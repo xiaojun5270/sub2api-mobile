@@ -30,9 +30,31 @@ jobs:
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --clean --non-interactive
 
+      - name: Disable iOS code signing
+        run: |
+          set -euo pipefail
+
+          PROJECT_FILE="$(find ios -maxdepth 2 -name project.pbxproj -print -quit)"
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "No Xcode project.pbxproj found under ios/."
+            exit 1
+          fi
+
+          ruby "$PROJECT_FILE" <<'RUBY'
+          path = ARGV.fetch(0)
+          text = File.read(path)
+          text.gsub!(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;')
+          text.gsub!(/DEVELOPMENT_TEAM = [A-Z0-9]+;/, 'DEVELOPMENT_TEAM = "";')
+          text.gsub!(/"DEVELOPMENT_TEAM\[sdk=iphoneos\*\]" = [A-Z0-9]+;/, '"DEVELOPMENT_TEAM[sdk=iphoneos*]" = "";')
+          text.gsub!(/PROVISIONING_PROFILE_SPECIFIER = .*?;/, 'PROVISIONING_PROFILE_SPECIFIER = "";')
+          text.gsub!(/"PROVISIONING_PROFILE_SPECIFIER\[sdk=iphoneos\*\]" = .*?;/, '"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "";')
+          File.write(path, text)
+          RUBY
+
       - name: Build unsigned app
         run: |
           set -euo pipefail
+          mkdir -p artifacts/diagnostics
 
           WORKSPACE="$(find ios -maxdepth 1 -name "*.xcworkspace" -print -quit)"
           if [ -z "$WORKSPACE" ]; then
@@ -49,17 +71,25 @@ jobs:
           echo "Workspace: $WORKSPACE"
           echo "Scheme: $SCHEME"
 
+          set +e
           xcodebuild \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
+            -destination generic/platform=iOS \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            clean build
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            clean build 2>&1 | tee artifacts/diagnostics/xcodebuild.log
+          XCODEBUILD_EXIT="${PIPESTATUS[0]}"
+          set -e
+
+          find build/DerivedData -maxdepth 8 -path "*/Build/Products/*" -print > artifacts/diagnostics/build-products.txt || true
+          exit "$XCODEBUILD_EXIT"
 
       - name: Package unsigned IPA
         run: |
@@ -88,3 +118,11 @@ jobs:
           name: sub2api-mobile-unsigned-ipa
           path: artifacts/sub2api-mobile-unsigned.ipa
           if-no-files-found: error
+
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sub2api-mobile-ios-build-diagnostics
+          path: artifacts/diagnostics
+          if-no-files-found: ignore
