@@ -39,7 +39,7 @@ jobs:
             exit 1
           fi
 
-          ruby "$PROJECT_FILE" <<'RUBY'
+          ruby - "$PROJECT_FILE" <<'RUBY'
           path = ARGV.fetch(0)
           text = File.read(path)
           text.gsub!(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;')
