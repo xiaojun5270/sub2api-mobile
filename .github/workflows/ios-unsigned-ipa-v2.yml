@@ -1,10 +1,13 @@
-name: Build Unsigned iOS IPA
+name: Build Unsigned iOS IPA V2
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 concurrency:
-  group: unsigned-ios-ipa-${{ github.ref }}
+  group: unsigned-ios-ipa-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
