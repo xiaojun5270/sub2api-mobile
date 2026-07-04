@@ -72,6 +72,14 @@ npm run eas:update:production -- "your message"
 
 Additional release notes: [docs/EXPO_RELEASE.md](docs/EXPO_RELEASE.md)
 
+GitHub Actions APK build:
+
+- Workflow: `.github/workflows/android-apk.yml`
+- Trigger: **Actions -> Build Android APK -> Run workflow**
+- Requirement: no `EXPO_TOKEN` required
+- Download: after completion, download the `sub2api-mobile-apk` artifact.
+- Details: [docs/GITHUB_ANDROID_APK_BUILD.md](docs/GITHUB_ANDROID_APK_BUILD.md)
+
 GitHub Actions Android build (downloadable):
 
 - Workflow: `.github/workflows/eas-build.yml`
