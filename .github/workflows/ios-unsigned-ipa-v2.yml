@@ -64,7 +64,13 @@ jobs:
             exit 1
           fi
 
-          SCHEME="$(xcodebuild -list -json -workspace "$WORKSPACE" | ruby -rjson -e 'data = JSON.parse(STDIN.read); schemes = data.dig("workspace", "schemes") || []; puts(schemes.find { |scheme| !scheme.start_with?("Pods-") } || schemes.first || "")')"
+          XCODEPROJ="$(find ios -maxdepth 1 -name "*.xcodeproj" -print -quit)"
+          if [ -z "$XCODEPROJ" ]; then
+            echo "No Xcode project found under ios/."
+            exit 1
+          fi
+
+          SCHEME="$(basename "$XCODEPROJ" .xcodeproj)"
           if [ -z "$SCHEME" ]; then
             echo "No Xcode scheme found in $WORKSPACE."
             exit 1
@@ -72,6 +78,7 @@ jobs:
 
           echo "Workspace: $WORKSPACE"
           echo "Scheme: $SCHEME"
+          xcodebuild -list -workspace "$WORKSPACE" | tee artifacts/diagnostics/xcodebuild-schemes.txt
 
           set +e
           xcodebuild \
