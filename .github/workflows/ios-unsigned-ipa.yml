@@ -65,11 +65,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          APP_PATH="$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" -print -quit)"
+          APP_PATH="$(find build/DerivedData -path "*/Build/Products/*-iphoneos/*.app" -type d -print -quit)"
           if [ -z "$APP_PATH" ]; then
             echo "No built .app found."
+            echo "Available build products:"
+            find build/DerivedData -maxdepth 8 -path "*/Build/Products/*" -print || true
             exit 1
           fi
+
+          echo "App path: $APP_PATH"
 
           mkdir -p artifacts/Payload
           cp -R "$APP_PATH" artifacts/Payload/
