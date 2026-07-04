@@ -34,9 +34,9 @@ export function DonutChartCard({
   let offset = 0;
 
   return (
-    <View className="rounded-[18px] bg-[#fbf8f2] p-4">
-      <Text className="text-xs uppercase tracking-[1.6px] text-[#7d7468]">{title}</Text>
-      <Text numberOfLines={1} className="mt-1 text-xs text-[#8a8072]">{subtitle}</Text>
+    <View className="rounded-[18px] border border-[#dbe5ef] bg-white p-4">
+      <Text className="text-xs uppercase tracking-[1.6px] text-[#64748b]">{title}</Text>
+      <Text numberOfLines={1} className="mt-1 text-xs text-[#64748b]">{subtitle}</Text>
 
       <View className="mt-4 items-center justify-center">
         <View className="items-center justify-center">
@@ -45,7 +45,7 @@ export function DonutChartCard({
               cx={size / 2}
               cy={size / 2}
               r={radius}
-              stroke="#ece4d6"
+              stroke="#e2e8f0"
               strokeWidth={strokeWidth}
               fill="none"
             />
@@ -73,8 +73,8 @@ export function DonutChartCard({
           </Svg>
 
           <View className="absolute items-center">
-            <Text className="text-xs uppercase tracking-[1.4px] text-[#7d7468]">{centerLabel}</Text>
-            <Text className="mt-1 text-[28px] font-bold text-[#16181a]">{centerValue}</Text>
+            <Text className="text-xs uppercase tracking-[1.4px] text-[#64748b]">{centerLabel}</Text>
+            <Text className="mt-1 text-[28px] font-bold text-[#0f172a]">{centerValue}</Text>
           </View>
         </View>
       </View>
@@ -84,12 +84,12 @@ export function DonutChartCard({
           const percentage = Math.round((segment.value / total) * 100);
 
           return (
-            <View key={segment.label} className="flex-row items-center justify-between rounded-[12px] bg-[#f4efe4] px-3 py-2.5">
+            <View key={segment.label} className="flex-row items-center justify-between rounded-[12px] bg-[#f1f5f9] px-3 py-2.5">
               <View className="flex-row items-center gap-3">
                 <View className="h-3 w-3 rounded-full" style={{ backgroundColor: segment.color }} />
-                <Text className="text-sm font-semibold text-[#16181a]">{segment.label}</Text>
+                <Text className="text-sm font-semibold text-[#0f172a]">{segment.label}</Text>
               </View>
-              <Text className="text-xs text-[#5d564d]">{segment.value} · {percentage}%</Text>
+              <Text className="text-xs text-[#475569]">{segment.value} · {percentage}%</Text>
             </View>
           );
         })}

@@ -27,9 +27,9 @@ export function BarChartCard({
   const maxValue = Math.max(...items.map((item) => item.value), 1);
 
   return (
-    <View className="rounded-[18px] bg-[#fbf8f2] p-4">
-      <Text className="text-xs uppercase tracking-[1.6px] text-[#7d7468]">{title}</Text>
-      <Text numberOfLines={1} className="mt-1 text-xs text-[#8a8072]">{subtitle}</Text>
+    <View className="rounded-[18px] border border-[#dbe5ef] bg-white p-4">
+      <Text className="text-xs uppercase tracking-[1.6px] text-[#64748b]">{title}</Text>
+      <Text numberOfLines={1} className="mt-1 text-xs text-[#64748b]">{subtitle}</Text>
 
       <View className="mt-4 gap-3">
         {items.map((item) => {
@@ -39,39 +39,39 @@ export function BarChartCard({
             <View key={item.label} className="w-full">
               <View className="w-full flex-row items-center justify-between gap-3">
                 <View className="flex-1 flex-row items-center gap-1.5 pr-3">
-                  <Text numberOfLines={1} className="text-sm font-semibold text-[#16181a]">
+                  <Text numberOfLines={1} className="text-sm font-semibold text-[#0f172a]">
                     {item.label}
                   </Text>
                   {item.hint ? (
                     <Pressable
-                      className="h-4 w-4 items-center justify-center rounded-full bg-[#efe7d9]"
+                      className="h-4 w-4 items-center justify-center rounded-full bg-[#eef3f8]"
                       onPress={() => setActiveHint(activeHint === item.label ? null : item.label)}
                     >
-                      <CircleHelp color="#7d7468" size={11} />
+                      <CircleHelp color="#64748b" size={11} />
                     </Pressable>
                   ) : null}
                 </View>
-                <Text className="text-sm font-semibold text-[#4e463e]">{formatValue(item.value)}</Text>
+                <Text className="text-sm font-semibold text-[#334155]">{formatValue(item.value)}</Text>
               </View>
 
               {item.hint && activeHint === item.label ? (
-                <View className="mt-2 rounded-[10px] bg-[#f1ece2] px-3 py-2">
-                  <Text className="text-[11px] leading-4 text-[#6f665c]">{item.hint}</Text>
+                <View className="mt-2 rounded-[10px] bg-[#f1f5f9] px-3 py-2">
+                  <Text className="text-[11px] leading-4 text-[#64748b]">{item.hint}</Text>
                 </View>
               ) : null}
 
               <View className="mt-1 flex-row items-end justify-between gap-3">
                 <View className="flex-1 pr-3">
-                  {item.meta ? <Text numberOfLines={1} className="text-[11px] text-[#7d7468]">{item.meta}</Text> : null}
+                  {item.meta ? <Text numberOfLines={1} className="text-[11px] text-[#64748b]">{item.meta}</Text> : null}
                 </View>
               </View>
 
-              <View className="mt-2 h-[10px] overflow-hidden rounded-full bg-[#ece4d6]">
+              <View className="mt-2 h-[10px] overflow-hidden rounded-full bg-[#e2e8f0]">
                 <View
                   className="h-full rounded-full"
                   style={{
                     width: barWidth,
-                    backgroundColor: item.color || '#1d5f55',
+                    backgroundColor: item.color || '#0f766e',
                   }}
                 />
               </View>
@@ -79,7 +79,7 @@ export function BarChartCard({
           );
         })}
 
-        {items.length === 0 ? <Text className="text-sm text-[#7d7468]">暂无可视化数据</Text> : null}
+        {items.length === 0 ? <Text className="text-sm text-[#64748b]">暂无可视化数据</Text> : null}
       </View>
     </View>
   );

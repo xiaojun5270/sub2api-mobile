@@ -15,17 +15,17 @@ export function StatCard({ label, value, tone = 'light', trend, icon: Icon }: St
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : null;
 
   return (
-    <View className={dark ? 'rounded-[24px] bg-[#1d5f55] p-4' : 'rounded-[24px] bg-[#fbf8f2] p-4'}>
+    <View className={dark ? 'rounded-[18px] bg-[#0f766e] p-4' : 'rounded-[18px] border border-[#dbe5ef] bg-white p-4'}>
       <View className="flex-row items-center justify-between gap-3">
-        <Text className={dark ? 'text-xs uppercase tracking-[1.5px] text-[#d8efe7]' : 'text-xs uppercase tracking-[1.5px] text-[#7d7468]'}>
+        <Text className={dark ? 'text-xs uppercase tracking-[1.5px] text-[#ccfbf1]' : 'text-xs uppercase tracking-[1.5px] text-[#64748b]'}>
           {label}
         </Text>
         <View className="flex-row items-center gap-2">
-          {TrendIcon ? <TrendIcon color={dark ? '#d8efe7' : '#7d7468'} size={14} /> : null}
-          {Icon ? <Icon color={dark ? '#d8efe7' : '#7d7468'} size={14} /> : null}
+          {TrendIcon ? <TrendIcon color={dark ? '#ccfbf1' : '#64748b'} size={14} /> : null}
+          {Icon ? <Icon color={dark ? '#ccfbf1' : '#64748b'} size={14} /> : null}
         </View>
       </View>
-      <Text className={dark ? 'mt-3 text-3xl font-bold text-white' : 'mt-3 text-3xl font-bold text-[#16181a]'}>
+      <Text className={dark ? 'mt-3 text-3xl font-bold text-white' : 'mt-3 text-3xl font-bold text-[#0f172a]'}>
         {value}
       </Text>
     </View>

@@ -22,14 +22,14 @@ export default function GroupsScreen() {
   const listHeader = useMemo(
     () => (
       <View className="pb-4">
-        <View className="flex-row items-center rounded-[24px] bg-[#fbf8f2] px-4 py-3">
-          <Search color="#7d7468" size={18} />
+        <View className="flex-row items-center rounded-[18px] border border-[#dbe5ef] bg-white px-4 py-3">
+          <Search color="#64748b" size={18} />
           <TextInput
             defaultValue=""
             onChangeText={setSearchText}
             placeholder="搜索分组名称"
-            placeholderTextColor="#9b9081"
-            className="ml-3 flex-1 text-base text-[#16181a]"
+            placeholderTextColor="#94a3b8"
+            className="ml-3 flex-1 text-base text-[#0f172a]"
           />
         </View>
       </View>
@@ -45,8 +45,8 @@ export default function GroupsScreen() {
         icon={FolderKanban}
       >
         <View className="flex-row items-center gap-2">
-          <Layers3 color="#7d7468" size={14} />
-          <Text className="text-sm text-[#7d7468]">
+          <Layers3 color="#64748b" size={14} />
+          <Text className="text-sm text-[#64748b]">
             账号数 {group.account_count ?? 0} · {group.is_exclusive ? '独占分组' : '共享分组'}
           </Text>
         </View>
@@ -72,7 +72,7 @@ export default function GroupsScreen() {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={groupsQuery.isRefetching} onRefresh={() => void groupsQuery.refetch()} tintColor="#1d5f55" />}
+        refreshControl={<RefreshControl refreshing={groupsQuery.isRefetching} onRefresh={() => void groupsQuery.refetch()} tintColor="#0f766e" />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-4" />}

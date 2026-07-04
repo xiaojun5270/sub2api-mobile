@@ -16,17 +16,17 @@ const { useSnapshot } = require('valtio/react');
 type RangeKey = '24h' | '7d' | '30d';
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  mutedCard: '#f1ece2',
-  primary: '#1d5f55',
-  text: '#16181a',
-  subtext: '#6f665c',
-  border: '#e7dfcf',
-  dangerBg: '#fbf1eb',
-  danger: '#c25d35',
-  successBg: '#e6f4ee',
-  success: '#1d5f55',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  mutedCard: '#eef3f8',
+  primary: '#0f766e',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  dangerBg: '#fef2f2',
+  danger: '#dc2626',
+  successBg: '#ecfdf5',
+  success: '#0f766e',
 };
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
@@ -159,7 +159,7 @@ function Section({ title, subtitle, children, right }: { title: string; subtitle
 function StatCard({ title, value, detail }: { title: string; value: string; detail?: string }) {
   return (
     <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: 16, padding: 14 }}>
-      <Text style={{ fontSize: 12, color: '#8a8072' }}>{title}</Text>
+      <Text style={{ fontSize: 12, color: '#64748b' }}>{title}</Text>
       <Text style={{ marginTop: 8, fontSize: 24, fontWeight: '700', color: colors.text }}>{value}</Text>
       {detail ? <Text style={{ marginTop: 6, fontSize: 12, color: colors.subtext }}>{detail}</Text> : null}
     </View>
@@ -260,12 +260,12 @@ export default function MonitorScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 110 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refetchAll()} tintColor="#1d5f55" />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refetchAll()} tintColor="#0f766e" />}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>概览</Text>
-            <Text style={{ marginTop: 6, fontSize: 13, color: '#8a8072' }}>{siteName} 的当前运行状态。</Text>
+            <Text style={{ marginTop: 6, fontSize: 13, color: '#64748b' }}>{siteName} 的当前运行状态。</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -277,7 +277,7 @@ export default function MonitorScreen() {
                     style={{ backgroundColor: active ? colors.primary : colors.border, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
                     onPress={() => setRangeKey(option.key)}
                   >
-                    <Text style={{ color: active ? '#fff' : '#4e463e', fontSize: 12, fontWeight: '700' }}>{option.label}</Text>
+                    <Text style={{ color: active ? '#fff' : '#334155', fontSize: 12, fontWeight: '700' }}>{option.label}</Text>
                   </Pressable>
                 );
               })}
@@ -307,7 +307,7 @@ export default function MonitorScreen() {
                 <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>重试</Text>
               </Pressable>
               <Pressable style={{ flex: 1, backgroundColor: colors.border, borderRadius: 14, paddingVertical: 12, alignItems: 'center' }} onPress={() => router.push('/settings')}>
-                <Text style={{ color: '#4e463e', fontSize: 13, fontWeight: '700' }}>检查服务器</Text>
+                <Text style={{ color: '#334155', fontSize: 13, fontWeight: '700' }}>检查服务器</Text>
               </Pressable>
             </View>
           </Section>
@@ -333,18 +333,18 @@ export default function MonitorScreen() {
                   style={{ alignSelf: 'flex-start', backgroundColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }}
                   onPress={() => router.push('/accounts/overview')}
                 >
-                  <Text style={{ color: '#4e463e', fontSize: 12, fontWeight: '700' }}>账号清单</Text>
+                  <Text style={{ color: '#334155', fontSize: 12, fontWeight: '700' }}>账号清单</Text>
                 </Pressable>
               )}
             >
               <Pressable onPress={() => router.push('/accounts/overview')}>
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                    <Text style={{ fontSize: 11, color: '#8a8072' }}>总数</Text>
+                    <Text style={{ fontSize: 11, color: '#64748b' }}>总数</Text>
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(totalAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                    <Text style={{ fontSize: 11, color: '#8a8072' }}>健康</Text>
+                    <Text style={{ fontSize: 11, color: '#64748b' }}>健康</Text>
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(healthyAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.dangerBg, borderRadius: 14, padding: 12 }}>
@@ -352,7 +352,7 @@ export default function MonitorScreen() {
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.danger }}>{formatNumber(errorAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                    <Text style={{ fontSize: 11, color: '#8a8072' }}>限流</Text>
+                    <Text style={{ fontSize: 11, color: '#64748b' }}>限流</Text>
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(currentPageLimitedAccounts)}</Text>
                   </View>
                 </View>
@@ -361,24 +361,24 @@ export default function MonitorScreen() {
             </Section>
 
             {throughputPoints.length > 1 ? (
-              <LineTrendChart title="Token 吞吐" subtitle="当前时间范围内的 Token 变化趋势" points={throughputPoints} color="#a34d2d" formatValue={formatTokenDisplay} />
+              <LineTrendChart title="Token 吞吐" subtitle="当前时间范围内的 Token 变化趋势" points={throughputPoints} color="#f97316" formatValue={formatTokenDisplay} />
             ) : null}
 
             {requestPoints.length > 1 ? (
-              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color="#1d5f55" formatValue={formatCompactNumber} />
+              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color="#0f766e" formatValue={formatCompactNumber} />
             ) : null}
 
             {costPoints.length > 1 ? (
-              <LineTrendChart title="成本趋势" subtitle="当前时间范围内的成本变化趋势" points={costPoints} color="#7651c8" formatValue={formatMoney} />
+              <LineTrendChart title="成本趋势" subtitle="当前时间范围内的成本变化趋势" points={costPoints} color="#7c3aed" formatValue={formatMoney} />
             ) : null}
 
             <BarChartCard
               title="Token 结构"
               subtitle="输入、输出、缓存读取占比"
               items={[
-                { label: '输入 Token', value: totalInputTokens, color: '#1d5f55', hint: '请求进入模型前消耗的 token。' },
-                { label: '输出 Token', value: totalOutputTokens, color: '#d38b36', hint: '模型返回内容消耗的 token。' },
-                { label: '缓存读取 Token', value: totalCacheReadTokens, color: '#7d7468', hint: '命中缓存后复用的 token。' },
+                { label: '输入 Token', value: totalInputTokens, color: '#0f766e', hint: '请求进入模型前消耗的 token。' },
+                { label: '输出 Token', value: totalOutputTokens, color: '#f59e0b', hint: '模型返回内容消耗的 token。' },
+                { label: '缓存读取 Token', value: totalCacheReadTokens, color: '#64748b', hint: '命中缓存后复用的 token。' },
               ]}
               formatValue={formatTokenDisplay}
             />
@@ -389,10 +389,10 @@ export default function MonitorScreen() {
               centerLabel="总账号"
               centerValue={formatNumber(totalAccounts)}
               segments={[
-                { label: '健康', value: healthyAccounts, color: '#1d5f55' },
-                { label: '繁忙', value: currentPageBusyAccounts, color: '#d38b36' },
-                { label: '限流', value: currentPageLimitedAccounts, color: '#7d7468' },
-                { label: '异常', value: errorAccounts, color: '#a34d2d' },
+                { label: '健康', value: healthyAccounts, color: '#0f766e' },
+                { label: '繁忙', value: currentPageBusyAccounts, color: '#f59e0b' },
+                { label: '限流', value: currentPageLimitedAccounts, color: '#64748b' },
+                { label: '异常', value: errorAccounts, color: '#f97316' },
               ]}
             />
 
@@ -402,7 +402,7 @@ export default function MonitorScreen() {
               items={topModels.map((model) => ({
                 label: model.model,
                 value: model.total_tokens,
-                color: '#a34d2d',
+                color: '#f97316',
                 meta: `请求 ${formatNumber(model.requests)} · 成本 ${formatMoney(model.cost)}`,
               }))}
               formatValue={formatCompactNumber}
@@ -419,15 +419,15 @@ export default function MonitorScreen() {
                         <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>{point.date}</Text>
                         <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
                           <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 11, color: '#8a8072' }}>请求</Text>
+                            <Text style={{ fontSize: 11, color: '#64748b' }}>请求</Text>
                             <Text style={{ marginTop: 4, fontSize: 15, fontWeight: '700', color: colors.text }}>{formatCompactNumber(point.requests)}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 11, color: '#8a8072' }}>Token</Text>
+                            <Text style={{ fontSize: 11, color: '#64748b' }}>Token</Text>
                             <Text style={{ marginTop: 4, fontSize: 15, fontWeight: '700', color: colors.text }}>{formatTokenDisplay(point.total_tokens)}</Text>
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 11, color: '#8a8072' }}>成本</Text>
+                            <Text style={{ fontSize: 11, color: '#64748b' }}>成本</Text>
                             <Text style={{ marginTop: 4, fontSize: 15, fontWeight: '700', color: colors.text }}>{formatMoney(point.cost)}</Text>
                           </View>
                         </View>

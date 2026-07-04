@@ -9,15 +9,15 @@ import { createUser } from '@/src/services/admin';
 import type { CreateUserRequest } from '@/src/types/admin';
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  text: '#16181a',
-  subtext: '#6f665c',
-  border: '#e7dfcf',
-  primary: '#1d5f55',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  primary: '#0f766e',
   dark: '#1b1d1f',
-  errorBg: '#f7e1d6',
-  errorText: '#a4512b',
+  errorBg: '#fef2f2',
+  errorText: '#dc2626',
   muted: '#f7f1e6',
 };
 
@@ -137,7 +137,7 @@ export default function CreateUserScreen() {
               value={email}
               onChangeText={setEmail}
               placeholder="例如：user@example.com"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               autoCapitalize="none"
               style={{
                 backgroundColor: colors.muted,
@@ -156,7 +156,7 @@ export default function CreateUserScreen() {
               value={password}
               onChangeText={setPassword}
               placeholder="请输入密码"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               secureTextEntry
               autoCapitalize="none"
               style={{
@@ -176,7 +176,7 @@ export default function CreateUserScreen() {
               value={username}
               onChangeText={setUsername}
               placeholder="例如：demo-user"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               autoCapitalize="none"
               style={{
                 backgroundColor: colors.muted,
@@ -195,7 +195,7 @@ export default function CreateUserScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="例如：测试用户"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -287,7 +287,7 @@ export default function CreateUserScreen() {
               onChangeText={setBalance}
               keyboardType="decimal-pad"
               placeholder="例如：100"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -306,7 +306,7 @@ export default function CreateUserScreen() {
               onChangeText={setConcurrency}
               keyboardType="number-pad"
               placeholder="例如：5"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -326,7 +326,7 @@ export default function CreateUserScreen() {
               multiline
               textAlignVertical="top"
               placeholder='例如：{"daily_limit":10}'
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 minHeight: 96,
                 backgroundColor: colors.muted,
@@ -353,7 +353,7 @@ export default function CreateUserScreen() {
             }}
             disabled={!canSubmit || createMutation.isPending}
             style={{
-              backgroundColor: !canSubmit || createMutation.isPending ? '#8a8072' : colors.dark,
+              backgroundColor: !canSubmit || createMutation.isPending ? '#64748b' : colors.dark,
               borderRadius: 12,
               paddingVertical: 14,
               alignItems: 'center',

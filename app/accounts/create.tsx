@@ -8,15 +8,15 @@ import { createAccount } from '@/src/services/admin';
 import type { AccountType, CreateAccountRequest } from '@/src/types/admin';
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  text: '#16181a',
-  subtext: '#6f665c',
-  border: '#e7dfcf',
-  primary: '#1d5f55',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  primary: '#0f766e',
   dark: '#1b1d1f',
-  errorBg: '#f7e1d6',
-  errorText: '#a4512b',
+  errorBg: '#fef2f2',
+  errorText: '#dc2626',
   muted: '#f7f1e6',
 };
 
@@ -157,7 +157,7 @@ export default function CreateAdminAccountScreen() {
               value={name}
               onChangeText={setName}
               placeholder="例如：openai-main"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -221,7 +221,7 @@ export default function CreateAdminAccountScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="例如：主线路账号"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -256,7 +256,7 @@ export default function CreateAdminAccountScreen() {
               multiline
               textAlignVertical="top"
               placeholder='例如：{"base_url":"https://api.example.com","api_key":"sk-..."}'
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 minHeight: 120,
                 backgroundColor: colors.muted,
@@ -277,7 +277,7 @@ export default function CreateAdminAccountScreen() {
               multiline
               textAlignVertical="top"
               placeholder='例如：{"window_cost_limit":50}'
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 minHeight: 96,
                 backgroundColor: colors.muted,
@@ -309,7 +309,7 @@ export default function CreateAdminAccountScreen() {
               onChangeText={setProxyId}
               keyboardType="number-pad"
               placeholder="例如：3"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -328,7 +328,7 @@ export default function CreateAdminAccountScreen() {
               onChangeText={setConcurrency}
               keyboardType="number-pad"
               placeholder="例如：10"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -347,7 +347,7 @@ export default function CreateAdminAccountScreen() {
               onChangeText={setPriority}
               keyboardType="number-pad"
               placeholder="例如：0"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -366,7 +366,7 @@ export default function CreateAdminAccountScreen() {
               onChangeText={setRateMultiplier}
               keyboardType="decimal-pad"
               placeholder="例如：1"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -384,7 +384,7 @@ export default function CreateAdminAccountScreen() {
               value={groupIds}
               onChangeText={setGroupIds}
               placeholder="例如：1,2,5"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -410,7 +410,7 @@ export default function CreateAdminAccountScreen() {
             }}
             disabled={!canSubmit || createMutation.isPending}
             style={{
-              backgroundColor: !canSubmit || createMutation.isPending ? '#8a8072' : colors.dark,
+              backgroundColor: !canSubmit || createMutation.isPending ? '#64748b' : colors.dark,
               borderRadius: 12,
               paddingVertical: 14,
               alignItems: 'center',

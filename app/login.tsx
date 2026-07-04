@@ -1,6 +1,7 @@
 import { Redirect, router } from 'expo-router';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
+import { Eye, EyeOff, LogIn } from 'lucide-react-native';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -26,15 +27,15 @@ type FormValues = z.infer<typeof schema>;
 type ConnectionState = 'idle' | 'checking' | 'error';
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  mutedCard: '#f1ece2',
-  primary: '#1d5f55',
-  text: '#16181a',
-  subtext: '#6f665c',
-  border: '#e7dfcf',
-  dangerBg: '#fbf1eb',
-  danger: '#c25d35',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  mutedCard: '#eef3f8',
+  primary: '#0f766e',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  dangerBg: '#fef2f2',
+  danger: '#dc2626',
 };
 
 function getConnectionErrorMessage(error: unknown) {
@@ -100,7 +101,7 @@ export default function LoginScreen() {
                       onChange(text);
                     }}
                     placeholder="例如：https://api.example.com"
-                    placeholderTextColor="#9b9081"
+                    placeholderTextColor="#94a3b8"
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{ backgroundColor: colors.mutedCard, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: colors.text }}
@@ -126,7 +127,7 @@ export default function LoginScreen() {
                         onChange(text);
                       }}
                       placeholder="admin-xxxxxxxx"
-                      placeholderTextColor="#9b9081"
+                      placeholderTextColor="#94a3b8"
                       autoCapitalize="none"
                       autoCorrect={false}
                       secureTextEntry={!showAdminKey}
@@ -144,7 +145,7 @@ export default function LoginScreen() {
                       onPress={() => setShowAdminKey((value) => !value)}
                       style={{ backgroundColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }}
                     >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#4e463e' }}>{showAdminKey ? '隐藏' : '显示'}</Text>
+                      {showAdminKey ? <EyeOff color="#334155" size={17} /> : <Eye color="#334155" size={17} />}
                     </Pressable>
                   </View>
                 )}
@@ -164,7 +165,7 @@ export default function LoginScreen() {
             ) : null}
 
             <Pressable
-              style={{ backgroundColor: connectionState === 'checking' ? '#7ca89f' : colors.primary, borderRadius: 18, paddingVertical: 15, alignItems: 'center' }}
+              style={{ backgroundColor: connectionState === 'checking' ? '#94a3b8' : colors.primary, borderRadius: 18, paddingVertical: 15, alignItems: 'center' }}
               disabled={connectionState === 'checking'}
               onPress={handleSubmit(async (values) => {
                 setConnectionState('checking');
@@ -182,7 +183,10 @@ export default function LoginScreen() {
                 }
               })}
             >
-              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{connectionState === 'checking' ? '连接中...' : '进入应用'}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <LogIn color="#fff" size={18} />
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{connectionState === 'checking' ? '连接中...' : '进入应用'}</Text>
+              </View>
             </Pressable>
           </View>
         </View>

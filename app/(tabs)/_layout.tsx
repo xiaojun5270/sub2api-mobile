@@ -1,5 +1,5 @@
 import { Redirect, Tabs } from 'expo-router';
-import { ChartNoAxesCombined, Settings2, Users } from 'lucide-react-native';
+import { ChartNoAxesCombined, ServerCog, UsersRound } from 'lucide-react-native';
 
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
 
@@ -18,14 +18,28 @@ export default function TabsLayout() {
       initialRouteName={hasAccount ? 'monitor' : 'settings'}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#1d5f55',
-        tabBarInactiveTintColor: '#8a8072',
+        tabBarActiveTintColor: '#0f766e',
+        tabBarInactiveTintColor: '#94a3b8',
         tabBarStyle: {
-          backgroundColor: '#fbf8f2',
+          position: 'absolute',
+          left: 16,
+          right: 16,
+          bottom: 12,
+          backgroundColor: '#ffffff',
           borderTopWidth: 0,
-          height: 84,
-          paddingTop: 10,
-          paddingBottom: 18,
+          borderRadius: 20,
+          height: 72,
+          paddingTop: 8,
+          paddingBottom: 12,
+          shadowColor: '#0f172a',
+          shadowOpacity: 0.1,
+          shadowRadius: 18,
+          shadowOffset: { width: 0, height: 10 },
+          elevation: 12,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '700',
         },
       }}
     >
@@ -46,14 +60,14 @@ export default function TabsLayout() {
         name="users"
         options={{
           title: '用户',
-          tabBarIcon: ({ color, size }) => <Users color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <UsersRound color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: '服务器',
-          tabBarIcon: ({ color, size }) => <Settings2 color={color} size={size} />,
+          tabBarIcon: ({ color, size }) => <ServerCog color={color} size={size} />,
         }}
       />
       <Tabs.Screen name="groups" options={{ href: null }} />

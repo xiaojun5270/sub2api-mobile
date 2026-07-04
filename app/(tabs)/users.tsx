@@ -1,5 +1,6 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
+import { ArrowDownUp, Plus, Search } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,16 +15,16 @@ import type { AdminUser, UsageStats } from '@/src/types/admin';
 const { useSnapshot } = require('valtio/react');
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  mutedCard: '#f1ece2',
-  primary: '#1d5f55',
-  text: '#16181a',
-  subtext: '#6f665c',
-  dangerBg: '#fbf1eb',
-  danger: '#c25d35',
-  accentBg: '#efe4cf',
-  accentText: '#8c5a22',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  mutedCard: '#eef3f8',
+  primary: '#0f766e',
+  text: '#0f172a',
+  subtext: '#64748b',
+  dangerBg: '#fef2f2',
+  danger: '#dc2626',
+  accentBg: '#fff7ed',
+  accentText: '#c2410c',
 };
 
 type SortOrder = 'desc' | 'asc';
@@ -130,7 +131,7 @@ function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
           <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>{user.email}</Text>
           <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>最近使用 {formatActivityTime(user.last_used_at || user.updated_at || user.created_at)}</Text>
         </View>
-        <View style={{ alignSelf: 'flex-start', backgroundColor: user.status === 'inactive' || user.status === 'disabled' ? '#cfc5b7' : colors.primary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+        <View style={{ alignSelf: 'flex-start', backgroundColor: user.status === 'inactive' || user.status === 'disabled' ? '#94a3b8' : colors.primary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
           <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>{statusLabel}</Text>
         </View>
       </View>
@@ -190,7 +191,7 @@ export default function UsersScreen() {
         <View style={{ marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>用户</Text>
-            <Text style={{ marginTop: 4, fontSize: 12, color: '#8a8072' }}>查看用户列表并进入详情页管理账号。</Text>
+            <Text style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>查看用户列表并进入详情页管理账号。</Text>
           </View>
           <Pressable
             onPress={() => router.push('/users/create-user')}
@@ -203,24 +204,28 @@ export default function UsersScreen() {
               justifyContent: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 24, lineHeight: 24, fontWeight: '500' }}>+</Text>
+            <Plus color="#fff" size={22} strokeWidth={2.4} />
           </Pressable>
         </View>
 
         <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <View style={{ flex: 1, backgroundColor: colors.card, borderRadius: 16, padding: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 14, paddingHorizontal: 14 }}>
+              <Search color={colors.subtext} size={18} />
             <TextInput
               value={searchText}
               onChangeText={setSearchText}
               placeholder="搜索邮箱、用户名或备注"
-              placeholderTextColor="#9b9081"
-              style={{ backgroundColor: colors.mutedCard, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, color: colors.text }}
+              placeholderTextColor="#94a3b8"
+              style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 11, fontSize: 15, color: colors.text }}
             />
+            </View>
           </View>
           <Pressable
             onPress={() => setSortOrder((value) => (value === 'desc' ? 'asc' : 'desc'))}
             style={{ backgroundColor: colors.card, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, minWidth: 92, alignItems: 'center' }}
           >
+            <ArrowDownUp color={colors.subtext} size={16} />
             <Text style={{ fontSize: 11, color: colors.subtext }}>时间</Text>
             <Text style={{ marginTop: 4, fontSize: 13, fontWeight: '700', color: colors.text }}>{sortOrder === 'desc' ? '倒序' : '正序'}</Text>
           </Pressable>
@@ -255,7 +260,7 @@ export default function UsersScreen() {
             data={users}
             keyExtractor={(item) => `${item.id}`}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={usersQuery.isRefetching} onRefresh={() => void usersQuery.refetch()} tintColor="#1d5f55" />}
+            refreshControl={<RefreshControl refreshing={usersQuery.isRefetching} onRefresh={() => void usersQuery.refetch()} tintColor="#0f766e" />}
             contentContainerStyle={{ paddingBottom: 8, gap: 12, flexGrow: users.length === 0 ? 1 : 0 }}
             ListEmptyComponent={
               <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 16 }}>

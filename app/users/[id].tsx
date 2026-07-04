@@ -10,15 +10,15 @@ import { getDashboardSnapshot, getUsageStats, getUser, listUserApiKeys, updateUs
 import type { AdminApiKey, BalanceOperation } from '@/src/types/admin';
 
 const colors = {
-  page: '#f4efe4',
-  card: '#fbf8f2',
-  text: '#16181a',
-  subtext: '#6f665c',
-  border: '#e7dfcf',
-  primary: '#1d5f55',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  primary: '#0f766e',
   dark: '#1b1d1f',
-  errorBg: '#f7e1d6',
-  errorText: '#a4512b',
+  errorBg: '#fef2f2',
+  errorText: '#dc2626',
   muted: '#f7f1e6',
 };
 
@@ -168,8 +168,8 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 
 function StatusBadge({ text }: { text: string }) {
   const normalized = text.toLowerCase();
-  const backgroundColor = normalized === 'active' ? '#dff4ea' : normalized === 'inactive' || normalized === 'disabled' ? '#ece5da' : '#f7e1d6';
-  const color = normalized === 'active' ? '#17663f' : normalized === 'inactive' || normalized === 'disabled' ? '#6f665c' : '#a4512b';
+  const backgroundColor = normalized === 'active' ? '#dff4ea' : normalized === 'inactive' || normalized === 'disabled' ? '#ece5da' : '#fef2f2';
+  const color = normalized === 'active' ? '#17663f' : normalized === 'inactive' || normalized === 'disabled' ? '#64748b' : '#dc2626';
 
   return (
     <View style={{ backgroundColor, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
@@ -184,13 +184,13 @@ function CopyInlineButton({ copied, onPress }: { copied: boolean; onPress: () =>
       onPress={onPress}
       style={{
         marginLeft: 8,
-        backgroundColor: copied ? '#dff4ea' : '#e7dfcf',
+        backgroundColor: copied ? '#dff4ea' : '#dbe5ef',
         borderRadius: 999,
         paddingHorizontal: 10,
         paddingVertical: 6,
       }}
     >
-      <Text style={{ fontSize: 11, fontWeight: '700', color: copied ? '#17663f' : '#4e463e' }}>{copied ? '已复制' : '复制'}</Text>
+      <Text style={{ fontSize: 11, fontWeight: '700', color: copied ? '#17663f' : '#334155' }}>{copied ? '已复制' : '复制'}</Text>
     </Pressable>
   );
 }
@@ -504,7 +504,7 @@ export default function UserDetailScreen() {
                   title="用量趋势"
                   subtitle={`${range.start_date} 到 ${range.end_date}`}
                   points={trendPoints}
-                  color="#1d5f55"
+                  color="#0f766e"
                   formatValue={(value) => formatTokenValue(value)}
                   compact
                 />
@@ -526,7 +526,7 @@ export default function UserDetailScreen() {
               value={searchText}
               onChangeText={setSearchText}
               placeholder="搜索名称 / Key / 分组"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -593,7 +593,7 @@ export default function UserDetailScreen() {
               value={amount}
               onChangeText={setAmount}
               placeholder="输入金额，例如 10"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               keyboardType="decimal-pad"
               style={{
                 backgroundColor: colors.muted,
@@ -611,7 +611,7 @@ export default function UserDetailScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="备注（可选）"
-              placeholderTextColor="#9a9082"
+              placeholderTextColor="#64748b"
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
