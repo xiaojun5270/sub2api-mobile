@@ -26,6 +26,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Select Xcode 26
+        run: |
+          set -euo pipefail
+          XCODE_26_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -type d | sort | tail -n 1)"
+          if [ -z "$XCODE_26_PATH" ]; then
+            echo "Xcode 26 is required for native iOS Liquid Glass."
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_26_PATH"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
       - name: Generate iOS project
         run: npx expo prebuild --platform ios --clean --non-interactive
 

@@ -1,79 +1,41 @@
 import { Redirect, Tabs } from 'expo-router';
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
 import { ChartNoAxesCombined, ServerCog, UsersRound } from 'lucide-react-native';
-import { Platform, StyleSheet, useColorScheme } from 'react-native';
+import { DynamicColorIOS, Platform, StyleSheet, useColorScheme } from 'react-native';
 
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
 
 const { useSnapshot } = require('valtio/react');
 
-function NativeIosTabs({ isDark }: { isDark: boolean }) {
-  const glassBackground = isDark ? 'rgba(15,23,42,0.42)' : 'rgba(255,255,255,0.72)';
-  const defaultColor = isDark ? '#f8fafc' : '#111827';
-  const selectedColor = '#3578e5';
+function NativeIosTabs() {
+  const adaptiveGlassColor = DynamicColorIOS({
+    dark: 'white',
+    light: 'black',
+  });
 
   return (
     <NativeTabs
-      backgroundColor={glassBackground}
-      blurEffect={isDark ? 'systemThinMaterialDark' : 'systemUltraThinMaterialLight'}
-      disableTransparentOnScrollEdge
-      iconColor={{
-        default: defaultColor,
-        selected: selectedColor,
-      }}
       labelStyle={{
-        default: {
-          color: defaultColor,
-          fontSize: 13,
-          fontWeight: '700',
-        },
-        selected: {
-          color: selectedColor,
-          fontSize: 13,
-          fontWeight: '800',
-        },
+        color: adaptiveGlassColor,
+        fontSize: 12,
+        fontWeight: '600',
       }}
-      minimizeBehavior="never"
-      shadowColor={isDark ? 'rgba(255,255,255,0.14)' : 'rgba(15,23,42,0.12)'}
-      tintColor={selectedColor}
+      minimizeBehavior="automatic"
+      tintColor={adaptiveGlassColor}
     >
       <NativeTabs.Trigger name="index" hidden />
-      <NativeTabs.Trigger
-        name="monitor"
-        options={{
-          title: '概览',
-          icon: { sf: 'chart.xyaxis.line' },
-          selectedIcon: { sf: 'chart.xyaxis.line' },
-          backgroundColor: glassBackground,
-          blurEffect: isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight',
-          iconColor: selectedColor,
-          shadowColor: 'rgba(53,120,229,0.16)',
-        }}
-      />
-      <NativeTabs.Trigger
-        name="users"
-        options={{
-          title: '用户',
-          icon: { sf: 'person.2' },
-          selectedIcon: { sf: 'person.2.fill' },
-          backgroundColor: glassBackground,
-          blurEffect: isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight',
-          iconColor: selectedColor,
-          shadowColor: 'rgba(53,120,229,0.16)',
-        }}
-      />
-      <NativeTabs.Trigger
-        name="settings"
-        options={{
-          title: '服务器',
-          icon: { sf: 'server.rack' },
-          selectedIcon: { sf: 'server.rack' },
-          backgroundColor: glassBackground,
-          blurEffect: isDark ? 'systemChromeMaterialDark' : 'systemChromeMaterialLight',
-          iconColor: selectedColor,
-          shadowColor: 'rgba(53,120,229,0.16)',
-        }}
-      />
+      <NativeTabs.Trigger name="monitor">
+        <Icon sf="chart.xyaxis.line" selectedColor={adaptiveGlassColor} />
+        <Label>概览</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="users">
+        <Icon sf={{ default: 'person.2', selected: 'person.2.fill' }} selectedColor={adaptiveGlassColor} />
+        <Label>用户</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="settings">
+        <Icon sf="server.rack" selectedColor={adaptiveGlassColor} />
+        <Label>服务器</Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="groups" hidden />
       <NativeTabs.Trigger name="accounts" hidden />
     </NativeTabs>
@@ -152,7 +114,7 @@ export default function TabsLayout() {
   }
 
   if (Platform.OS === 'ios') {
-    return <NativeIosTabs isDark={isDark} />;
+    return <NativeIosTabs />;
   }
 
   return <FallbackBottomTabs isDark={isDark} />;
