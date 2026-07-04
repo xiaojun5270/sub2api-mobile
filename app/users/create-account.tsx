@@ -4,25 +4,15 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAppTheme } from '@/src/lib/theme';
 import { createAccount } from '@/src/services/admin';
 import type { AccountType } from '@/src/types/admin';
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  text: '#0f172a',
-  subtext: '#64748b',
-  border: '#dbe5ef',
-  primary: '#0f766e',
-  dark: '#1b1d1f',
-  errorBg: '#fef2f2',
-  errorText: '#dc2626',
-  muted: '#f7f1e6',
-};
 
 const PLATFORM_OPTIONS = ['anthropic', 'openai', 'gemini', 'sora', 'antigravity'];
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const colors = useAppTheme();
+
   return (
     <View
       style={{
@@ -98,6 +88,7 @@ function parseJsonObject(raw: string) {
 }
 
 export default function CreateAccountScreen() {
+  const colors = useAppTheme();
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
@@ -172,7 +163,7 @@ export default function CreateAccountScreen() {
               value={name}
               onChangeText={setName}
               placeholder="例如：openai-main"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -202,7 +193,7 @@ export default function CreateAccountScreen() {
                       backgroundColor: active ? colors.primary : colors.muted,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
                   </Pressable>
                 );
               })}
@@ -226,7 +217,7 @@ export default function CreateAccountScreen() {
                       backgroundColor: active ? colors.primary : colors.muted,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontSize: 12, fontWeight: '700' }}>{item.toUpperCase()}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '700' }}>{item.toUpperCase()}</Text>
                   </Pressable>
                 );
               })}
@@ -237,7 +228,7 @@ export default function CreateAccountScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="例如：主线路账号"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -259,7 +250,7 @@ export default function CreateAccountScreen() {
                   value={baseUrl}
                   onChangeText={setBaseUrl}
                   placeholder="https://api.example.com"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.placeholder}
                   autoCapitalize="none"
                   style={{
                     backgroundColor: colors.muted,
@@ -278,7 +269,7 @@ export default function CreateAccountScreen() {
                   value={apiKey}
                   onChangeText={setApiKey}
                   placeholder="sk-..."
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.placeholder}
                   autoCapitalize="none"
                   style={{
                     backgroundColor: colors.muted,
@@ -299,7 +290,7 @@ export default function CreateAccountScreen() {
                   value={accessToken}
                   onChangeText={setAccessToken}
                   placeholder="access_token"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.placeholder}
                   autoCapitalize="none"
                   style={{
                     backgroundColor: colors.muted,
@@ -318,7 +309,7 @@ export default function CreateAccountScreen() {
                   value={refreshToken}
                   onChangeText={setRefreshToken}
                   placeholder="refresh_token"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.placeholder}
                   autoCapitalize="none"
                   style={{
                     backgroundColor: colors.muted,
@@ -337,7 +328,7 @@ export default function CreateAccountScreen() {
                   value={clientId}
                   onChangeText={setClientId}
                   placeholder="client_id"
-                  placeholderTextColor="#64748b"
+                  placeholderTextColor={colors.placeholder}
                   autoCapitalize="none"
                   style={{
                     backgroundColor: colors.muted,
@@ -358,7 +349,7 @@ export default function CreateAccountScreen() {
               value={extraCredentialsJson}
               onChangeText={setExtraCredentialsJson}
               placeholder='例如：{"project_id":"abc","tier_id":2}'
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               multiline
               style={{
                 minHeight: 88,
@@ -381,7 +372,7 @@ export default function CreateAccountScreen() {
               onChangeText={setConcurrency}
               keyboardType="number-pad"
               placeholder="例如：10"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -400,7 +391,7 @@ export default function CreateAccountScreen() {
               onChangeText={setPriority}
               keyboardType="number-pad"
               placeholder="例如：0"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -419,7 +410,7 @@ export default function CreateAccountScreen() {
               onChangeText={setRateMultiplier}
               keyboardType="decimal-pad"
               placeholder="例如：1"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -438,7 +429,7 @@ export default function CreateAccountScreen() {
               onChangeText={setProxyId}
               keyboardType="number-pad"
               placeholder="例如：3"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -456,7 +447,7 @@ export default function CreateAccountScreen() {
               value={groupIds}
               onChangeText={setGroupIds}
               placeholder="例如：1,2,5"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -482,13 +473,13 @@ export default function CreateAccountScreen() {
             }}
             disabled={!canSubmit || createMutation.isPending}
             style={{
-              backgroundColor: !canSubmit || createMutation.isPending ? '#64748b' : colors.dark,
+              backgroundColor: !canSubmit || createMutation.isPending ? colors.disabled : colors.dark,
               borderRadius: 12,
               paddingVertical: 14,
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontWeight: '700' }}>{createMutation.isPending ? '提交中...' : '创建账号'}</Text>
+            <Text style={{ color: colors.primaryText, fontWeight: '700' }}>{createMutation.isPending ? '提交中...' : '创建账号'}</Text>
           </Pressable>
         </ScrollView>
       </SafeAreaView>

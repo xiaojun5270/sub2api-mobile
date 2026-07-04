@@ -1,15 +1,19 @@
 import { Text, View } from 'react-native';
 
+import { useAppTheme } from '@/src/lib/theme';
+
 type DetailRowProps = {
   label: string;
   value: string;
 };
 
 export function DetailRow({ label, value }: DetailRowProps) {
+  const colors = useAppTheme();
+
   return (
-    <View className="flex-row items-start justify-between gap-4 border-b border-[#e2e8f0] py-3 last:border-b-0">
-      <Text className="text-sm text-[#64748b]">{label}</Text>
-      <Text className="max-w-[62%] text-right text-sm font-medium text-[#0f172a]">{value}</Text>
+    <View style={{ borderBottomColor: colors.rowBorder, borderBottomWidth: 1, flexDirection: 'row', gap: 16, justifyContent: 'space-between', paddingVertical: 12 }}>
+      <Text style={{ color: colors.subtext, fontSize: 14 }}>{label}</Text>
+      <Text style={{ color: colors.text, fontSize: 14, fontWeight: '500', maxWidth: '62%', textAlign: 'right' }}>{value}</Text>
     </View>
   );
 }

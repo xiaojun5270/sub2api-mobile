@@ -2,6 +2,8 @@ import type { LucideIcon } from 'lucide-react-native';
 import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
 
+import { useAppTheme } from '@/src/lib/theme';
+
 type ListCardProps = {
   title: string;
   meta?: string;
@@ -11,49 +13,36 @@ type ListCardProps = {
   icon?: LucideIcon;
 };
 
-const badgeClassMap: Record<NonNullable<ListCardProps['badgeTone']>, { wrap: string; text: string }> = {
-  default: {
-    wrap: 'rounded-full bg-[#eef3f8] px-2.5 py-1',
-    text: 'text-[10px] font-semibold uppercase tracking-[1px] text-[#475569]',
-  },
-  success: {
-    wrap: 'rounded-full bg-[#ecfdf5] px-2.5 py-1',
-    text: 'text-[10px] font-semibold uppercase tracking-[1px] text-[#0f766e]',
-  },
-  muted: {
-    wrap: 'rounded-full bg-[#f1f5f9] px-2.5 py-1',
-    text: 'text-[10px] font-semibold uppercase tracking-[1px] text-[#64748b]',
-  },
-  danger: {
-    wrap: 'rounded-full bg-[#fef2f2] px-2.5 py-1',
-    text: 'text-[10px] font-semibold uppercase tracking-[1px] text-[#dc2626]',
-  },
-};
-
 export function ListCard({ title, meta, badge, badgeTone = 'default', children, icon: Icon }: ListCardProps) {
-  const badgeClass = badgeClassMap[badgeTone];
+  const colors = useAppTheme();
+  const badgeColors = {
+    default: { backgroundColor: colors.badgeDefaultBg, color: colors.badgeDefaultText },
+    success: { backgroundColor: colors.successBg, color: colors.success },
+    muted: { backgroundColor: colors.badgeMutedBg, color: colors.badgeMutedText },
+    danger: { backgroundColor: colors.dangerBg, color: colors.danger },
+  }[badgeTone];
 
   return (
-    <View className="rounded-[16px] border border-[#dbe5ef] bg-white p-3.5">
+    <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 16, borderWidth: 1, padding: 14 }}>
       <View className="flex-row items-start justify-between gap-3">
         <View className="flex-1">
           <View className="flex-row items-center gap-2">
             {Icon ? (
-              <View className="h-8 w-8 items-center justify-center rounded-full bg-[#eef3f8]">
-                <Icon color="#0f766e" size={16} />
+              <View style={{ alignItems: 'center', backgroundColor: colors.iconSoftBg, borderRadius: 999, height: 32, justifyContent: 'center', width: 32 }}>
+                <Icon color={colors.primary} size={16} />
               </View>
             ) : null}
-            <Text className="flex-1 text-base font-semibold text-[#0f172a]">{title}</Text>
+            <Text style={{ color: colors.text, flex: 1, fontSize: 16, fontWeight: '600' }}>{title}</Text>
           </View>
-          {meta ? <Text numberOfLines={1} className="mt-1 text-xs text-[#64748b]">{meta}</Text> : null}
+          {meta ? <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{meta}</Text> : null}
         </View>
         {badge ? (
-          <View className={badgeClass.wrap}>
-            <Text className={badgeClass.text}>{badge}</Text>
+          <View style={{ backgroundColor: badgeColors.backgroundColor, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 }}>
+            <Text style={{ color: badgeColors.color, fontSize: 10, fontWeight: '600', letterSpacing: 1, textTransform: 'uppercase' }}>{badge}</Text>
           </View>
         ) : null}
       </View>
-      {children ? <View className="mt-3">{children}</View> : null}
+      {children ? <View style={{ marginTop: 12 }}>{children}</View> : null}
     </View>
   );
 }

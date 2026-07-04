@@ -2,6 +2,8 @@ import { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
+import { useAppTheme } from '@/src/lib/theme';
+
 type Point = {
   label: string;
   value: number;
@@ -24,6 +26,7 @@ export function LineTrendChart({
   formatValue = (value) => `${value}`,
   compact = false,
 }: LineTrendChartProps) {
+  const colors = useAppTheme();
   const width = 320;
   const height = compact ? 104 : 144;
   const maxValue = Math.max(...points.map((point) => point.value), 1);
@@ -50,12 +53,12 @@ export function LineTrendChart({
   const tickPoints = points.filter((_, index) => index === 0 || index === points.length - 1 || index % tickStep === 0);
 
   return (
-    <View className="rounded-[18px] border border-[#dbe5ef] bg-white p-4">
-      <Text className="text-xs uppercase tracking-[1.6px] text-[#64748b]">{title}</Text>
-      <Text className={`mt-1 font-bold text-[#0f172a] ${compact ? 'text-[22px]' : 'text-[28px]'}`}>{formatValue(latest)}</Text>
-      <Text numberOfLines={1} className="mt-1 text-xs text-[#64748b]">{subtitle}</Text>
+    <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
+      <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
+      <Text style={{ color: colors.text, fontSize: compact ? 22 : 28, fontWeight: '700', marginTop: 4 }}>{formatValue(latest)}</Text>
+      <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
 
-      <View className={`overflow-hidden rounded-[14px] bg-[#f1f5f9] p-3 ${compact ? 'mt-3' : 'mt-4'}`}>
+      <View style={{ backgroundColor: colors.chartPanel, borderRadius: 14, marginTop: compact ? 12 : 16, overflow: 'hidden', padding: 12 }}>
         <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
           <Defs>
             <LinearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
@@ -69,7 +72,7 @@ export function LineTrendChart({
 
         <View className="mt-2 flex-row justify-between">
           {tickPoints.map((point, index) => (
-            <Text key={`${point.label}-${index}`} className={`text-[#64748b] ${compact ? 'text-[10px]' : 'text-xs'}`}>
+            <Text key={`${point.label}-${index}`} style={{ color: colors.subtext, fontSize: compact ? 10 : 12 }}>
               {point.label}
             </Text>
           ))}

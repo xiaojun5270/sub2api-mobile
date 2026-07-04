@@ -1,6 +1,8 @@
 import { Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { useAppTheme } from '@/src/lib/theme';
+
 type DonutSegment = {
   label: string;
   value: number;
@@ -22,6 +24,7 @@ export function DonutChartCard({
   centerLabel,
   centerValue,
 }: DonutChartCardProps) {
+  const colors = useAppTheme();
   const total = Math.max(
     segments.reduce((sum, segment) => sum + segment.value, 0),
     1
@@ -34,9 +37,9 @@ export function DonutChartCard({
   let offset = 0;
 
   return (
-    <View className="rounded-[18px] border border-[#dbe5ef] bg-white p-4">
-      <Text className="text-xs uppercase tracking-[1.6px] text-[#64748b]">{title}</Text>
-      <Text numberOfLines={1} className="mt-1 text-xs text-[#64748b]">{subtitle}</Text>
+    <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
+      <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
+      <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
 
       <View className="mt-4 items-center justify-center">
         <View className="items-center justify-center">
@@ -45,7 +48,7 @@ export function DonutChartCard({
               cx={size / 2}
               cy={size / 2}
               r={radius}
-              stroke="#e2e8f0"
+              stroke={colors.chartTrack}
               strokeWidth={strokeWidth}
               fill="none"
             />
@@ -73,8 +76,8 @@ export function DonutChartCard({
           </Svg>
 
           <View className="absolute items-center">
-            <Text className="text-xs uppercase tracking-[1.4px] text-[#64748b]">{centerLabel}</Text>
-            <Text className="mt-1 text-[28px] font-bold text-[#0f172a]">{centerValue}</Text>
+            <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.4, textTransform: 'uppercase' }}>{centerLabel}</Text>
+            <Text style={{ color: colors.text, fontSize: 28, fontWeight: '700', marginTop: 4 }}>{centerValue}</Text>
           </View>
         </View>
       </View>
@@ -84,12 +87,15 @@ export function DonutChartCard({
           const percentage = Math.round((segment.value / total) * 100);
 
           return (
-            <View key={segment.label} className="flex-row items-center justify-between rounded-[12px] bg-[#f1f5f9] px-3 py-2.5">
+            <View
+              key={segment.label}
+              style={{ alignItems: 'center', backgroundColor: colors.chartPanel, borderRadius: 12, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10 }}
+            >
               <View className="flex-row items-center gap-3">
                 <View className="h-3 w-3 rounded-full" style={{ backgroundColor: segment.color }} />
-                <Text className="text-sm font-semibold text-[#0f172a]">{segment.label}</Text>
+                <Text style={{ color: colors.text, fontSize: 14, fontWeight: '600' }}>{segment.label}</Text>
               </View>
-              <Text className="text-xs text-[#475569]">{segment.value} · {percentage}%</Text>
+              <Text style={{ color: colors.badgeDefaultText, fontSize: 12 }}>{segment.value} · {percentage}%</Text>
             </View>
           );
         })}

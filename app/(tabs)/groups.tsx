@@ -6,9 +6,11 @@ import { FlatList, RefreshControl, Text, TextInput, View } from 'react-native';
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
+import { useAppTheme } from '@/src/lib/theme';
 import { listGroups } from '@/src/services/admin';
 
 export default function GroupsScreen() {
+  const colors = useAppTheme();
   const [searchText, setSearchText] = useState('');
   const keyword = useDebouncedValue(searchText.trim(), 300);
 
@@ -22,19 +24,19 @@ export default function GroupsScreen() {
   const listHeader = useMemo(
     () => (
       <View className="pb-4">
-        <View className="flex-row items-center rounded-[18px] border border-[#dbe5ef] bg-white px-4 py-3">
-          <Search color="#64748b" size={18} />
+        <View style={{ alignItems: 'center', backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12 }}>
+          <Search color={colors.subtext} size={18} />
           <TextInput
             defaultValue=""
             onChangeText={setSearchText}
             placeholder="搜索分组名称"
-            placeholderTextColor="#94a3b8"
-            className="ml-3 flex-1 text-base text-[#0f172a]"
+            placeholderTextColor={colors.placeholder}
+            style={{ color: colors.text, flex: 1, fontSize: 16, marginLeft: 12 }}
           />
         </View>
       </View>
     ),
-    []
+    [colors]
   );
   const renderItem = useCallback(
     ({ item: group }: { item: (typeof items)[number] }) => (
@@ -45,14 +47,14 @@ export default function GroupsScreen() {
         icon={FolderKanban}
       >
         <View className="flex-row items-center gap-2">
-          <Layers3 color="#64748b" size={14} />
-          <Text className="text-sm text-[#64748b]">
+          <Layers3 color={colors.subtext} size={14} />
+          <Text style={{ color: colors.subtext, fontSize: 14 }}>
             账号数 {group.account_count ?? 0} · {group.is_exclusive ? '独占分组' : '共享分组'}
           </Text>
         </View>
       </ListCard>
     ),
-    []
+    [colors]
   );
   const emptyState = useMemo(
     () => <ListCard title="暂无分组" meta={errorMessage || '连上 Sub2API 后，这里会展示分组列表。'} icon={FolderKanban} />,
@@ -63,7 +65,7 @@ export default function GroupsScreen() {
     <ScreenShell
       title="分组管理"
       subtitle=""
-      titleAside={<Text className="text-[11px] text-[#a2988a]">查看分组与调度归属。</Text>}
+      titleAside={<Text style={{ color: colors.subtext, fontSize: 11 }}>查看分组与调度归属。</Text>}
       variant="minimal"
       scroll={false}
     >
@@ -72,7 +74,7 @@ export default function GroupsScreen() {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={groupsQuery.isRefetching} onRefresh={() => void groupsQuery.refetch()} tintColor="#0f766e" />}
+        refreshControl={<RefreshControl refreshing={groupsQuery.isRefetching} onRefresh={() => void groupsQuery.refetch()} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-4" />}

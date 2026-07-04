@@ -2,6 +2,8 @@ import type { LucideIcon } from 'lucide-react-native';
 import { TrendingDown, TrendingUp } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 
+import { useAppTheme } from '@/src/lib/theme';
+
 type StatCardProps = {
   label: string;
   value: string;
@@ -11,21 +13,31 @@ type StatCardProps = {
 };
 
 export function StatCard({ label, value, tone = 'light', trend, icon: Icon }: StatCardProps) {
+  const colors = useAppTheme();
   const dark = tone === 'dark';
   const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : null;
+  const labelColor = dark ? colors.primaryText : colors.subtext;
 
   return (
-    <View className={dark ? 'rounded-[18px] bg-[#0f766e] p-4' : 'rounded-[18px] border border-[#dbe5ef] bg-white p-4'}>
+    <View
+      style={{
+        backgroundColor: dark ? colors.primary : colors.card,
+        borderColor: colors.border,
+        borderRadius: 18,
+        borderWidth: dark ? 0 : 1,
+        padding: 16,
+      }}
+    >
       <View className="flex-row items-center justify-between gap-3">
-        <Text className={dark ? 'text-xs uppercase tracking-[1.5px] text-[#ccfbf1]' : 'text-xs uppercase tracking-[1.5px] text-[#64748b]'}>
+        <Text style={{ color: labelColor, fontSize: 12, letterSpacing: 1.5, textTransform: 'uppercase' }}>
           {label}
         </Text>
         <View className="flex-row items-center gap-2">
-          {TrendIcon ? <TrendIcon color={dark ? '#ccfbf1' : '#64748b'} size={14} /> : null}
-          {Icon ? <Icon color={dark ? '#ccfbf1' : '#64748b'} size={14} /> : null}
+          {TrendIcon ? <TrendIcon color={labelColor} size={14} /> : null}
+          {Icon ? <Icon color={labelColor} size={14} /> : null}
         </View>
       </View>
-      <Text className={dark ? 'mt-3 text-3xl font-bold text-white' : 'mt-3 text-3xl font-bold text-[#0f172a]'}>
+      <Text style={{ color: dark ? colors.primaryText : colors.text, fontSize: 30, fontWeight: '700', marginTop: 12 }}>
         {value}
       </Text>
     </View>

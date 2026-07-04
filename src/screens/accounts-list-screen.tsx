@@ -8,6 +8,7 @@ import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatTokenValue } from '@/src/lib/formatters';
+import { useAppTheme } from '@/src/lib/theme';
 import { getAccountTodayStats, listAccounts, setAccountSchedulable, testAccount } from '@/src/services/admin';
 import type { AdminAccount } from '@/src/types/admin';
 
@@ -54,6 +55,7 @@ type AccountsListScreenProps = {
 };
 
 export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
+  const colors = useAppTheme();
   const [searchText, setSearchText] = useState('');
   const [filter, setFilter] = useState<AccountStatusFilter>('all');
   const [usageSort, setUsageSort] = useState<UsageSort>('usage-desc');
@@ -138,15 +140,15 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const listHeader = useMemo(
     () => (
       <View className="pb-2">
-        <View className="rounded-[18px] border border-[#dbe5ef] bg-white p-2.5">
-          <View className="flex-row items-center rounded-[18px] bg-[#eef3f8] px-4 py-3">
-            <Search color="#64748b" size={18} />
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 10 }}>
+          <View style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 18, flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12 }}>
+            <Search color={colors.subtext} size={18} />
             <TextInput
               defaultValue=""
               onChangeText={setSearchText}
               placeholder="搜索账号名称 / 平台"
-              placeholderTextColor="#94a3b8"
-              className="ml-3 flex-1 text-base text-[#0f172a]"
+              placeholderTextColor={colors.placeholder}
+              style={{ color: colors.text, flex: 1, fontSize: 16, marginLeft: 12 }}
             />
           </View>
 
@@ -162,9 +164,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 <Pressable
                   key={key}
                   onPress={() => setFilter(key)}
-                  className={active ? 'rounded-full bg-[#0f766e] px-3 py-2' : 'rounded-full bg-[#dbe5ef] px-3 py-2'}
+                  style={{ backgroundColor: active ? colors.primary : colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
                 >
-                  <Text className={active ? 'text-xs font-semibold text-white' : 'text-xs font-semibold text-[#334155]'}>{label}</Text>
+                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '600' }}>{label}</Text>
                 </Pressable>
               );
             })}
@@ -180,9 +182,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 <Pressable
                   key={key}
                   onPress={() => setUsageSort(key)}
-                  className={active ? 'rounded-full bg-[#334155] px-3 py-3' : 'rounded-full bg-[#dbe5ef] px-3 py-3'}
+                  style={{ backgroundColor: active ? colors.dark : colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 12 }}
                 >
-                  <Text className={active ? 'text-xs font-semibold text-white' : 'text-xs font-semibold text-[#334155]'}>{label}</Text>
+                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '600' }}>{label}</Text>
                 </Pressable>
               );
             })}
@@ -190,7 +192,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </View>
       </View>
     ),
-    [filter, summary.active, summary.errors, summary.paused, summary.total, usageSort]
+    [colors, filter, summary.active, summary.errors, summary.paused, summary.total, usageSort]
   );
 
   const renderItem = useCallback(
@@ -218,35 +220,35 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             <View className="gap-3">
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center gap-2">
-                  {account.schedulable && !isError ? <ShieldCheck color="#64748b" size={14} /> : <ShieldOff color="#64748b" size={14} />}
-                  <Text className="text-sm text-[#64748b]">状态：{statusText}</Text>
+                  {account.schedulable && !isError ? <ShieldCheck color={colors.subtext} size={14} /> : <ShieldOff color={colors.subtext} size={14} />}
+                  <Text style={{ color: colors.subtext, fontSize: 14 }}>状态：{statusText}</Text>
                 </View>
-                <Text className="text-xs text-[#64748b]">最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
+                <Text style={{ color: colors.subtext, fontSize: 12 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
               </View>
 
               <View className="flex-row gap-2">
-                <View className="flex-1 rounded-[14px] bg-[#eef3f8] px-3 py-3">
-                  <Text className="text-[11px] text-[#64748b]">请求次数</Text>
-                  <Text className="mt-1 text-sm font-bold text-[#0f172a]">{todayStats.requests}</Text>
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, paddingHorizontal: 12, paddingVertical: 12 }}>
+                  <Text style={{ color: colors.subtext, fontSize: 11 }}>请求次数</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{todayStats.requests}</Text>
                 </View>
-                <View className="flex-1 rounded-[14px] bg-[#eef3f8] px-3 py-3">
-                  <Text className="text-[11px] text-[#64748b]">消费金额</Text>
-                  <Text className="mt-1 text-sm font-bold text-[#0f172a]">${todayStats.cost.toFixed(2)}</Text>
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, paddingHorizontal: 12, paddingVertical: 12 }}>
+                  <Text style={{ color: colors.subtext, fontSize: 11 }}>消费金额</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>${todayStats.cost.toFixed(2)}</Text>
                 </View>
-                <View className="flex-1 rounded-[14px] bg-[#eef3f8] px-3 py-3">
-                  <Text className="text-[11px] text-[#64748b]">token消耗</Text>
-                  <Text className="mt-1 text-sm font-bold text-[#0f172a]">{formatTokenValue(todayStats.tokens)}</Text>
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, paddingHorizontal: 12, paddingVertical: 12 }}>
+                  <Text style={{ color: colors.subtext, fontSize: 11 }}>token消耗</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{formatTokenValue(todayStats.tokens)}</Text>
                 </View>
               </View>
 
-              <Text className="text-xs text-[#64748b]">优先级 {account.priority ?? 0} · 倍率 {(account.rate_multiplier ?? 1).toFixed(2)}x</Text>
+              <Text style={{ color: colors.subtext, fontSize: 12 }}>优先级 {account.priority ?? 0} · 倍率 {(account.rate_multiplier ?? 1).toFixed(2)}x</Text>
 
-              {groupsText ? <Text className="text-xs text-[#64748b]">分组 {groupsText}</Text> : null}
-              {account.error_message ? <Text className="text-xs text-[#dc2626]">异常信息：{account.error_message}</Text> : null}
+              {groupsText ? <Text style={{ color: colors.subtext, fontSize: 12 }}>分组 {groupsText}</Text> : null}
+              {account.error_message ? <Text style={{ color: colors.danger, fontSize: 12 }}>异常信息：{account.error_message}</Text> : null}
 
               <View className="flex-row gap-2">
                 <Pressable
-                  className="rounded-full bg-[#1b1d1f] px-4 py-2"
+                  style={{ backgroundColor: colors.dark, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTestingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -265,10 +267,10 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     });
                   }}
                 >
-                  <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-[#f6f1e8]">{isTestingCurrent ? '测试中...' : '测试'}</Text>
+                  <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
                 </Pressable>
                 <Pressable
-                  className="rounded-full bg-[#dbe5ef] px-4 py-2"
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTogglingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -283,17 +285,17 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     });
                   }}
                 >
-                  <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-[#334155]">{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
+                  <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
                 </Pressable>
               </View>
 
-              {testFeedback ? <Text className="text-xs text-[#0f766e]">测试结果：{testFeedback}</Text> : null}
+              {testFeedback ? <Text style={{ color: colors.success, fontSize: 12 }}>测试结果：{testFeedback}</Text> : null}
             </View>
           </ListCard>
         </View>
       );
     },
-    [testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId]
+    [colors, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId]
   );
 
   const emptyState = useMemo(
@@ -306,7 +308,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       title="账号清单"
       subtitle="查看名称、平台&类型、请求次数、消费金额、token消耗，并支持筛选与排序。"
       titleAside={(
-        <Text className="text-[11px] text-[#64748b]">更接近网页后台的账号视图。</Text>
+        <Text style={{ color: colors.subtext, fontSize: 11 }}>更接近网页后台的账号视图。</Text>
       )}
       variant="minimal"
       scroll={false}
@@ -321,7 +323,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={accountsQuery.isRefetching} onRefresh={() => void accountsQuery.refetch()} tintColor="#0f766e" />}
+        refreshControl={<RefreshControl refreshing={accountsQuery.isRefetching} onRefresh={() => void accountsQuery.refetch()} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-4" />}

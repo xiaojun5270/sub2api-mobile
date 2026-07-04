@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { getAdminSettings, getDashboardStats } from '@/src/services/admin';
 import { queryClient } from '@/src/lib/query-client';
+import { useAppTheme } from '@/src/lib/theme';
 import { adminConfigState, hasAuthenticatedAdminSession, saveAdminConfig } from '@/src/store/admin-config';
 
 const { useSnapshot } = require('valtio/react');
@@ -25,18 +26,6 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 type ConnectionState = 'idle' | 'checking' | 'error';
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  mutedCard: '#eef3f8',
-  primary: '#0f766e',
-  text: '#0f172a',
-  subtext: '#64748b',
-  border: '#dbe5ef',
-  dangerBg: '#fef2f2',
-  danger: '#dc2626',
-};
 
 function getConnectionErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -56,6 +45,7 @@ function getConnectionErrorMessage(error: unknown) {
 }
 
 export default function LoginScreen() {
+  const colors = useAppTheme();
   const config = useSnapshot(adminConfigState);
   const hasAccount = hasAuthenticatedAdminSession(config);
   const { control, handleSubmit, formState } = useForm<FormValues>({
@@ -84,7 +74,7 @@ export default function LoginScreen() {
             </Text>
           </View>
 
-          <View style={{ backgroundColor: colors.card, borderRadius: 22, padding: 18, gap: 16 }}>
+          <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 18, gap: 16 }}>
             <View>
               <Text style={{ marginBottom: 8, fontSize: 12, color: colors.subtext }}>服务器地址</Text>
               <Controller
@@ -101,7 +91,7 @@ export default function LoginScreen() {
                       onChange(text);
                     }}
                     placeholder="例如：https://api.example.com"
-                    placeholderTextColor="#94a3b8"
+                    placeholderTextColor={colors.placeholder}
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{ backgroundColor: colors.mutedCard, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: colors.text }}
@@ -127,7 +117,7 @@ export default function LoginScreen() {
                         onChange(text);
                       }}
                       placeholder="admin-xxxxxxxx"
-                      placeholderTextColor="#94a3b8"
+                      placeholderTextColor={colors.placeholder}
                       autoCapitalize="none"
                       autoCorrect={false}
                       secureTextEntry={!showAdminKey}
@@ -145,7 +135,7 @@ export default function LoginScreen() {
                       onPress={() => setShowAdminKey((value) => !value)}
                       style={{ backgroundColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }}
                     >
-                      {showAdminKey ? <EyeOff color="#334155" size={17} /> : <Eye color="#334155" size={17} />}
+                      {showAdminKey ? <EyeOff color={colors.badgeDefaultText} size={17} /> : <Eye color={colors.badgeDefaultText} size={17} />}
                     </Pressable>
                   </View>
                 )}
@@ -165,7 +155,7 @@ export default function LoginScreen() {
             ) : null}
 
             <Pressable
-              style={{ backgroundColor: connectionState === 'checking' ? '#94a3b8' : colors.primary, borderRadius: 18, paddingVertical: 15, alignItems: 'center' }}
+              style={{ backgroundColor: connectionState === 'checking' ? colors.disabled : colors.primary, borderRadius: 18, paddingVertical: 15, alignItems: 'center' }}
               disabled={connectionState === 'checking'}
               onPress={handleSubmit(async (values) => {
                 setConnectionState('checking');
@@ -184,8 +174,8 @@ export default function LoginScreen() {
               })}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <LogIn color="#fff" size={18} />
-                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{connectionState === 'checking' ? '连接中...' : '进入应用'}</Text>
+                <LogIn color={colors.primaryText} size={18} />
+                <Text style={{ color: colors.primaryText, fontSize: 15, fontWeight: '700' }}>{connectionState === 'checking' ? '连接中...' : '进入应用'}</Text>
               </View>
             </Pressable>
           </View>

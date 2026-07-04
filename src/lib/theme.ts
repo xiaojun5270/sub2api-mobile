@@ -1,0 +1,73 @@
+import { useColorScheme } from 'react-native';
+
+const lightTheme = {
+  mode: 'light',
+  page: '#f7f9fc',
+  card: '#ffffff',
+  mutedCard: '#eef3f8',
+  muted: '#eef3f8',
+  surface: '#ffffff',
+  primary: '#0f766e',
+  primaryText: '#ffffff',
+  text: '#0f172a',
+  subtext: '#64748b',
+  border: '#dbe5ef',
+  dangerBg: '#fef2f2',
+  danger: '#dc2626',
+  errorBg: '#fef2f2',
+  errorText: '#dc2626',
+  successBg: '#ecfdf5',
+  success: '#0f766e',
+  accentBg: '#fff7ed',
+  accentText: '#c2410c',
+  dark: '#1b1d1f',
+  disabled: '#64748b',
+  chartTrack: '#e2e8f0',
+  chartPanel: '#f1f5f9',
+  badgeDefaultBg: '#eef3f8',
+  badgeDefaultText: '#475569',
+  badgeMutedBg: '#f1f5f9',
+  badgeMutedText: '#64748b',
+  iconSoftBg: '#eef3f8',
+  rowBorder: '#e2e8f0',
+  placeholder: '#94a3b8',
+};
+
+const darkTheme: typeof lightTheme = {
+  mode: 'dark',
+  page: '#020617',
+  card: '#0f172a',
+  mutedCard: '#111c2f',
+  muted: '#111c2f',
+  surface: '#0f172a',
+  primary: '#2dd4bf',
+  primaryText: '#04111d',
+  text: '#e5edf6',
+  subtext: '#94a3b8',
+  border: '#1f2f46',
+  dangerBg: '#3b1115',
+  danger: '#f87171',
+  errorBg: '#3b1115',
+  errorText: '#fca5a5',
+  successBg: '#073b35',
+  success: '#5eead4',
+  accentBg: '#3a240a',
+  accentText: '#fdba74',
+  dark: '#2dd4bf',
+  disabled: '#475569',
+  chartTrack: '#1e293b',
+  chartPanel: '#111c2f',
+  badgeDefaultBg: '#1e293b',
+  badgeDefaultText: '#cbd5e1',
+  badgeMutedBg: '#111c2f',
+  badgeMutedText: '#94a3b8',
+  iconSoftBg: '#12323a',
+  rowBorder: '#1e293b',
+  placeholder: '#64748b',
+};
+
+export type AppTheme = typeof lightTheme;
+
+export function useAppTheme(): AppTheme {
+  return useColorScheme() === 'dark' ? darkTheme : lightTheme;
+}

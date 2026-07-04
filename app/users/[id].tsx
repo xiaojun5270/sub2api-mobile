@@ -6,21 +6,9 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { useAppTheme } from '@/src/lib/theme';
 import { getDashboardSnapshot, getUsageStats, getUser, listUserApiKeys, updateUserBalance, updateUserStatus } from '@/src/services/admin';
 import type { AdminApiKey, BalanceOperation } from '@/src/types/admin';
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  text: '#0f172a',
-  subtext: '#64748b',
-  border: '#dbe5ef',
-  primary: '#0f766e',
-  dark: '#1b1d1f',
-  errorBg: '#fef2f2',
-  errorText: '#dc2626',
-  muted: '#f7f1e6',
-};
 
 type RangeKey = '24h' | '7d' | '30d';
 
@@ -111,6 +99,8 @@ function formatTime(value?: string | null) {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const colors = useAppTheme();
+
   return (
     <View
       style={{
@@ -129,6 +119,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function GridField({ label, value }: { label: string; value: string }) {
+  const colors = useAppTheme();
+
   return (
     <View
       style={{
@@ -148,6 +140,8 @@ function GridField({ label, value }: { label: string; value: string }) {
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
+  const colors = useAppTheme();
+
   return (
     <View
       style={{
@@ -167,9 +161,11 @@ function MetricCard({ label, value }: { label: string; value: string }) {
 }
 
 function StatusBadge({ text }: { text: string }) {
+  const colors = useAppTheme();
   const normalized = text.toLowerCase();
-  const backgroundColor = normalized === 'active' ? '#dff4ea' : normalized === 'inactive' || normalized === 'disabled' ? '#ece5da' : '#fef2f2';
-  const color = normalized === 'active' ? '#17663f' : normalized === 'inactive' || normalized === 'disabled' ? '#64748b' : '#dc2626';
+  const inactive = normalized === 'inactive' || normalized === 'disabled';
+  const backgroundColor = normalized === 'active' ? colors.successBg : inactive ? colors.badgeMutedBg : colors.dangerBg;
+  const color = normalized === 'active' ? colors.success : inactive ? colors.badgeMutedText : colors.danger;
 
   return (
     <View style={{ backgroundColor, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
@@ -179,23 +175,27 @@ function StatusBadge({ text }: { text: string }) {
 }
 
 function CopyInlineButton({ copied, onPress }: { copied: boolean; onPress: () => void }) {
+  const colors = useAppTheme();
+
   return (
     <Pressable
       onPress={onPress}
       style={{
         marginLeft: 8,
-        backgroundColor: copied ? '#dff4ea' : '#dbe5ef',
+        backgroundColor: copied ? colors.successBg : colors.mutedCard,
         borderRadius: 999,
         paddingHorizontal: 10,
         paddingVertical: 6,
       }}
     >
-      <Text style={{ fontSize: 11, fontWeight: '700', color: copied ? '#17663f' : '#334155' }}>{copied ? '已复制' : '复制'}</Text>
+      <Text style={{ fontSize: 11, fontWeight: '700', color: copied ? colors.success : colors.badgeDefaultText }}>{copied ? '已复制' : '复制'}</Text>
     </Pressable>
   );
 }
 
 function KeyItem({ item, copied, onCopy }: { item: AdminApiKey; copied: boolean; onCopy: () => void }) {
+  const colors = useAppTheme();
+
   return (
     <View
       style={{
@@ -235,6 +235,7 @@ function KeyItem({ item, copied, onCopy }: { item: AdminApiKey; copied: boolean;
 }
 
 export default function UserDetailScreen() {
+  const colors = useAppTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const userId = Number(id);
   const queryClient = useQueryClient();
@@ -431,14 +432,14 @@ export default function UserDetailScreen() {
                   disabled={statusMutation.isPending || user.role?.toLowerCase() === 'admin'}
                   onPress={handleToggleUserStatus}
                   style={{
-                    backgroundColor: user.status === 'disabled' ? colors.primary : '#8b3f1f',
+                    backgroundColor: user.status === 'disabled' ? colors.primary : colors.danger,
                     borderRadius: 10,
                     paddingHorizontal: 12,
                     paddingVertical: 10,
                     opacity: statusMutation.isPending || user.role?.toLowerCase() === 'admin' ? 0.6 : 1,
                   }}
                 >
-                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                  <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '700' }}>
                     {statusMutation.isPending ? '处理中...' : user.status === 'disabled' ? '启用用户' : '禁用用户'}
                   </Text>
                 </Pressable>
@@ -471,7 +472,7 @@ export default function UserDetailScreen() {
                       borderColor: active ? colors.primary : colors.border,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
                   </Pressable>
                 );
               })}
@@ -504,7 +505,7 @@ export default function UserDetailScreen() {
                   title="用量趋势"
                   subtitle={`${range.start_date} 到 ${range.end_date}`}
                   points={trendPoints}
-                  color="#0f766e"
+                  color={colors.primary}
                   formatValue={(value) => formatTokenValue(value)}
                   compact
                 />
@@ -526,7 +527,7 @@ export default function UserDetailScreen() {
               value={searchText}
               onChangeText={setSearchText}
               placeholder="搜索名称 / Key / 分组"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -583,7 +584,7 @@ export default function UserDetailScreen() {
                       borderColor: active ? colors.primary : colors.border,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontWeight: '700' }}>{item.label}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontWeight: '700' }}>{item.label}</Text>
                   </Pressable>
                 );
               })}
@@ -593,7 +594,7 @@ export default function UserDetailScreen() {
               value={amount}
               onChangeText={setAmount}
               placeholder="输入金额，例如 10"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               keyboardType="decimal-pad"
               style={{
                 backgroundColor: colors.muted,
@@ -611,7 +612,7 @@ export default function UserDetailScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="备注（可选）"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -631,7 +632,7 @@ export default function UserDetailScreen() {
             ) : null}
 
             <Pressable onPress={submitBalance} style={{ backgroundColor: colors.dark, borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>{balanceMutation.isPending ? '提交中...' : '确认提交'}</Text>
+              <Text style={{ color: colors.primaryText, fontWeight: '700' }}>{balanceMutation.isPending ? '提交中...' : '确认提交'}</Text>
             </Pressable>
           </Section>
         </ScrollView>

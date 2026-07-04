@@ -5,21 +5,9 @@ import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { queryClient } from '@/src/lib/query-client';
+import { useAppTheme } from '@/src/lib/theme';
 import { createUser } from '@/src/services/admin';
 import type { CreateUserRequest } from '@/src/types/admin';
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  text: '#0f172a',
-  subtext: '#64748b',
-  border: '#dbe5ef',
-  primary: '#0f766e',
-  dark: '#1b1d1f',
-  errorBg: '#fef2f2',
-  errorText: '#dc2626',
-  muted: '#f7f1e6',
-};
 
 type JsonValue = string | number | boolean | null | undefined;
 
@@ -75,6 +63,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export default function CreateUserScreen() {
+  const colors = useAppTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
@@ -137,7 +126,7 @@ export default function CreateUserScreen() {
               value={email}
               onChangeText={setEmail}
               placeholder="例如：user@example.com"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               autoCapitalize="none"
               style={{
                 backgroundColor: colors.muted,
@@ -156,7 +145,7 @@ export default function CreateUserScreen() {
               value={password}
               onChangeText={setPassword}
               placeholder="请输入密码"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               secureTextEntry
               autoCapitalize="none"
               style={{
@@ -176,7 +165,7 @@ export default function CreateUserScreen() {
               value={username}
               onChangeText={setUsername}
               placeholder="例如：demo-user"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               autoCapitalize="none"
               style={{
                 backgroundColor: colors.muted,
@@ -195,7 +184,7 @@ export default function CreateUserScreen() {
               value={notes}
               onChangeText={setNotes}
               placeholder="例如：测试用户"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -238,7 +227,7 @@ export default function CreateUserScreen() {
                       backgroundColor: active ? colors.primary : colors.muted,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
                   </Pressable>
                 );
               })}
@@ -262,7 +251,7 @@ export default function CreateUserScreen() {
                       backgroundColor: active ? colors.primary : colors.muted,
                     }}
                   >
-                    <Text style={{ color: active ? '#fff' : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
+                    <Text style={{ color: active ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '700' }}>{item}</Text>
                   </Pressable>
                 );
               })}
@@ -287,7 +276,7 @@ export default function CreateUserScreen() {
               onChangeText={setBalance}
               keyboardType="decimal-pad"
               placeholder="例如：100"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -306,7 +295,7 @@ export default function CreateUserScreen() {
               onChangeText={setConcurrency}
               keyboardType="number-pad"
               placeholder="例如：5"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 backgroundColor: colors.muted,
                 borderWidth: 1,
@@ -326,7 +315,7 @@ export default function CreateUserScreen() {
               multiline
               textAlignVertical="top"
               placeholder='例如：{"daily_limit":10}'
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.placeholder}
               style={{
                 minHeight: 96,
                 backgroundColor: colors.muted,
@@ -353,13 +342,13 @@ export default function CreateUserScreen() {
             }}
             disabled={!canSubmit || createMutation.isPending}
             style={{
-              backgroundColor: !canSubmit || createMutation.isPending ? '#64748b' : colors.dark,
+              backgroundColor: !canSubmit || createMutation.isPending ? colors.disabled : colors.dark,
               borderRadius: 12,
               paddingVertical: 14,
               alignItems: 'center',
             }}
           >
-            <Text style={{ color: '#fff', fontWeight: '700' }}>{createMutation.isPending ? '提交中...' : '创建用户'}</Text>
+            <Text style={{ color: colors.primaryText, fontWeight: '700' }}>{createMutation.isPending ? '提交中...' : '创建用户'}</Text>
           </Pressable>
         </ScrollView>
       </SafeAreaView>

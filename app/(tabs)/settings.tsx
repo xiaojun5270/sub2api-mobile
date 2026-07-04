@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { getAdminSettings, getDashboardStats } from '@/src/services/admin';
 import { queryClient } from '@/src/lib/query-client';
+import { useAppTheme } from '@/src/lib/theme';
 import { adminConfigState, removeAdminAccount, saveAdminConfig, switchAdminAccount, type AdminAccountProfile } from '@/src/store/admin-config';
 
 const { useSnapshot } = require('valtio/react');
@@ -25,20 +26,6 @@ const schema = z
 
 type FormValues = z.infer<typeof schema>;
 type ConnectionState = 'idle' | 'checking' | 'success' | 'error';
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  mutedCard: '#eef3f8',
-  primary: '#0f766e',
-  text: '#0f172a',
-  subtext: '#64748b',
-  border: '#dbe5ef',
-  dangerBg: '#fef2f2',
-  danger: '#dc2626',
-  successBg: '#ecfdf5',
-  success: '#0f766e',
-};
 
 function getConnectionErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) {
@@ -68,11 +55,13 @@ function ServerCard({
   onSelect: () => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
+  const colors = useAppTheme();
+
   return (
     <Pressable
       onPress={onSelect}
       style={{
-        backgroundColor: active ? '#ecfdf5' : colors.card,
+        backgroundColor: active ? colors.successBg : colors.card,
         borderRadius: 18,
         padding: 16,
         borderWidth: 1,
@@ -82,27 +71,27 @@ function ServerCard({
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: active ? '#ccfbf1' : colors.mutedCard, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: active ? colors.iconSoftBg : colors.mutedCard, alignItems: 'center', justifyContent: 'center' }}>
               <Server color={active ? colors.success : colors.subtext} size={18} />
             </View>
             <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: colors.text }}>{account.label}</Text>
           </View>
           <Text style={{ marginTop: 6, fontSize: 13, lineHeight: 20, color: colors.subtext }}>{account.baseUrl}</Text>
-          <Text style={{ marginTop: 8, fontSize: 11, color: '#64748b' }}>更新时间 {new Date(account.updatedAt).toLocaleString()}</Text>
+          <Text style={{ marginTop: 8, fontSize: 11, color: colors.subtext }}>更新时间 {new Date(account.updatedAt).toLocaleString()}</Text>
         </View>
         {active ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.success, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
-            <CheckCircle2 color="#fff" size={12} />
-            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>当前使用</Text>
+            <CheckCircle2 color={colors.primaryText} size={12} />
+            <Text style={{ color: colors.primaryText, fontSize: 11, fontWeight: '700' }}>当前使用</Text>
           </View>
         ) : null}
       </View>
 
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
-        <Pressable onPress={onSelect} style={{ flex: 1, backgroundColor: active ? '#ccfbf1' : colors.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center' }}>
-          <Text style={{ color: active ? colors.success : '#fff', fontSize: 13, fontWeight: '700' }}>{active ? '已选中' : '切换到此服务器'}</Text>
+        <Pressable onPress={onSelect} style={{ flex: 1, backgroundColor: active ? colors.iconSoftBg : colors.primary, borderRadius: 14, paddingVertical: 11, alignItems: 'center' }}>
+          <Text style={{ color: active ? colors.success : colors.primaryText, fontSize: 13, fontWeight: '700' }}>{active ? '已选中' : '切换到此服务器'}</Text>
         </Pressable>
-        <Pressable onPress={onDelete} style={{ backgroundColor: '#fef2f2', borderRadius: 14, paddingHorizontal: 14, justifyContent: 'center' }}>
+        <Pressable onPress={onDelete} style={{ backgroundColor: colors.dangerBg, borderRadius: 14, paddingHorizontal: 14, justifyContent: 'center' }}>
           <Trash2 color={colors.danger} size={17} />
         </Pressable>
       </View>
@@ -111,6 +100,7 @@ function ServerCard({
 }
 
 export default function SettingsScreen() {
+  const colors = useAppTheme();
   const config = useSnapshot(adminConfigState);
   const [showForm, setShowForm] = useState(config.accounts.length === 0);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
@@ -187,12 +177,12 @@ export default function SettingsScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 110, gap: 14 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} tintColor="#0f766e" />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} tintColor={colors.primary} />}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>服务器</Text>
-            <Text style={{ marginTop: 6, fontSize: 13, color: '#64748b' }}>选择当前管理的服务器，或添加新的服务器。</Text>
+            <Text style={{ marginTop: 6, fontSize: 13, color: colors.subtext }}>选择当前管理的服务器，或添加新的服务器。</Text>
           </View>
           <Pressable
             onPress={() => {
@@ -202,7 +192,7 @@ export default function SettingsScreen() {
             }}
             style={{ backgroundColor: colors.primary, borderRadius: 999, width: 42, height: 42, alignItems: 'center', justifyContent: 'center' }}
           >
-            <Plus color="#fff" size={22} strokeWidth={2.4} />
+            <Plus color={colors.primaryText} size={22} strokeWidth={2.4} />
           </Pressable>
         </View>
 
@@ -220,7 +210,7 @@ export default function SettingsScreen() {
                     value={value}
                     onChangeText={onChange}
                     placeholder="例如：https://api.example.com"
-                    placeholderTextColor="#94a3b8"
+                    placeholderTextColor={colors.placeholder}
                     autoCapitalize="none"
                     autoCorrect={false}
                     style={{ backgroundColor: colors.mutedCard, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, color: colors.text }}
@@ -240,7 +230,7 @@ export default function SettingsScreen() {
                       value={value}
                       onChangeText={onChange}
                       placeholder="admin-xxxxxxxx"
-                      placeholderTextColor="#94a3b8"
+                      placeholderTextColor={colors.placeholder}
                       autoCapitalize="none"
                       autoCorrect={false}
                       secureTextEntry={!showAdminKey}
@@ -258,7 +248,7 @@ export default function SettingsScreen() {
                       onPress={() => setShowAdminKey((value) => !value)}
                       style={{ backgroundColor: colors.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }}
                     >
-                      {showAdminKey ? <EyeOff color="#334155" size={17} /> : <Eye color="#334155" size={17} />}
+                      {showAdminKey ? <EyeOff color={colors.badgeDefaultText} size={17} /> : <Eye color={colors.badgeDefaultText} size={17} />}
                     </Pressable>
                   </View>
                 )}
@@ -281,9 +271,9 @@ export default function SettingsScreen() {
               <Pressable
                 onPress={handleSubmit(handleAdd)}
                 disabled={connectionState === 'checking'}
-                style={{ flex: 1, backgroundColor: connectionState === 'checking' ? '#94a3b8' : colors.primary, borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
+                style={{ flex: 1, backgroundColor: connectionState === 'checking' ? colors.disabled : colors.primary, borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
               >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>{connectionState === 'checking' ? '检测中...' : '保存并使用'}</Text>
+                <Text style={{ color: colors.primaryText, fontSize: 14, fontWeight: '700' }}>{connectionState === 'checking' ? '检测中...' : '保存并使用'}</Text>
               </Pressable>
               <Pressable
                 onPress={() => {
@@ -292,9 +282,9 @@ export default function SettingsScreen() {
                   setConnectionMessage('');
                   reset({ baseUrl: '', adminApiKey: '' });
                 }}
-                style={{ flex: 1, backgroundColor: colors.border, borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
+                style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
               >
-                <Text style={{ color: '#334155', fontSize: 14, fontWeight: '700' }}>取消</Text>
+                <Text style={{ color: colors.badgeDefaultText, fontSize: 14, fontWeight: '700' }}>取消</Text>
               </Pressable>
             </View>
           </View>

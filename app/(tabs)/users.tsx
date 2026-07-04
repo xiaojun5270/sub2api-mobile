@@ -8,24 +8,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
 import { queryClient } from '@/src/lib/query-client';
+import { useAppTheme } from '@/src/lib/theme';
 import { getUser, getUsageStats, listUserApiKeys, listUsers } from '@/src/services/admin';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
 import type { AdminUser, UsageStats } from '@/src/types/admin';
 
 const { useSnapshot } = require('valtio/react');
-
-const colors = {
-  page: '#f7f9fc',
-  card: '#ffffff',
-  mutedCard: '#eef3f8',
-  primary: '#0f766e',
-  text: '#0f172a',
-  subtext: '#64748b',
-  dangerBg: '#fef2f2',
-  danger: '#dc2626',
-  accentBg: '#fff7ed',
-  accentText: '#c2410c',
-};
 
 type SortOrder = 'desc' | 'asc';
 type RangeKey = '24h' | '7d' | '30d';
@@ -103,6 +91,7 @@ function getErrorMessage(error: unknown) {
 }
 
 function MetricTile({ title, value, tone = 'default' }: { title: string; value: string; tone?: 'default' | 'accent' }) {
+  const colors = useAppTheme();
   const backgroundColor = tone === 'accent' ? colors.accentBg : colors.mutedCard;
   const valueColor = tone === 'accent' ? colors.accentText : colors.text;
 
@@ -117,6 +106,7 @@ function MetricTile({ title, value, tone = 'default' }: { title: string; value: 
 }
 
 function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
+  const colors = useAppTheme();
   const isAdmin = user.role?.trim().toLowerCase() === 'admin';
   const userNameLabel = getUserNameLabel(user);
   const statusLabel = `${isAdmin ? 'admin · ' : ''}${user.status || 'active'} · ${userNameLabel}`;
@@ -125,14 +115,14 @@ function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
   const totalRequests = Number(usage?.total_requests ?? 0);
 
   return (
-    <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 14 }}>
+    <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>{user.email}</Text>
           <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>最近使用 {formatActivityTime(user.last_used_at || user.updated_at || user.created_at)}</Text>
         </View>
-        <View style={{ alignSelf: 'flex-start', backgroundColor: user.status === 'inactive' || user.status === 'disabled' ? '#94a3b8' : colors.primary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
-          <Text style={{ fontSize: 10, fontWeight: '700', color: '#fff' }}>{statusLabel}</Text>
+        <View style={{ alignSelf: 'flex-start', backgroundColor: user.status === 'inactive' || user.status === 'disabled' ? colors.disabled : colors.primary, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.primaryText }}>{statusLabel}</Text>
         </View>
       </View>
 
@@ -146,6 +136,7 @@ function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
 }
 
 export default function UsersScreen() {
+  const colors = useAppTheme();
   const config = useSnapshot(adminConfigState);
   const hasAccount = hasAuthenticatedAdminSession(config);
   const [searchText, setSearchText] = useState('');
@@ -191,7 +182,7 @@ export default function UsersScreen() {
         <View style={{ marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>用户</Text>
-            <Text style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>查看用户列表并进入详情页管理账号。</Text>
+            <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>查看用户列表并进入详情页管理账号。</Text>
           </View>
           <Pressable
             onPress={() => router.push('/users/create-user')}
@@ -204,7 +195,7 @@ export default function UsersScreen() {
               justifyContent: 'center',
             }}
           >
-            <Plus color="#fff" size={22} strokeWidth={2.4} />
+            <Plus color={colors.primaryText} size={22} strokeWidth={2.4} />
           </Pressable>
         </View>
 
@@ -216,7 +207,7 @@ export default function UsersScreen() {
               value={searchText}
               onChangeText={setSearchText}
               placeholder="搜索邮箱、用户名或备注"
-              placeholderTextColor="#94a3b8"
+              placeholderTextColor={colors.placeholder}
               style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 11, fontSize: 15, color: colors.text }}
             />
             </View>
@@ -239,7 +230,7 @@ export default function UsersScreen() {
               style={{ marginTop: 14, alignSelf: 'flex-start', backgroundColor: colors.primary, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12 }}
               onPress={() => router.push('/settings')}
             >
-              <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>去配置服务器</Text>
+              <Text style={{ color: colors.primaryText, fontSize: 13, fontWeight: '700' }}>去配置服务器</Text>
             </Pressable>
           </View>
         ) : usersQuery.isLoading ? (
@@ -260,7 +251,7 @@ export default function UsersScreen() {
             data={users}
             keyExtractor={(item) => `${item.id}`}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={usersQuery.isRefetching} onRefresh={() => void usersQuery.refetch()} tintColor="#0f766e" />}
+            refreshControl={<RefreshControl refreshing={usersQuery.isRefetching} onRefresh={() => void usersQuery.refetch()} tintColor={colors.primary} />}
             contentContainerStyle={{ paddingBottom: 8, gap: 12, flexGrow: users.length === 0 ? 1 : 0 }}
             ListEmptyComponent={
               <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 16 }}>
