@@ -27,15 +27,17 @@ import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admi
 
 const { useSnapshot } = require('valtio/react');
 
-type RangeKey = '24h' | '7d' | '30d';
+type RangeKey = 'today' | '24h' | '7d' | '30d';
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
+  { key: 'today', label: '今日' },
   { key: '24h', label: '24H' },
   { key: '7d', label: '7D' },
   { key: '30d', label: '30D' },
 ];
 
 const RANGE_TITLE_MAP: Record<RangeKey, string> = {
+  today: '今日',
   '24h': '24H',
   '7d': '7D',
   '30d': '30D',
@@ -77,7 +79,9 @@ function getDateRange(rangeKey: RangeKey) {
   const end = new Date();
   const start = new Date();
 
-  if (rangeKey === '24h') {
+  if (rangeKey === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (rangeKey === '24h') {
     start.setHours(end.getHours() - 23, 0, 0, 0);
   } else if (rangeKey === '30d') {
     start.setDate(end.getDate() - 29);
@@ -85,12 +89,13 @@ function getDateRange(rangeKey: RangeKey) {
     start.setDate(end.getDate() - 6);
   }
 
-  const toDate = (value: Date) => value.toISOString().slice(0, 10);
+  const toDate = (value: Date) =>
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
 
   return {
     start_date: toDate(start),
     end_date: toDate(end),
-    granularity: rangeKey === '24h' ? ('hour' as const) : ('day' as const),
+    granularity: rangeKey === 'today' || rangeKey === '24h' ? ('hour' as const) : ('day' as const),
   };
 }
 
@@ -117,7 +122,7 @@ function formatTokenDisplay(value?: number) {
 }
 
 function getPointLabel(value: string, rangeKey: RangeKey) {
-  if (rangeKey === '24h') {
+  if (rangeKey === 'today' || rangeKey === '24h') {
     return value.slice(11, 13);
   }
 
@@ -257,6 +262,7 @@ export default function MonitorScreen() {
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
   const selectedOutputTotal = trend.reduce((sum, item) => sum + item.output_tokens, 0);
   const rangeTitle = RANGE_TITLE_MAP[rangeKey];
+  const usesTodayFallback = rangeKey === 'today' || rangeKey === '24h';
   const isLoading = statsQuery.isLoading || settingsQuery.isLoading || accountsQuery.isLoading;
   const hasError = Boolean(statsQuery.error || settingsQuery.error || accountsQuery.error || trendQuery.error || modelsQuery.error);
 
@@ -342,13 +348,13 @@ export default function MonitorScreen() {
             <View style={{ flexDirection: 'row', gap: 12 }}>
               <StatCard
                 title={`${rangeTitle} Token`}
-                value={formatTokenDisplay(rangeKey === '24h' ? selectedTokenTotal || stats?.today_tokens : selectedTokenTotal)}
-                detail={`输出 ${formatTokenDisplay(rangeKey === '24h' ? selectedOutputTotal || stats?.today_output_tokens : selectedOutputTotal)}`}
+                value={formatTokenDisplay(usesTodayFallback ? selectedTokenTotal || stats?.today_tokens : selectedTokenTotal)}
+                detail={`输出 ${formatTokenDisplay(usesTodayFallback ? selectedOutputTotal || stats?.today_output_tokens : selectedOutputTotal)}`}
                 icon={Zap}
               />
               <StatCard
                 title={`${rangeTitle} 成本`}
-                value={formatMoney(rangeKey === '24h' ? selectedCostTotal || stats?.today_cost : selectedCostTotal)}
+                value={formatMoney(usesTodayFallback ? selectedCostTotal || stats?.today_cost : selectedCostTotal)}
                 detail={`TPM ${formatNumber(stats?.tpm)}`}
                 icon={CircleDollarSign}
               />
