@@ -1,11 +1,13 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { ArrowDownUp, Plus, Search } from 'lucide-react-native';
+import { Activity, ArrowDownUp, CircleDollarSign, KeyRound, Plus, Search, UserRound, UsersRound } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
+import { IconBadge } from '@/src/components/icon-badge';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
 import { queryClient } from '@/src/lib/query-client';
 import { useAppTheme } from '@/src/lib/theme';
@@ -90,14 +92,27 @@ function getErrorMessage(error: unknown) {
   return '当前无法加载页面数据，请检查服务地址、Token 和网络。';
 }
 
-function MetricTile({ title, value, tone = 'default' }: { title: string; value: string; tone?: 'default' | 'accent' }) {
+function MetricTile({
+  title,
+  value,
+  icon,
+  tone = 'default',
+}: {
+  title: string;
+  value: string;
+  icon: LucideIcon;
+  tone?: 'default' | 'accent';
+}) {
   const colors = useAppTheme();
   const backgroundColor = tone === 'accent' ? colors.accentBg : colors.mutedCard;
   const valueColor = tone === 'accent' ? colors.accentText : colors.text;
 
   return (
     <View style={{ flex: 1, minWidth: 0, backgroundColor, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 12 }}>
-      <Text style={{ fontSize: 11, color: colors.subtext }}>{title}</Text>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>
+        <IconBadge icon={icon} tone={tone === 'accent' ? 'accent' : 'muted'} containerSize={24} size={12} />
+        <Text style={{ flex: 1, fontSize: 11, color: colors.subtext }}>{title}</Text>
+      </View>
       <Text numberOfLines={1} style={{ marginTop: 6, fontSize: 16, fontWeight: '800', color: valueColor }}>
         {value}
       </Text>
@@ -117,6 +132,7 @@ function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <IconBadge icon={UserRound} containerSize={36} size={17} />
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>{user.email}</Text>
           <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>最近使用 {formatActivityTime(user.last_used_at || user.updated_at || user.created_at)}</Text>
@@ -127,9 +143,9 @@ function UserCard({ user, usage }: { user: AdminUser; usage?: UsageStats }) {
       </View>
 
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-        <MetricTile title="消费" value={formatCost(totalCost)} tone="accent" />
-        <MetricTile title="总 Token" value={formatTokenValue(totalTokens)} />
-        <MetricTile title="总请求" value={formatCompactNumber(totalRequests)} />
+        <MetricTile title="消费" value={formatCost(totalCost)} icon={CircleDollarSign} tone="accent" />
+        <MetricTile title="总 Token" value={formatTokenValue(totalTokens)} icon={KeyRound} />
+        <MetricTile title="总请求" value={formatCompactNumber(totalRequests)} icon={Activity} />
       </View>
     </View>
   );
@@ -180,9 +196,12 @@ export default function UsersScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
       <View style={{ flex: 1, paddingHorizontal: 16, paddingTop: 14 }}>
         <View style={{ marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>用户</Text>
-            <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>查看用户列表并进入详情页管理账号。</Text>
+          <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>
+            <IconBadge icon={UsersRound} containerSize={44} size={21} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>用户</Text>
+              <Text style={{ marginTop: 4, fontSize: 12, color: colors.subtext }}>查看用户列表并进入详情页管理账号。</Text>
+            </View>
           </View>
           <Pressable
             onPress={() => router.push('/users/create-user')}

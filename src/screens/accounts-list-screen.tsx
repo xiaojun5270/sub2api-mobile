@@ -307,6 +307,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     <ScreenShell
       title="账号清单"
       subtitle="查看名称、平台&类型、请求次数、消费金额、token消耗，并支持筛选与排序。"
+      icon={KeyRound}
       titleAside={(
         <Text style={{ color: colors.subtext, fontSize: 11 }}>更接近网页后台的账号视图。</Text>
       )}

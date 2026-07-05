@@ -8,33 +8,48 @@ import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admi
 const { useSnapshot } = require('valtio/react');
 
 function NativeIosTabs() {
-  const adaptiveGlassColor = DynamicColorIOS({
-    dark: 'white',
-    light: 'black',
+  const activeColor = DynamicColorIOS({
+    dark: '#64d2ff',
+    light: '#007aff',
+  });
+  const inactiveColor = DynamicColorIOS({
+    dark: 'rgba(235,235,245,0.58)',
+    light: 'rgba(60,60,67,0.58)',
   });
 
   return (
     <NativeTabs
+      iconColor={{
+        default: inactiveColor,
+        selected: activeColor,
+      }}
       labelStyle={{
-        color: adaptiveGlassColor,
-        fontSize: 12,
-        fontWeight: '600',
+        default: {
+          color: inactiveColor,
+          fontSize: 12,
+          fontWeight: '500',
+        },
+        selected: {
+          color: activeColor,
+          fontSize: 12,
+          fontWeight: '700',
+        },
       }}
       minimizeBehavior="automatic"
-      tintColor={adaptiveGlassColor}
+      tintColor={activeColor}
     >
       <NativeTabs.Trigger name="index" hidden />
       <NativeTabs.Trigger name="monitor">
-        <Icon sf="chart.xyaxis.line" selectedColor={adaptiveGlassColor} />
-        <Label>概览</Label>
+        <Icon sf="chart.xyaxis.line" selectedColor={activeColor} />
+        <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>概览</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="users">
-        <Icon sf={{ default: 'person.2', selected: 'person.2.fill' }} selectedColor={adaptiveGlassColor} />
-        <Label>用户</Label>
+        <Icon sf={{ default: 'person.2', selected: 'person.2.fill' }} selectedColor={activeColor} />
+        <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>用户</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
-        <Icon sf="server.rack" selectedColor={adaptiveGlassColor} />
-        <Label>服务器</Label>
+        <Icon sf="server.rack" selectedColor={activeColor} />
+        <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>服务器</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="groups" hidden />
       <NativeTabs.Trigger name="accounts" hidden />
@@ -48,8 +63,14 @@ function FallbackBottomTabs({ isDark }: { isDark: boolean }) {
       initialRouteName="monitor"
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: '#3578e5',
-        tabBarInactiveTintColor: isDark ? '#dbeafe' : '#111827',
+        tabBarActiveBackgroundColor: isDark ? 'rgba(14,165,233,0.14)' : 'rgba(14,165,233,0.11)',
+        tabBarActiveTintColor: isDark ? '#67e8f9' : '#0284c7',
+        tabBarInactiveTintColor: isDark ? '#94a3b8' : '#64748b',
+        tabBarItemStyle: {
+          borderRadius: 22,
+          marginHorizontal: 5,
+          marginVertical: 7,
+        },
         tabBarStyle: {
           position: 'absolute',
           left: 18,

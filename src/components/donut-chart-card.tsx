@@ -1,6 +1,8 @@
+import type { LucideIcon } from 'lucide-react-native';
 import { Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { IconBadge } from '@/src/components/icon-badge';
 import { useAppTheme } from '@/src/lib/theme';
 
 type DonutSegment = {
@@ -15,6 +17,7 @@ type DonutChartCardProps = {
   segments: DonutSegment[];
   centerLabel: string;
   centerValue: string;
+  icon?: LucideIcon;
 };
 
 export function DonutChartCard({
@@ -23,6 +26,7 @@ export function DonutChartCard({
   segments,
   centerLabel,
   centerValue,
+  icon,
 }: DonutChartCardProps) {
   const colors = useAppTheme();
   const total = Math.max(
@@ -38,8 +42,13 @@ export function DonutChartCard({
 
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
-      <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
-      <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
+        {icon ? <IconBadge icon={icon} containerSize={34} size={16} /> : null}
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
+          <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
+        </View>
+      </View>
 
       <View className="mt-4 items-center justify-center">
         <View className="items-center justify-center">

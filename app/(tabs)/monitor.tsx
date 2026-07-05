@@ -1,13 +1,26 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
+import {
+  Activity,
+  BarChart3,
+  CircleDollarSign,
+  DatabaseZap,
+  LayoutDashboard,
+  PieChart,
+  ShieldCheck,
+  TrendingUp,
+  Zap,
+} from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BarChartCard } from '@/src/components/bar-chart-card';
-import { formatTokenValue } from '@/src/lib/formatters';
 import { DonutChartCard } from '@/src/components/donut-chart-card';
+import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import { getAdminSettings, getDashboardModels, getDashboardStats, getDashboardTrend, listAccounts } from '@/src/services/admin';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
@@ -128,15 +141,30 @@ function getErrorMessage(error: unknown) {
   return '当前无法加载概览数据，请检查服务地址、Token 和网络。';
 }
 
-function Section({ title, subtitle, children, right }: { title: string; subtitle?: string; children: React.ReactNode; right?: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  children,
+  right,
+  icon,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  icon?: LucideIcon;
+}) {
   const colors = useAppTheme();
 
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>{title}</Text>
-          {subtitle ? <Text style={{ marginTop: 6, fontSize: 12, color: colors.subtext }}>{subtitle}</Text> : null}
+        <View style={{ flex: 1, flexDirection: 'row', gap: 10 }}>
+          {icon ? <IconBadge icon={icon} containerSize={36} size={17} /> : null}
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>{title}</Text>
+            {subtitle ? <Text style={{ marginTop: 6, fontSize: 12, color: colors.subtext }}>{subtitle}</Text> : null}
+          </View>
         </View>
         {right}
       </View>
@@ -145,12 +173,15 @@ function Section({ title, subtitle, children, right }: { title: string; subtitle
   );
 }
 
-function StatCard({ title, value, detail }: { title: string; value: string; detail?: string }) {
+function StatCard({ title, value, detail, icon }: { title: string; value: string; detail?: string; icon: LucideIcon }) {
   const colors = useAppTheme();
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.card, borderColor: colors.border, borderRadius: 16, borderWidth: 1, padding: 14 }}>
-      <Text style={{ fontSize: 12, color: colors.subtext }}>{title}</Text>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
+        <IconBadge icon={icon} containerSize={30} size={15} />
+        <Text style={{ flex: 1, fontSize: 12, color: colors.subtext }}>{title}</Text>
+      </View>
       <Text style={{ marginTop: 8, fontSize: 24, fontWeight: '700', color: colors.text }}>{value}</Text>
       {detail ? <Text style={{ marginTop: 6, fontSize: 12, color: colors.subtext }}>{detail}</Text> : null}
     </View>
@@ -255,9 +286,12 @@ export default function MonitorScreen() {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refetchAll()} tintColor={colors.primary} />}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>概览</Text>
-            <Text style={{ marginTop: 6, fontSize: 13, color: colors.subtext }}>{siteName} 的当前运行状态。</Text>
+          <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>
+            <IconBadge icon={LayoutDashboard} containerSize={44} size={21} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>概览</Text>
+              <Text style={{ marginTop: 6, fontSize: 13, color: colors.subtext }}>{siteName} 的当前运行状态。</Text>
+            </View>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -279,18 +313,18 @@ export default function MonitorScreen() {
         </View>
 
         {!hasAccount ? (
-          <Section title="未连接服务器" subtitle="需要先配置连接">
+          <Section title="未连接服务器" subtitle="需要先配置连接" icon={DatabaseZap}>
             <Text style={{ fontSize: 14, lineHeight: 22, color: colors.subtext }}>请先前往“服务器”页填写服务地址和 Admin Token，再返回查看概览数据。</Text>
             <Pressable style={{ marginTop: 14, alignSelf: 'flex-start', backgroundColor: colors.primary, borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12 }} onPress={() => router.push('/settings')}>
               <Text style={{ color: colors.primaryText, fontSize: 13, fontWeight: '700' }}>去配置服务器</Text>
             </Pressable>
           </Section>
         ) : isLoading ? (
-          <Section title="正在加载概览" subtitle="请稍候">
+          <Section title="正在加载概览" subtitle="请稍候" icon={Activity}>
             <Text style={{ fontSize: 14, lineHeight: 22, color: colors.subtext }}>已连接服务器，正在拉取概览、模型和账号状态数据。</Text>
           </Section>
         ) : hasError ? (
-          <Section title="加载失败" subtitle="请检查连接配置">
+          <Section title="加载失败" subtitle="请检查连接配置" icon={Activity}>
             <View style={{ borderRadius: 14, backgroundColor: colors.dangerBg, paddingHorizontal: 14, paddingVertical: 12 }}>
               <Text style={{ color: colors.danger, fontSize: 14, lineHeight: 20 }}>{errorMessage}</Text>
             </View>
@@ -310,16 +344,19 @@ export default function MonitorScreen() {
                 title={`${rangeTitle} Token`}
                 value={formatTokenDisplay(rangeKey === '24h' ? selectedTokenTotal || stats?.today_tokens : selectedTokenTotal)}
                 detail={`输出 ${formatTokenDisplay(rangeKey === '24h' ? selectedOutputTotal || stats?.today_output_tokens : selectedOutputTotal)}`}
+                icon={Zap}
               />
               <StatCard
                 title={`${rangeTitle} 成本`}
                 value={formatMoney(rangeKey === '24h' ? selectedCostTotal || stats?.today_cost : selectedCostTotal)}
                 detail={`TPM ${formatNumber(stats?.tpm)}`}
+                icon={CircleDollarSign}
               />
             </View>
             <Section
               title="账号概览"
               subtitle="总数、健康、异常和限流状态一览"
+              icon={ShieldCheck}
               right={(
                 <Pressable
                   style={{ alignSelf: 'flex-start', backgroundColor: colors.mutedCard, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 }}
@@ -353,20 +390,21 @@ export default function MonitorScreen() {
             </Section>
 
             {throughputPoints.length > 1 ? (
-              <LineTrendChart title="Token 吞吐" subtitle="当前时间范围内的 Token 变化趋势" points={throughputPoints} color="#f97316" formatValue={formatTokenDisplay} />
+              <LineTrendChart title="Token 吞吐" subtitle="当前时间范围内的 Token 变化趋势" points={throughputPoints} color="#f97316" icon={TrendingUp} formatValue={formatTokenDisplay} />
             ) : null}
 
             {requestPoints.length > 1 ? (
-              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color="#0f766e" formatValue={formatCompactNumber} />
+              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color="#0f766e" icon={Activity} formatValue={formatCompactNumber} />
             ) : null}
 
             {costPoints.length > 1 ? (
-              <LineTrendChart title="成本趋势" subtitle="当前时间范围内的成本变化趋势" points={costPoints} color="#7c3aed" formatValue={formatMoney} />
+              <LineTrendChart title="成本趋势" subtitle="当前时间范围内的成本变化趋势" points={costPoints} color="#7c3aed" icon={CircleDollarSign} formatValue={formatMoney} />
             ) : null}
 
             <BarChartCard
               title="Token 结构"
               subtitle="输入、输出、缓存读取占比"
+              icon={BarChart3}
               items={[
                 { label: '输入 Token', value: totalInputTokens, color: '#0f766e', hint: '请求进入模型前消耗的 token。' },
                 { label: '输出 Token', value: totalOutputTokens, color: '#f59e0b', hint: '模型返回内容消耗的 token。' },
@@ -380,6 +418,7 @@ export default function MonitorScreen() {
               subtitle="健康、繁忙、限流、异常分布"
               centerLabel="总账号"
               centerValue={formatNumber(totalAccounts)}
+              icon={PieChart}
               segments={[
                 { label: '健康', value: healthyAccounts, color: '#0f766e' },
                 { label: '繁忙', value: currentPageBusyAccounts, color: '#f59e0b' },
@@ -391,6 +430,7 @@ export default function MonitorScreen() {
             <BarChartCard
               title="热点模型"
               subtitle="当前时间范围内最活跃的模型"
+              icon={DatabaseZap}
               items={topModels.map((model) => ({
                 label: model.model,
                 value: model.total_tokens,
@@ -400,7 +440,7 @@ export default function MonitorScreen() {
               formatValue={formatCompactNumber}
             />
 
-            <Section title="趋势摘要" subtitle="最近几个统计点的请求、Token 和成本变化">
+            <Section title="趋势摘要" subtitle="最近几个统计点的请求、Token 和成本变化" icon={TrendingUp}>
               {latestTrendPoints.length === 0 ? (
                 <Text style={{ fontSize: 14, color: colors.subtext }}>当前时间范围没有趋势数据。</Text>
               ) : (

@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
-import { CheckCircle2, Eye, EyeOff, Plus, Server, Trash2 } from 'lucide-react-native';
+import { CheckCircle2, Eye, EyeOff, KeyRound, Link2, Plus, Server, ServerCog, Trash2 } from 'lucide-react-native';
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useState } from 'react';
 import { z } from 'zod';
 
 import { getAdminSettings, getDashboardStats } from '@/src/services/admin';
+import { IconBadge } from '@/src/components/icon-badge';
 import { queryClient } from '@/src/lib/query-client';
 import { useAppTheme } from '@/src/lib/theme';
 import { adminConfigState, removeAdminAccount, saveAdminConfig, switchAdminAccount, type AdminAccountProfile } from '@/src/store/admin-config';
@@ -71,9 +72,7 @@ function ServerCard({
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: active ? colors.iconSoftBg : colors.mutedCard, alignItems: 'center', justifyContent: 'center' }}>
-              <Server color={active ? colors.success : colors.subtext} size={18} />
-            </View>
+            <IconBadge icon={Server} tone={active ? 'success' : 'muted'} containerSize={36} size={17} />
             <Text style={{ flex: 1, fontSize: 16, fontWeight: '700', color: colors.text }}>{account.label}</Text>
           </View>
           <Text style={{ marginTop: 6, fontSize: 13, lineHeight: 20, color: colors.subtext }}>{account.baseUrl}</Text>
@@ -180,9 +179,12 @@ export default function SettingsScreen() {
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void handleRefresh()} tintColor={colors.primary} />}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-          <View style={{ flex: 1 }}>
-            <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>服务器</Text>
-            <Text style={{ marginTop: 6, fontSize: 13, color: colors.subtext }}>选择当前管理的服务器，或添加新的服务器。</Text>
+          <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>
+            <IconBadge icon={ServerCog} containerSize={44} size={21} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 28, fontWeight: '700', color: colors.text }}>服务器</Text>
+              <Text style={{ marginTop: 6, fontSize: 13, color: colors.subtext }}>选择当前管理的服务器，或添加新的服务器。</Text>
+            </View>
           </View>
           <Pressable
             onPress={() => {
@@ -197,11 +199,17 @@ export default function SettingsScreen() {
         </View>
 
         {showForm ? (
-          <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 16, gap: 14 }}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>添加服务器</Text>
+          <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16, gap: 14 }}>
+            <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
+              <IconBadge icon={ServerCog} containerSize={36} size={17} />
+              <Text style={{ fontSize: 18, fontWeight: '700', color: colors.text }}>添加服务器</Text>
+            </View>
 
             <View>
-              <Text style={{ marginBottom: 8, fontSize: 12, color: colors.subtext }}>服务器地址</Text>
+              <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                <Link2 color={colors.subtext} size={14} />
+                <Text style={{ fontSize: 12, color: colors.subtext }}>服务器地址</Text>
+              </View>
               <Controller
                 control={control}
                 name="baseUrl"
@@ -220,7 +228,10 @@ export default function SettingsScreen() {
             </View>
 
             <View>
-              <Text style={{ marginBottom: 8, fontSize: 12, color: colors.subtext }}>Admin Key</Text>
+              <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                <KeyRound color={colors.subtext} size={14} />
+                <Text style={{ fontSize: 12, color: colors.subtext }}>Admin Key</Text>
+              </View>
               <Controller
                 control={control}
                 name="adminApiKey"
@@ -302,8 +313,11 @@ export default function SettingsScreen() {
           ))}
 
           {config.accounts.length === 0 ? (
-            <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 18 }}>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>还没有服务器</Text>
+            <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 18 }}>
+              <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
+                <IconBadge icon={Server} tone="muted" containerSize={36} size={17} />
+                <Text style={{ flex: 1, fontSize: 15, fontWeight: '700', color: colors.text }}>还没有服务器</Text>
+              </View>
               <Text style={{ marginTop: 8, fontSize: 13, lineHeight: 21, color: colors.subtext }}>点击右上角 + 添加服务器，保存成功后会自动切换并进入概览。</Text>
             </View>
           ) : null}

@@ -65,6 +65,7 @@ export default function GroupsScreen() {
     <ScreenShell
       title="分组管理"
       subtitle=""
+      icon={FolderKanban}
       titleAside={<Text style={{ color: colors.subtext, fontSize: 11 }}>查看分组与调度归属。</Text>}
       variant="minimal"
       scroll={false}

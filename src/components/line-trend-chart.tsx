@@ -1,7 +1,9 @@
+import type { LucideIcon } from 'lucide-react-native';
 import { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg';
 
+import { IconBadge } from '@/src/components/icon-badge';
 import { useAppTheme } from '@/src/lib/theme';
 
 type Point = {
@@ -14,6 +16,7 @@ type LineTrendChartProps = {
   color?: string;
   title: string;
   subtitle: string;
+  icon?: LucideIcon;
   formatValue?: (value: number) => string;
   compact?: boolean;
 };
@@ -23,6 +26,7 @@ export function LineTrendChart({
   color = '#0f766e',
   title,
   subtitle,
+  icon,
   formatValue = (value) => `${value}`,
   compact = false,
 }: LineTrendChartProps) {
@@ -54,9 +58,14 @@ export function LineTrendChart({
 
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
-      <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
-      <Text style={{ color: colors.text, fontSize: compact ? 22 : 28, fontWeight: '700', marginTop: 4 }}>{formatValue(latest)}</Text>
-      <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
+        {icon ? <IconBadge icon={icon} containerSize={34} size={16} /> : null}
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: colors.subtext, fontSize: 12, letterSpacing: 1.6, textTransform: 'uppercase' }}>{title}</Text>
+          <Text style={{ color: colors.text, fontSize: compact ? 22 : 28, fontWeight: '700', marginTop: 4 }}>{formatValue(latest)}</Text>
+          <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>{subtitle}</Text>
+        </View>
+      </View>
 
       <View style={{ backgroundColor: colors.chartPanel, borderRadius: 14, marginTop: compact ? 12 : 16, overflow: 'hidden', padding: 12 }}>
         <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
