@@ -127,7 +127,54 @@ function textOrDash(...values: unknown[]) {
 function nestedRecord(source: unknown, key: string) {
   if (!isRecord(source)) return undefined;
   const value = source[key];
+  if (typeof value === 'string' && value.trim().startsWith('{')) {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   return isRecord(value) ? value : undefined;
+}
+
+function nestedRecordFrom(source: unknown, keys: string[]) {
+  for (const key of keys) {
+    const value = nestedRecord(source, key);
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
+function firstTextFromSources(sources: unknown[], keys: string[]) {
+  for (const source of sources) {
+    const value = firstTextValue(source, keys);
+    if (value) return value;
+  }
+
+  return undefined;
+}
+
+function firstNumberFromSources(sources: unknown[], keys: string[]) {
+  for (const source of sources) {
+    const value = firstNumberValue(source, keys);
+    if (value !== undefined) return value;
+  }
+
+  return undefined;
+}
+
+function isHttpAccessLog(item: OpsRecord) {
+  const extra = nestedRecord(item, 'extra');
+  const sources = [item, extra];
+  const component = firstTextFromSources(sources, ['component'])?.toLowerCase();
+  const message = firstTextFromSources(sources, ['message'])?.toLowerCase();
+  const method = firstTextFromSources(sources, ['method', 'request_method', 'requestMethod', 'http_method', 'httpMethod']);
+  const path = firstTextFromSources(sources, ['path', 'request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint', 'endpoint', 'url', 'route']);
+
+  return component === 'http.access' || message === 'http request completed' || Boolean(method && path);
 }
 
 function formatKnownTime(...values: unknown[]) {
@@ -383,13 +430,17 @@ export default function OpsScreen() {
   const tokenStats = tokenStatsQuery.data || snapshot?.openai_token_stats;
   const runtimeAlert = runtimeAlertQuery.data;
   const logsHealth = logsHealthQuery.data;
-  const recentRequests = getItems(requestsQuery.data).slice(0, 8);
+  const rawRecentRequests = getItems(requestsQuery.data).slice(0, 8);
   const requestErrorItems = getItems(requestErrorsQuery.data).slice(0, 8);
   const genericErrorItems = getItems(genericErrorsQuery.data).slice(0, 8);
   const upstreamErrorItems = getItems(upstreamErrorsQuery.data).slice(0, 8);
   const requestErrorSource: 'request' | 'generic' | 'upstream' = requestErrorItems.length > 0 ? 'request' : genericErrorItems.length > 0 ? 'generic' : 'upstream';
   const requestErrors = requestErrorItems.length > 0 ? requestErrorItems : genericErrorItems.length > 0 ? genericErrorItems : upstreamErrorItems;
-  const systemLogs = getItems(systemLogsQuery.data).slice(0, 8);
+  const rawSystemLogs = getItems(systemLogsQuery.data);
+  const systemLogs = rawSystemLogs.slice(0, 8);
+  const accessLogRequests = rawSystemLogs.filter(isHttpAccessLog).slice(0, 8);
+  const recentRequests = rawRecentRequests.length > 0 ? rawRecentRequests : accessLogRequests;
+  const recentRequestsLoading = requestsQuery.isLoading || (rawRecentRequests.length === 0 && systemLogsQuery.isLoading);
   const alertEvents = getItems(alertEventsQuery.data).slice(0, 8);
   const overviewRecord = isRecord(overview) ? overview : undefined;
   const qpsMetrics = nestedRecord(overview, 'qps') ?? nestedRecord(realtime, 'qps');
@@ -678,33 +729,43 @@ export default function OpsScreen() {
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="最近请求" icon={Activity} />
           <View style={{ gap: 10, marginTop: 12 }}>
-            {requestsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载最近请求...</Text> : null}
+            {recentRequestsLoading ? <Text style={{ color: colors.subtext }}>正在加载最近请求...</Text> : null}
             {recentRequests.map((item, index) => {
               const id = item.id ?? index;
               const extra = nestedRecord(item, 'extra');
-              const method = textOrDash(item.method, firstTextValue(item, ['request_method', 'requestMethod', 'http_method', 'httpMethod']), firstTextValue(extra, ['method', 'http_method', 'httpMethod']));
-              const path = textOrDash(item.path, firstTextValue(item, ['request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint', 'url', 'endpoint', 'route']), firstTextValue(extra, ['path', 'endpoint', 'route']));
-              const status = textOrDash(item.status, firstTextValue(item, ['status_code', 'statusCode', 'code']), firstTextValue(extra, ['status_code', 'statusCode']));
-              const createdAt = textOrDash(item.created_at, firstTextValue(item, ['createdAt', 'completed_at', 'completedAt', 'timestamp', 'time']), firstTextValue(extra, ['completed_at', 'completedAt']));
-              const latency = firstNumber(item, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs', 'elapsed_ms', 'elapsedMs']) || firstNumber(extra, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs']);
+              const metadata = nestedRecordFrom(item, ['metadata', 'meta']);
+              const request = nestedRecordFrom(item, ['request', 'request_info', 'requestInfo']);
+              const response = nestedRecordFrom(item, ['response', 'response_info', 'responseInfo']);
+              const sources = [item, extra, metadata, request, response];
+              const requestId = textOrDash(firstTextFromSources(sources, ['request_id', 'requestId', 'client_request_id', 'clientRequestId', 'trace_id', 'traceId']), item.id);
+              const method = textOrDash(firstTextFromSources(sources, ['method', 'request_method', 'requestMethod', 'http_method', 'httpMethod']));
+              const path = textOrDash(firstTextFromSources(sources, ['path', 'request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint', 'endpoint', 'url', 'route', 'upstream_endpoint', 'upstreamEndpoint']));
+              const status = textOrDash(firstTextFromSources(sources, ['status', 'status_code', 'statusCode', 'http_status', 'httpStatus', 'code', 'response_status', 'responseStatus', 'upstream_status_code', 'upstreamStatusCode']));
+              const createdAt = textOrDash(firstTextFromSources(sources, ['created_at', 'createdAt', 'completed_at', 'completedAt', 'timestamp', 'time']));
+              const latency = firstNumberFromSources(sources, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs', 'response_latency_ms', 'responseLatencyMs', 'elapsed_ms', 'elapsedMs', 'avg_duration_ms', 'avgDurationMs']) ?? 0;
+              const platform = textOrDash(firstTextFromSources(sources, ['platform', 'provider']));
+              const model = textOrDash(firstTextFromSources(sources, ['model', 'model_name', 'modelName', 'requested_model', 'requestedModel', 'upstream_model', 'upstreamModel']));
+              const user = textOrDash(firstTextFromSources(sources, ['user_email', 'userEmail', 'email', 'user_id', 'userId']));
+              const account = textOrDash(firstTextFromSources(sources, ['account_name', 'accountName', 'account_id', 'accountId']));
+              const requestTitle = method !== '--' && path !== '--' ? `${method} ${path}` : path !== '--' ? path : requestId !== '--' ? `请求 ${requestId}` : model;
 
               return (
                 <View key={`${id}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{method} {path}</Text>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{requestTitle}</Text>
                   <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                    {textOrDash(firstTextValue(item, ['model', 'model_name', 'modelName']), firstTextValue(extra, ['model']))} · {formatKnownTime(createdAt)} · {formatLatency(latency)}
+                    {model} · {formatKnownTime(createdAt)} · {formatLatency(latency)}
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                    <InfoTile label="请求 ID" value={`${item.id ?? '--'}`} />
-                    <InfoTile label="状态" value={status} />
-                    <InfoTile label="平台" value={textOrDash(item.platform, firstTextValue(extra, ['platform']))} />
-                    <InfoTile label="用户" value={textOrDash(item.user_email, firstTextValue(item, ['userEmail', 'email', 'user_id', 'userId']))} />
-                    <InfoTile label="账号" value={textOrDash(item.account_name, firstTextValue(item, ['accountName', 'account_id', 'accountId']), firstTextValue(extra, ['account_id', 'accountId']))} />
+                    <InfoTile label="请求 ID" value={requestId} />
+                    <InfoTile label="状态" value={status} tone={status.startsWith('5') || status.startsWith('4') ? 'danger' : status.startsWith('2') ? 'success' : 'default'} />
+                    <InfoTile label="平台" value={platform} />
+                    <InfoTile label="用户" value={user} />
+                    <InfoTile label="账号" value={account} />
                   </View>
                 </View>
               );
             })}
-            {!requestsQuery.isLoading && recentRequests.length === 0 ? <Text style={{ color: colors.subtext }}>暂无最近请求。</Text> : null}
+            {!recentRequestsLoading && recentRequests.length === 0 ? <Text style={{ color: colors.subtext }}>暂无最近请求。</Text> : null}
           </View>
         </View>
 

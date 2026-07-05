@@ -263,19 +263,19 @@ function isDeletedApiKey(item: AdminApiKey) {
 
 function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?: AdminUser): AdminApiKey {
   const source = raw as Record<string, unknown>;
+  const rawUser = isRecord(source.user) ? source.user : undefined;
+  const rawGroup = isRecord(source.group) ? source.group : undefined;
   const id = firstNumberField(source, ['id', 'api_key_id', 'apiKeyId', 'key_id', 'keyId']) ?? 0;
-  const userId = firstNumberField(source, ['user_id', 'userId', 'owner_id', 'ownerId']) ?? owner?.id ?? 0;
-  const groupId = firstNumberField(source, ['group_id', 'groupId']);
-  const groupName = firstStringField(source, ['group_name', 'groupName']);
-  const userEmail = firstStringField(source, ['user_email', 'userEmail', 'email']) ?? owner?.email;
+  const userId = firstNumberField(source, ['user_id', 'userId', 'owner_id', 'ownerId']) ?? firstNumberField(rawUser, ['id', 'user_id', 'userId']) ?? owner?.id ?? 0;
+  const groupId = firstNumberField(source, ['group_id', 'groupId']) ?? firstNumberField(rawGroup, ['id', 'group_id', 'groupId']);
+  const groupName = firstStringField(source, ['group_name', 'groupName']) ?? firstStringField(rawGroup, ['name', 'group_name', 'groupName']);
+  const userEmail = firstStringField(source, ['user_email', 'userEmail', 'email']) ?? firstStringField(rawUser, ['email', 'user_email', 'userEmail']) ?? owner?.email;
   const key = firstStringField(source, ['key', 'custom_key', 'customKey', 'api_key', 'apiKey', 'key_value', 'keyValue', 'token', 'value']) ?? '';
   const name = firstStringField(source, ['name', 'label', 'title', 'remark', 'description']) || (key ? `Key ${key.slice(0, 8)}` : `Key #${id || '--'}`);
   const enabled = firstBooleanField(source, ['enabled', 'is_active', 'isActive', 'active']);
   const status = firstStringField(source, ['status', 'state']) || (enabled === false ? 'disabled' : 'active');
   const quota = firstNumberField(source, ['quota', 'quota_limit', 'quotaLimit', 'limit', 'total_quota']) ?? 0;
   const quotaUsed = firstNumberField(source, ['quota_used', 'quotaUsed', 'used_quota', 'usedQuota', 'usage', 'used']) ?? 0;
-  const rawUser = isRecord(source.user) ? source.user : undefined;
-  const rawGroup = isRecord(source.group) ? source.group : undefined;
   const group = (raw as AdminApiKey).group
     ?? (rawGroup as AdminGroup | undefined)
     ?? (groupName || groupId
@@ -328,6 +328,92 @@ function toNormalizedApiKeyPage(payload: unknown, preferredKeys: string[], searc
   const page = toPaginatedData<AdminApiKey>(payload, preferredKeys);
   const items = page.items
     .map((item) => normalizeAdminApiKey(item, owner))
+    .filter((item) => item.id || item.key)
+    .filter((item) => !isDeletedApiKey(item))
+    .filter((item) => keyMatchesSearch(item, search));
+
+  return {
+    ...page,
+    items,
+    total: items.length,
+    page_size: Math.max(page.page_size, items.length, 1),
+    pages: Math.max(Math.ceil(items.length / Math.max(page.page_size, 1)), 1),
+  };
+}
+
+function isSparseApiKey(item: AdminApiKey) {
+  return (
+    !item.key
+    || (!item.group_id && !item.group_name && !item.group)
+    || (!item.last_used_at && !item.created_at && !item.updated_at)
+    || item.rate_limit_5h === undefined
+    || item.usage_5h === undefined
+  );
+}
+
+function mergeAdminApiKey(base: AdminApiKey, detail: AdminApiKey) {
+  return normalizeAdminApiKey({
+    ...base,
+    ...detail,
+    user: detail.user ?? base.user,
+    group: detail.group ?? base.group,
+  });
+}
+
+async function getApiKeyDetail(apiKeyId: number) {
+  const paths = [`/api/v1/keys/${apiKeyId}`, `/api/v1/admin/api-keys/${apiKeyId}`];
+
+  for (const path of paths) {
+    try {
+      const payload = await adminFetch<unknown>(path);
+      const item = normalizeAdminApiKey(payload as AdminApiKey | Record<string, unknown>);
+      if (item.id || item.key) {
+        return item;
+      }
+    } catch {
+      // Try the next compatible detail endpoint.
+    }
+  }
+
+  return undefined;
+}
+
+async function getUserApiKeysForEnrichment(userId: number, cache: Map<number, Promise<AdminApiKey[]>>) {
+  const cached = cache.get(userId);
+  if (cached) return cached;
+
+  const request = adminFetch<unknown>(`/api/v1/admin/users/${userId}/api-keys`)
+    .then((payload) => toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys']).items)
+    .catch(() => [] as AdminApiKey[]);
+
+  cache.set(userId, request);
+
+  return request;
+}
+
+async function enrichApiKey(item: AdminApiKey, userKeyCache: Map<number, Promise<AdminApiKey[]>>) {
+  if (!isSparseApiKey(item)) return item;
+
+  const detail = item.id ? await getApiKeyDetail(item.id) : undefined;
+  if (detail) {
+    return mergeAdminApiKey(item, detail);
+  }
+
+  if (item.user_id) {
+    const userKeys = await getUserApiKeysForEnrichment(item.user_id, userKeyCache);
+    const userKey = userKeys.find((candidate) => candidate.id === item.id || (item.key && candidate.key === item.key));
+
+    if (userKey) {
+      return mergeAdminApiKey(item, userKey);
+    }
+  }
+
+  return item;
+}
+
+async function enrichApiKeyPage(page: PaginatedData<AdminApiKey>, search = '') {
+  const userKeyCache = new Map<number, Promise<AdminApiKey[]>>();
+  const items = (await Promise.all(page.items.map((item) => enrichApiKey(item, userKeyCache))))
     .filter((item) => item.id || item.key)
     .filter((item) => !isDeletedApiKey(item))
     .filter((item) => keyMatchesSearch(item, search));
@@ -443,7 +529,7 @@ export function getUserUsage(userId: number, period: 'day' | 'week' | 'month' = 
 
 export async function listUserApiKeys(userId: number) {
   const payload = await adminFetch<unknown>(`/api/v1/admin/users/${userId}/api-keys`);
-  return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys']);
+  return enrichApiKeyPage(toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys']));
 }
 
 export async function searchAdminApiKeys(search = '') {
@@ -457,14 +543,28 @@ export async function searchAdminApiKeys(search = '') {
       search: keyword,
     });
 
-    return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword);
+    return await enrichApiKeyPage(toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword), keyword);
   } catch (error) {
     primaryError = error;
   }
 
   try {
+    const payload = await adminFetchWithOptionalQuery<unknown>('/api/v1/admin/api-keys', {
+      page: 1,
+      page_size: 100,
+      search: keyword,
+    });
+
+    return await enrichApiKeyPage(toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword), keyword);
+  } catch (error) {
+    if (!primaryError) {
+      primaryError = error;
+    }
+  }
+
+  try {
     const payload = await adminFetch<unknown>('/api/v1/admin/usage/search-api-keys');
-    return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword);
+    return await enrichApiKeyPage(toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword), keyword);
   } catch (error) {
     if (!primaryError) {
       primaryError = error;

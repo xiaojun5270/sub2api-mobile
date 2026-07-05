@@ -8,6 +8,22 @@ const upstreamBaseUrl = (process.env.SUB2API_BASE_URL || '').trim().replace(/\/$
 const adminApiKey = (process.env.SUB2API_ADMIN_API_KEY || '').trim();
 const allowedOrigin = (process.env.ALLOW_ORIGIN || '*').trim();
 
+function isSuccessPayload(json) {
+  if (!json || typeof json !== 'object') {
+    return true;
+  }
+
+  if (typeof json.code === 'number') {
+    return json.code === 0 || (json.code >= 200 && json.code < 300);
+  }
+
+  if (typeof json.success === 'boolean') {
+    return json.success;
+  }
+
+  return true;
+}
+
 async function fetchAdminJson(path) {
   if (!upstreamBaseUrl) {
     throw new Error('SUB2API_BASE_URL_NOT_CONFIGURED');
@@ -25,11 +41,11 @@ async function fetchAdminJson(path) {
 
   const json = await response.json();
 
-  if (!response.ok || json.code !== 0) {
+  if (!response.ok || !isSuccessPayload(json)) {
     throw new Error(json.message || 'ADMIN_FETCH_FAILED');
   }
 
-  return json.data;
+  return json.data ?? json;
 }
 
 function redactAccountCredentials(payload) {
@@ -61,6 +77,68 @@ function redactAccountCredentials(payload) {
   };
 
   return walk(payload);
+}
+
+async function proxyUpstreamRequest(req, res, options = {}) {
+  if (!upstreamBaseUrl) {
+    res.status(500).json({ code: 500, message: 'SUB2API_BASE_URL_NOT_CONFIGURED' });
+    return;
+  }
+
+  if (!adminApiKey) {
+    res.status(500).json({ code: 500, message: 'SUB2API_ADMIN_API_KEY_NOT_CONFIGURED' });
+    return;
+  }
+
+  const upstreamUrl = new URL(`${upstreamBaseUrl}${req.originalUrl}`);
+  const headers = new Headers();
+
+  headers.set('x-api-key', adminApiKey);
+
+  const contentType = req.headers['content-type'];
+  if (contentType) {
+    headers.set('content-type', contentType);
+  }
+
+  const idempotencyKey = req.headers['idempotency-key'];
+  if (typeof idempotencyKey === 'string' && idempotencyKey) {
+    headers.set('Idempotency-Key', idempotencyKey);
+  }
+
+  const init = {
+    method: req.method,
+    headers,
+  };
+
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    init.body = JSON.stringify(req.body || {});
+  }
+
+  try {
+    const response = await fetch(upstreamUrl, init);
+    const upstreamContentType = response.headers.get('content-type');
+    const isJson = upstreamContentType?.includes('application/json');
+
+    let responseBody;
+    if (isJson) {
+      const json = await response.json();
+      responseBody = options.redactAccounts && req.path.startsWith('/accounts') ? redactAccountCredentials(json) : json;
+    } else {
+      responseBody = await response.text();
+    }
+
+    if (upstreamContentType) {
+      res.setHeader('content-type', upstreamContentType);
+    }
+
+    res.status(response.status).send(responseBody);
+  } catch (error) {
+    res.status(502).json({
+      code: 502,
+      message: 'UPSTREAM_REQUEST_FAILED',
+      error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
+    });
+  }
 }
 
 app.use(
@@ -116,7 +194,7 @@ app.get('/api/v1/keys', async (req, res) => {
 
     if (search) {
       items = items.filter((item) => {
-        const haystack = [item.name, item.key, item.user?.email, item.user?.username, item.group?.name]
+        const haystack = [item.name, item.key, item.user_email, item.user?.email, item.user?.username, item.group_name, item.group?.name]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -158,65 +236,11 @@ app.get('/api/v1/keys', async (req, res) => {
 });
 
 app.use('/api/v1/admin', async (req, res) => {
-  if (!upstreamBaseUrl) {
-    res.status(500).json({ code: 500, message: 'SUB2API_BASE_URL_NOT_CONFIGURED' });
-    return;
-  }
+  await proxyUpstreamRequest(req, res, { redactAccounts: true });
+});
 
-  if (!adminApiKey) {
-    res.status(500).json({ code: 500, message: 'SUB2API_ADMIN_API_KEY_NOT_CONFIGURED' });
-    return;
-  }
-
-  const upstreamUrl = new URL(`${upstreamBaseUrl}${req.originalUrl}`);
-  const headers = new Headers();
-
-  headers.set('x-api-key', adminApiKey);
-
-  const contentType = req.headers['content-type'];
-  if (contentType) {
-    headers.set('content-type', contentType);
-  }
-
-  const idempotencyKey = req.headers['idempotency-key'];
-  if (typeof idempotencyKey === 'string' && idempotencyKey) {
-    headers.set('Idempotency-Key', idempotencyKey);
-  }
-
-  const init = {
-    method: req.method,
-    headers,
-  };
-
-  if (!['GET', 'HEAD'].includes(req.method)) {
-    init.body = JSON.stringify(req.body || {});
-  }
-
-  try {
-    const response = await fetch(upstreamUrl, init);
-    const upstreamContentType = response.headers.get('content-type');
-    const isJson = upstreamContentType?.includes('application/json');
-
-    let responseBody;
-    if (isJson) {
-      const json = await response.json();
-      responseBody = req.path.startsWith('/accounts') ? redactAccountCredentials(json) : json;
-    } else {
-      responseBody = await response.text();
-    }
-
-    if (upstreamContentType) {
-      res.setHeader('content-type', upstreamContentType);
-    }
-
-    res.status(response.status).send(responseBody);
-  } catch (error) {
-    res.status(502).json({
-      code: 502,
-      message: 'UPSTREAM_REQUEST_FAILED',
-      error: error instanceof Error ? error.message : 'UNKNOWN_ERROR',
-    });
-  }
+app.use('/api/v1/usage', async (req, res) => {
+  await proxyUpstreamRequest(req, res);
 });
 
 app.listen(port, () => {
