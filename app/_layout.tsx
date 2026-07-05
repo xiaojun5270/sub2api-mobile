@@ -106,6 +106,45 @@ export default function RootLayout() {
                 headerShadowVisible: false,
               }}
             />
+            <Stack.Screen
+              name="accounts/[id]"
+              options={{
+                animation: 'slide_from_right',
+                presentation: 'card',
+                headerShown: true,
+                title: '账号详情',
+                headerBackTitle: '返回',
+                headerTintColor: colors.text,
+                headerStyle: { backgroundColor: colors.page },
+                headerShadowVisible: false,
+              }}
+            />
+            <Stack.Screen
+              name="api-keys/index"
+              options={{
+                animation: 'slide_from_right',
+                presentation: 'card',
+                headerShown: true,
+                title: 'API 密钥管理',
+                headerBackTitle: '返回',
+                headerTintColor: colors.text,
+                headerStyle: { backgroundColor: colors.page },
+                headerShadowVisible: false,
+              }}
+            />
+            <Stack.Screen
+              name="ops/index"
+              options={{
+                animation: 'slide_from_right',
+                presentation: 'card',
+                headerShown: true,
+                title: '运维监控',
+                headerBackTitle: '返回',
+                headerTintColor: colors.text,
+                headerStyle: { backgroundColor: colors.page },
+                headerShadowVisible: false,
+              }}
+            />
           </Stack>
         )}
       </QueryClientProvider>

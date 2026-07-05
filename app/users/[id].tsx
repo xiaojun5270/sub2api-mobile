@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -523,6 +523,13 @@ export default function UserDetailScreen() {
           </Section>
 
           <Section title="API Keys">
+            <Pressable
+              onPress={() => router.push('/api-keys')}
+              style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 12, marginBottom: 10, paddingVertical: 12 }}
+            >
+              <Text style={{ color: colors.primaryText, fontSize: 13, fontWeight: '800' }}>打开 API 密钥管理</Text>
+            </Pressable>
+
             <TextInput
               value={searchText}
               onChangeText={setSearchText}

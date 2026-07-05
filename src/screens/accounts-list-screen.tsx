@@ -1,7 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import { KeyRound, Search, ShieldCheck, ShieldOff } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import type { Edge } from 'react-native-safe-area-context';
 
 import { ListCard } from '@/src/components/list-card';
@@ -9,7 +10,7 @@ import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
-import { getAccountTodayStats, listAccounts, setAccountSchedulable, testAccount } from '@/src/services/admin';
+import { batchClearAccountErrors, batchRefreshAccounts, getAccountTodayStats, listAccounts, setAccountSchedulable, testAccount } from '@/src/services/admin';
 import type { AdminAccount } from '@/src/types/admin';
 
 type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error';
@@ -80,6 +81,16 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     mutationFn: (accountId: number) => testAccount(accountId),
   });
 
+  const batchRefreshMutation = useMutation({
+    mutationFn: (accountIds: number[]) => batchRefreshAccounts(accountIds),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  const batchClearErrorMutation = useMutation({
+    mutationFn: (accountIds: number[]) => batchClearAccountErrors(accountIds),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
   const items = accountsQuery.data?.items ?? [];
   const accountCostQueries = useQueries({
     queries: items.map((account) => ({
@@ -128,6 +139,28 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     return sorted;
   }, [filter, items, todayByAccountId, usageSort]);
   const errorMessage = accountsQuery.error instanceof Error ? accountsQuery.error.message : '';
+
+  function confirmBatch(action: 'refresh' | 'clear-error') {
+    const accountIds = filteredItems.map((item) => item.id);
+    if (accountIds.length === 0) return;
+
+    const title = action === 'refresh' ? '批量刷新账号' : '批量清除错误';
+    const message = `确认对当前筛选的 ${accountIds.length} 个账号执行该操作吗？`;
+
+    Alert.alert(title, message, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '确认',
+        onPress: () => {
+          if (action === 'refresh') {
+            batchRefreshMutation.mutate(accountIds);
+          } else {
+            batchClearErrorMutation.mutate(accountIds);
+          }
+        },
+      },
+    ]);
+  }
 
   const summary = useMemo(() => {
     const total = items.length;
@@ -189,10 +222,31 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               );
             })}
           </View>
+
+          <View className="mt-3 flex-row gap-2">
+            <Pressable
+              disabled={filteredItems.length === 0 || batchRefreshMutation.isPending}
+              onPress={() => confirmBatch('refresh')}
+              style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 999, flex: 1, opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
+            >
+              <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>
+                {batchRefreshMutation.isPending ? '刷新中...' : '批量刷新'}
+              </Text>
+            </Pressable>
+            <Pressable
+              disabled={filteredItems.length === 0 || batchClearErrorMutation.isPending}
+              onPress={() => confirmBatch('clear-error')}
+              style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flex: 1, opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
+            >
+              <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
+                {batchClearErrorMutation.isPending ? '清理中...' : '批量清错'}
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     ),
-    [colors, filter, summary.active, summary.errors, summary.paused, summary.total, usageSort]
+    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, filter, filteredItems, summary.active, summary.errors, summary.paused, summary.total, usageSort]
   );
 
   const renderItem = useCallback(
@@ -209,7 +263,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       const isTestingCurrent = testingAccountId === account.id && testMutation.isPending;
 
       return (
-        <View>
+        <Pressable onPress={() => router.push(`/accounts/${account.id}`)}>
           <ListCard
             title={account.name}
             meta={`${account.platform} · ${account.type}`}
@@ -292,7 +346,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               {testFeedback ? <Text style={{ color: colors.success, fontSize: 12 }}>测试结果：{testFeedback}</Text> : null}
             </View>
           </ListCard>
-        </View>
+        </Pressable>
       );
     },
     [colors, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId]

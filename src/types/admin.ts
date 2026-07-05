@@ -14,6 +14,9 @@ export type PaginatedData<T> = {
   pages: number;
 };
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonRecord = Record<string, JsonPrimitive | JsonPrimitive[] | undefined>;
+
 export type DashboardStats = {
   total_users: number;
   today_new_users: number;
@@ -151,6 +154,17 @@ export type AdminApiKey = {
   };
 };
 
+export type CreateApiKeyRequest = {
+  name: string;
+  quota?: number;
+  group_id?: number | null;
+  expires_at?: string | null;
+  status?: 'active' | 'disabled' | string;
+  [key: string]: JsonPrimitive | undefined;
+};
+
+export type UpdateApiKeyRequest = Partial<CreateApiKeyRequest>;
+
 export type BalanceOperation = 'set' | 'add' | 'subtract';
 
 export type AdminGroup = {
@@ -196,6 +210,7 @@ export type AdminAccount = {
   group_ids?: number[];
   groups?: AdminGroup[];
   extra?: Record<string, string | number | boolean | null>;
+  notes?: string | null;
 };
 
 export type AccountType = 'apikey' | 'oauth' | 'setup-token' | 'upstream';
@@ -214,6 +229,11 @@ export type CreateAccountRequest = {
   group_ids?: number[];
 };
 
+export type UpdateAccountRequest = Partial<CreateAccountRequest> & {
+  status?: string;
+  schedulable?: boolean;
+};
+
 export type CreateUserRequest = {
   email: string;
   password: string;
@@ -224,4 +244,62 @@ export type CreateUserRequest = {
   balance?: number;
   concurrency?: number;
   [key: string]: string | number | boolean | null | undefined;
+};
+
+export type OpsMetricPoint = {
+  date?: string;
+  time?: string;
+  label?: string;
+  value?: number;
+  count?: number;
+  requests?: number;
+  errors?: number;
+  latency_ms?: number;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
+export type OpsRecord = {
+  id?: number | string;
+  status?: string;
+  level?: string;
+  method?: string;
+  path?: string;
+  model?: string;
+  account_name?: string;
+  user_email?: string;
+  message?: string;
+  error_message?: string;
+  upstream_error?: string;
+  latency_ms?: number;
+  duration_ms?: number;
+  created_at?: string;
+  updated_at?: string;
+  resolved_at?: string | null;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
+export type OpsDashboardOverview = {
+  requests?: number;
+  total_requests?: number;
+  errors?: number;
+  error_count?: number;
+  error_rate?: number;
+  avg_latency_ms?: number;
+  p95_latency_ms?: number;
+  qps?: number;
+  rpm?: number;
+  active_accounts?: number;
+  alert_count?: number;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
+export type OpsDashboardSnapshot = {
+  overview?: OpsDashboardOverview;
+  realtime?: Record<string, unknown>;
+  error_trend?: OpsMetricPoint[];
+  throughput_trend?: OpsMetricPoint[];
+  latency_histogram?: OpsMetricPoint[];
+  error_distribution?: OpsMetricPoint[];
+  openai_token_stats?: Record<string, unknown>;
+  [key: string]: unknown;
 };

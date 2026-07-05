@@ -5,8 +5,10 @@ import {
   BarChart3,
   CircleDollarSign,
   DatabaseZap,
+  KeyRound,
   LayoutDashboard,
   PieChart,
+  ServerCog,
   ShieldCheck,
   TrendingUp,
   Zap,
@@ -359,6 +361,25 @@ export default function MonitorScreen() {
                 icon={CircleDollarSign}
               />
             </View>
+            <Section title="管理入口" subtitle="快速进入常用管理模块" icon={ServerCog}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {[
+                  { title: '账号', subtitle: '详情与异常处理', icon: ShieldCheck, href: '/accounts/overview' },
+                  { title: '密钥', subtitle: 'API Key 管理', icon: KeyRound, href: '/api-keys' },
+                  { title: '运维', subtitle: '日志与告警', icon: ServerCog, href: '/ops' },
+                ].map((item) => (
+                  <Pressable
+                    key={item.title}
+                    onPress={() => router.push(item.href)}
+                    style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minHeight: 82, padding: 12 }}
+                  >
+                    <IconBadge icon={item.icon} containerSize={28} size={14} />
+                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800', marginTop: 8 }}>{item.title}</Text>
+                    <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, marginTop: 4 }}>{item.subtitle}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </Section>
             <Section
               title="账号概览"
               subtitle="总数、健康、异常和限流状态一览"
