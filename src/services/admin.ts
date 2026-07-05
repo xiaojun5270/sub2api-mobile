@@ -38,6 +38,141 @@ function buildQuery(params: Record<string, string | number | boolean | null | un
   return value ? `?${value}` : '';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function firstNumberField(source: unknown, keys: string[]) {
+  if (!isRecord(source)) return undefined;
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+
+  return firstNumberField(source.data, keys);
+}
+
+function extractItems<T>(payload: unknown, preferredKeys: string[] = []): T[] {
+  if (Array.isArray(payload)) return payload as T[];
+  if (!isRecord(payload)) return [];
+
+  const keys = [
+    ...preferredKeys,
+    'items',
+    'data',
+    'list',
+    'records',
+    'results',
+    'rows',
+    'api_keys',
+    'apiKeys',
+    'keys',
+    'users',
+    'logs',
+    'errors',
+    'events',
+  ];
+
+  for (const key of keys) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value as T[];
+    if (isRecord(value)) {
+      const nested = extractItems<T>(value, preferredKeys);
+      if (nested.length > 0) return nested;
+    }
+  }
+
+  return [];
+}
+
+function toPaginatedData<T>(payload: unknown, preferredKeys: string[] = []): PaginatedData<T> {
+  const items = extractItems<T>(payload, preferredKeys);
+  const total = firstNumberField(payload, ['total', 'total_count', 'count']) ?? items.length;
+  const page = firstNumberField(payload, ['page', 'current_page']) ?? 1;
+  const pageSize = firstNumberField(payload, ['page_size', 'per_page', 'limit']) ?? Math.max(items.length, 1);
+  const pages = firstNumberField(payload, ['pages', 'total_pages']) ?? Math.max(Math.ceil(total / Math.max(pageSize, 1)), 1);
+
+  return {
+    items,
+    total,
+    page,
+    page_size: pageSize,
+    pages,
+  };
+}
+
+async function adminFetchWithOptionalQuery<T>(
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>
+) {
+  const query = buildQuery(params);
+
+  if (!query) {
+    return adminFetch<T>(path);
+  }
+
+  try {
+    return await adminFetch<T>(`${path}${query}`);
+  } catch {
+    return adminFetch<T>(path);
+  }
+}
+
+function keyMatchesSearch(item: AdminApiKey, search: string) {
+  if (!search) return true;
+
+  const normalized = search.toLowerCase();
+  const haystack = [
+    item.name,
+    item.key,
+    item.status,
+    item.group?.name,
+    item.group_id,
+    item.user?.email,
+    item.user?.username,
+    item.user_id,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  return haystack.includes(normalized);
+}
+
+async function listApiKeysFromUsers(search: string): Promise<PaginatedData<AdminApiKey>> {
+  const usersPayload = await adminFetchWithOptionalQuery<unknown>(
+    '/api/v1/admin/users',
+    { page: 1, page_size: 50, search }
+  );
+  const users = toPaginatedData<AdminUser>(usersPayload, ['users']).items;
+  const keyGroups = await Promise.all(
+    users.map(async (user) => {
+      try {
+        const payload = await adminFetch<unknown>(`/api/v1/admin/users/${user.id}/api-keys`);
+        return toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']).items.map((item) => ({
+          ...item,
+          user_id: item.user_id ?? user.id,
+          user: item.user ?? {
+            id: user.id,
+            email: user.email,
+            username: user.username,
+          },
+        }));
+      } catch {
+        return [] as AdminApiKey[];
+      }
+    })
+  );
+  const items = keyGroups.flat().filter((item) => keyMatchesSearch(item, search));
+
+  return {
+    items,
+    total: items.length,
+    page: 1,
+    page_size: Math.max(items.length, 1),
+    pages: 1,
+  };
+}
+
 export function getDashboardStats() {
   return adminFetch<DashboardStats>('/api/v1/admin/dashboard/stats');
 }
@@ -118,8 +253,33 @@ export function listUserApiKeys(userId: number) {
   return adminFetch<PaginatedData<AdminApiKey>>(`/api/v1/admin/users/${userId}/api-keys`);
 }
 
-export function searchAdminApiKeys() {
-  return adminFetch<PaginatedData<AdminApiKey>>('/api/v1/admin/usage/search-api-keys');
+export async function searchAdminApiKeys(search = '') {
+  const keyword = search.trim();
+  let directError: unknown;
+
+  try {
+    const payload = await adminFetchWithOptionalQuery<unknown>(
+      '/api/v1/admin/usage/search-api-keys',
+      { search: keyword, keyword, q: keyword }
+    );
+    const direct = toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']);
+
+    if (direct.items.length > 0 || keyword) {
+      return direct;
+    }
+  } catch (error) {
+    directError = error;
+  }
+
+  try {
+    return await listApiKeysFromUsers(keyword);
+  } catch (error) {
+    if (directError) {
+      throw directError;
+    }
+
+    throw error;
+  }
 }
 
 export function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
@@ -283,13 +443,11 @@ export function getOpsRealtimeTraffic() {
 }
 
 export function getOpsRequests(params: { page?: number; page_size?: number; search?: string } = {}) {
-  void params;
-  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/requests');
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/requests', params);
 }
 
 export function getOpsRequestErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
-  void params;
-  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/request-errors');
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/request-errors', params);
 }
 
 export function resolveOpsRequestError(errorId: number | string) {
@@ -299,9 +457,15 @@ export function resolveOpsRequestError(errorId: number | string) {
   });
 }
 
+export function resolveOpsError(errorId: number | string) {
+  return adminFetch(`/api/v1/admin/ops/errors/${errorId}/resolve`, {
+    method: 'PUT',
+    body: JSON.stringify({ resolved: true }),
+  });
+}
+
 export function getOpsUpstreamErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
-  void params;
-  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/upstream-errors');
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/upstream-errors', params);
 }
 
 export function resolveOpsUpstreamError(errorId: number | string) {
@@ -312,8 +476,7 @@ export function resolveOpsUpstreamError(errorId: number | string) {
 }
 
 export function getOpsSystemLogs(params: { page?: number; page_size?: number; level?: string; search?: string } = {}) {
-  void params;
-  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/system-logs');
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/system-logs', params);
 }
 
 export function getOpsSystemLogsHealth() {
@@ -327,8 +490,7 @@ export function cleanupOpsSystemLogs() {
 }
 
 export function getOpsAlertEvents(params: { page?: number; page_size?: number; status?: string } = {}) {
-  void params;
-  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/alert-events');
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/alert-events', params);
 }
 
 export function updateOpsAlertEventStatus(eventId: number | string, status: string) {
@@ -340,6 +502,10 @@ export function updateOpsAlertEventStatus(eventId: number | string, status: stri
 
 export function getOpsErrorTrend() {
   return adminFetch<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-trend');
+}
+
+export function getOpsErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
+  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/errors', params);
 }
 
 export function getOpsErrorDistribution() {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
-import { KeyRound, Pencil, Search } from 'lucide-react-native';
+import { KeyRound, Pencil, RefreshCw, Search } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 
@@ -13,7 +13,7 @@ import { useAppTheme } from '@/src/lib/theme';
 import { searchAdminApiKeys, updateAdminApiKey } from '@/src/services/admin';
 import type { AdminApiKey, PaginatedData } from '@/src/types/admin';
 
-type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?: AdminApiKey[]; api_keys?: AdminApiKey[] };
+type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?: AdminApiKey[]; api_keys?: AdminApiKey[]; keys?: AdminApiKey[]; data?: ApiKeySearchResult };
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -32,6 +32,10 @@ function getApiKeyItems(result?: ApiKeySearchResult) {
   if (Array.isArray(result.items)) return result.items;
   const shaped = result as { api_keys?: AdminApiKey[] };
   if (Array.isArray(shaped.api_keys)) return shaped.api_keys;
+  const withKeys = result as { keys?: AdminApiKey[] };
+  if (Array.isArray(withKeys.keys)) return withKeys.keys;
+  const withData = result as { data?: ApiKeySearchResult };
+  if (withData.data) return getApiKeyItems(withData.data);
   return [];
 }
 
@@ -147,8 +151,8 @@ export default function ApiKeysScreen() {
   const [editGroupId, setEditGroupId] = useState('');
 
   const apiKeysQuery = useQuery({
-    queryKey: ['admin-api-keys'],
-    queryFn: searchAdminApiKeys,
+    queryKey: ['admin-api-keys', keyword],
+    queryFn: () => searchAdminApiKeys(keyword),
   });
 
   const allApiKeys = useMemo(
@@ -226,6 +230,15 @@ export default function ApiKeysScreen() {
         onRefresh={() => {
           void apiKeysQuery.refetch();
         }}
+        right={(
+          <Pressable
+            onPress={() => void apiKeysQuery.refetch()}
+            style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 8 }}
+          >
+            <RefreshCw color={colors.badgeDefaultText} size={14} />
+            <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>刷新</Text>
+          </Pressable>
+        )}
         bottomInsetClassName="pb-8"
       >
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>

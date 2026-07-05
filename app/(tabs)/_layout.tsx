@@ -1,6 +1,6 @@
 import { Redirect, Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
-import { ChartNoAxesCombined, ServerCog, UsersRound } from 'lucide-react-native';
+import { ChartNoAxesCombined, LayoutGrid, ServerCog, UsersRound } from 'lucide-react-native';
 import { DynamicColorIOS, Platform, StyleSheet, useColorScheme } from 'react-native';
 
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
@@ -46,6 +46,10 @@ function NativeIosTabs() {
       <NativeTabs.Trigger name="users">
         <Icon sf={{ default: 'person.2', selected: 'person.2.fill' }} selectedColor={activeColor} />
         <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>用户</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="manage">
+        <Icon sf={{ default: 'square.grid.2x2', selected: 'square.grid.2x2.fill' }} selectedColor={activeColor} />
+        <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>管理</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="settings">
         <Icon sf="server.rack" selectedColor={activeColor} />
@@ -109,6 +113,13 @@ function FallbackBottomTabs({ isDark }: { isDark: boolean }) {
         options={{
           title: '用户',
           tabBarIcon: ({ color, size }) => <UsersRound color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="manage"
+        options={{
+          title: '管理',
+          tabBarIcon: ({ color, size }) => <LayoutGrid color={color} size={size} />,
         }}
       />
       <Tabs.Screen

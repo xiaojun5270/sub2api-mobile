@@ -14,6 +14,8 @@ import { useAppTheme } from '@/src/lib/theme';
 import {
   getOpsAlertEvents,
   getOpsDashboardOverview,
+  getOpsDashboardSnapshot,
+  getOpsErrors,
   getOpsErrorDistribution,
   getOpsErrorTrend,
   getOpsLatencyHistogram,
@@ -22,52 +24,136 @@ import {
   getOpsSystemLogs,
   getOpsSystemLogsHealth,
   getOpsThroughputTrend,
+  getOpsUpstreamErrors,
   getSystemVersion,
+  resolveOpsError,
   resolveOpsRequestError,
+  resolveOpsUpstreamError,
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
-import type { OpsMetricPoint, OpsRecord } from '@/src/types/admin';
-
-type TrendPayload = { trend?: OpsMetricPoint[]; items?: OpsMetricPoint[]; histogram?: OpsMetricPoint[]; distribution?: OpsMetricPoint[] };
+import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return '加载失败，请稍后重试。';
 }
 
-function firstNumber(source: Record<string, unknown> | undefined, keys: string[]) {
-  if (!source) return 0;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function firstNumberValue(source: unknown, keys: string[]): number | undefined {
+  if (!isRecord(source)) return undefined;
+
   for (const key of keys) {
     const value = source[key];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
   }
-  return 0;
+
+  for (const key of ['data', 'overview', 'metrics', 'stats', 'realtime']) {
+    const nested = firstNumberValue(source[key], keys);
+    if (nested !== undefined) return nested;
+  }
+
+  return undefined;
 }
 
-function firstText(source: Record<string, unknown> | undefined, keys: string[]) {
-  if (!source) return '--';
+function firstNumber(source: unknown, keys: string[]) {
+  return firstNumberValue(source, keys) ?? 0;
+}
+
+function firstTextValue(source: unknown, keys: string[]): string | undefined {
+  if (!isRecord(source)) return undefined;
+
   for (const key of keys) {
     const value = source[key];
     if (typeof value === 'string' && value.trim()) return value;
     if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   }
-  return '--';
+
+  for (const key of ['data', 'overview', 'metrics', 'stats', 'realtime']) {
+    const nested = firstTextValue(source[key], keys);
+    if (nested) return nested;
+  }
+
+  return undefined;
 }
 
-function getItems(data?: { items?: OpsRecord[] } | OpsRecord[]) {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  return Array.isArray(data.items) ? data.items : [];
+function firstText(source: unknown, keys: string[]) {
+  return firstTextValue(source, keys) ?? '--';
 }
 
-function getTrendItems(data?: TrendPayload) {
-  if (!data) return [];
-  if (Array.isArray(data.trend)) return data.trend;
-  if (Array.isArray(data.items)) return data.items;
-  if (Array.isArray(data.histogram)) return data.histogram;
-  if (Array.isArray(data.distribution)) return data.distribution;
+function firstArray<T>(source: unknown, keys: string[]): T[] {
+  if (Array.isArray(source)) return source as T[];
+  if (!isRecord(source)) return [];
+
+  for (const key of keys) {
+    const value = source[key];
+    if (Array.isArray(value)) return value as T[];
+    if (isRecord(value)) {
+      const nested = firstArray<T>(value, keys);
+      if (nested.length > 0) return nested;
+    }
+  }
+
   return [];
+}
+
+function getItems(data?: unknown) {
+  return firstArray<OpsRecord>(data, [
+    'items',
+    'data',
+    'list',
+    'records',
+    'results',
+    'rows',
+    'errors',
+    'request_errors',
+    'requestErrors',
+    'upstream_errors',
+    'upstreamErrors',
+    'logs',
+    'system_logs',
+    'systemLogs',
+    'events',
+    'alert_events',
+    'alertEvents',
+  ]);
+}
+
+function getTrendItems(data?: unknown) {
+  return firstArray<OpsMetricPoint>(data, [
+    'trend',
+    'items',
+    'data',
+    'points',
+    'buckets',
+    'histogram',
+    'distribution',
+    'throughput_trend',
+    'throughputTrend',
+    'error_trend',
+    'errorTrend',
+    'latency_histogram',
+    'latencyHistogram',
+    'error_distribution',
+    'errorDistribution',
+  ]);
+}
+
+function firstNonEmptyTrend(...sources: unknown[]) {
+  for (const source of sources) {
+    const items = getTrendItems(source);
+    if (items.length > 0) return items;
+  }
+
+  return [];
+}
+
+function snapshotArray(snapshot: OpsDashboardSnapshot | undefined, keys: string[]) {
+  if (!snapshot) return [];
+  return firstArray<OpsMetricPoint>(snapshot, keys);
 }
 
 function pointLabel(point: OpsMetricPoint, index: number) {
@@ -78,10 +164,6 @@ function pointLabel(point: OpsMetricPoint, index: number) {
 
 function pointValue(point: OpsMetricPoint, keys: string[]) {
   return firstNumber(point as Record<string, unknown>, keys);
-}
-
-function formatMoney(value: number) {
-  return `$${value.toFixed(2)}`;
 }
 
 function formatLatency(value: number) {
@@ -133,20 +215,31 @@ export default function OpsScreen() {
   const queryClient = useQueryClient();
 
   const overviewQuery = useQuery({ queryKey: ['ops-overview'], queryFn: getOpsDashboardOverview, staleTime: 30_000 });
+  const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot'], queryFn: getOpsDashboardSnapshot, staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime'], queryFn: getOpsRealtimeTraffic, staleTime: 15_000 });
   const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend'], queryFn: getOpsThroughputTrend, staleTime: 60_000 });
   const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend'], queryFn: getOpsErrorTrend, staleTime: 60_000 });
   const latencyQuery = useQuery({ queryKey: ['ops-latency-histogram'], queryFn: getOpsLatencyHistogram, staleTime: 60_000 });
   const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution'], queryFn: getOpsErrorDistribution, staleTime: 60_000 });
   const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors'], queryFn: () => getOpsRequestErrors({ page_size: 8 }), staleTime: 30_000 });
+  const genericErrorsQuery = useQuery({ queryKey: ['ops-errors'], queryFn: () => getOpsErrors({ page_size: 8 }), staleTime: 30_000 });
+  const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors'], queryFn: () => getOpsUpstreamErrors({ page_size: 8 }), staleTime: 30_000 });
   const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs'], queryFn: () => getOpsSystemLogs({ page_size: 8 }), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events'], queryFn: () => getOpsAlertEvents({ page_size: 8 }), staleTime: 30_000 });
   const versionQuery = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion, staleTime: 120_000 });
 
   const resolveErrorMutation = useMutation({
-    mutationFn: (id: number | string) => resolveOpsRequestError(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-request-errors'] }),
+    mutationFn: ({ id, source }: { id: number | string; source: 'request' | 'generic' | 'upstream' }) => {
+      if (source === 'upstream') return resolveOpsUpstreamError(id);
+      if (source === 'generic') return resolveOpsError(id);
+      return resolveOpsRequestError(id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ops-request-errors'] });
+      queryClient.invalidateQueries({ queryKey: ['ops-errors'] });
+      queryClient.invalidateQueries({ queryKey: ['ops-upstream-errors'] });
+    },
   });
 
   const resolveAlertMutation = useMutation({
@@ -154,9 +247,14 @@ export default function OpsScreen() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-alert-events'] }),
   });
 
-  const overview = overviewQuery.data;
-  const realtime = realtimeQuery.data;
-  const requestErrors = getItems(requestErrorsQuery.data);
+  const snapshot = snapshotQuery.data;
+  const overview = overviewQuery.data || snapshot?.overview || snapshot;
+  const realtime = realtimeQuery.data || snapshot?.realtime || snapshot?.overview || snapshot;
+  const requestErrorItems = getItems(requestErrorsQuery.data);
+  const genericErrorItems = getItems(genericErrorsQuery.data);
+  const upstreamErrorItems = getItems(upstreamErrorsQuery.data);
+  const requestErrorSource: 'request' | 'generic' | 'upstream' = requestErrorItems.length > 0 ? 'request' : genericErrorItems.length > 0 ? 'generic' : 'upstream';
+  const requestErrors = requestErrorItems.length > 0 ? requestErrorItems : genericErrorItems.length > 0 ? genericErrorItems : upstreamErrorItems;
   const systemLogs = getItems(systemLogsQuery.data);
   const alertEvents = getItems(alertEventsQuery.data);
 
@@ -173,43 +271,68 @@ export default function OpsScreen() {
   const queueSize = firstNumber(realtime, ['queue_size', 'queued_requests', 'pending_requests']);
   const tokenPerSecond = firstNumber(realtime, ['tps', 'tokens_per_second', 'token_per_second']);
 
-  const throughputPoints = getTrendItems(throughputQuery.data).map((point, index) => ({
+  const throughputSource = firstNonEmptyTrend(
+    throughputQuery.data,
+    snapshotArray(snapshot, ['throughput_trend', 'throughputTrend']),
+    snapshot
+  );
+  const errorSource = firstNonEmptyTrend(
+    errorTrendQuery.data,
+    snapshotArray(snapshot, ['error_trend', 'errorTrend']),
+    snapshot
+  );
+  const latencySource = firstNonEmptyTrend(
+    latencyQuery.data,
+    snapshotArray(snapshot, ['latency_histogram', 'latencyHistogram']),
+    snapshot
+  );
+  const distributionSource = firstNonEmptyTrend(
+    errorDistributionQuery.data,
+    snapshotArray(snapshot, ['error_distribution', 'errorDistribution']),
+    snapshot
+  );
+
+  const throughputPoints = throughputSource.map((point, index) => ({
     label: pointLabel(point, index),
     value: pointValue(point, ['requests', 'count', 'value']),
   }));
-  const errorPoints = getTrendItems(errorTrendQuery.data).map((point, index) => ({
+  const errorPoints = errorSource.map((point, index) => ({
     label: pointLabel(point, index),
     value: pointValue(point, ['errors', 'count', 'value']),
   }));
-  const latencyItems = getTrendItems(latencyQuery.data).map((point, index) => ({
+  const latencyItems = latencySource.map((point, index) => ({
     label: pointLabel(point, index),
     value: pointValue(point, ['count', 'requests', 'value']),
     color: '#0f766e',
     meta: `${pointValue(point, ['latency_ms', 'duration_ms']) || point.label || ''}`,
   }));
-  const distributionItems = getTrendItems(errorDistributionQuery.data).map((point, index) => ({
+  const distributionItems = distributionSource.map((point, index) => ({
     label: pointLabel(point, index),
     value: pointValue(point, ['count', 'errors', 'value']),
     color: '#f97316',
   }));
 
-  const firstError = overviewQuery.error || realtimeQuery.error;
+  const hasOverviewFallback = Boolean(snapshot);
+  const firstError = hasOverviewFallback ? null : overviewQuery.error || realtimeQuery.error || snapshotQuery.error;
 
   function refetchAll() {
     overviewQuery.refetch();
+    snapshotQuery.refetch();
     realtimeQuery.refetch();
     throughputQuery.refetch();
     errorTrendQuery.refetch();
     latencyQuery.refetch();
     errorDistributionQuery.refetch();
     requestErrorsQuery.refetch();
+    genericErrorsQuery.refetch();
+    upstreamErrorsQuery.refetch();
     systemLogsQuery.refetch();
     logsHealthQuery.refetch();
     alertEventsQuery.refetch();
     versionQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || realtimeQuery.isRefetching || requestErrorsQuery.isRefetching || systemLogsQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || requestErrorsQuery.isRefetching || systemLogsQuery.isRefetching;
 
   return (
     <>
@@ -272,7 +395,7 @@ export default function OpsScreen() {
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="请求错误" icon={AlertTriangle} />
           <View style={{ gap: 10, marginTop: 12 }}>
-            {requestErrorsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载请求错误...</Text> : null}
+            {requestErrorsQuery.isLoading || genericErrorsQuery.isLoading || upstreamErrorsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载请求错误...</Text> : null}
             {requestErrors.map((item, index) => {
               const id = item.id ?? index;
               const message = item.error_message || item.message || firstText(item, ['reason', 'type']);
@@ -297,7 +420,7 @@ export default function OpsScreen() {
                     {item.id ? (
                       <Pressable
                         style={{ alignSelf: 'flex-start', backgroundColor: colors.successBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 }}
-                        onPress={() => resolveErrorMutation.mutate(item.id as number | string)}
+                        onPress={() => resolveErrorMutation.mutate({ id: item.id as number | string, source: requestErrorSource })}
                       >
                         <Text style={{ color: colors.success, fontSize: 11, fontWeight: '800' }}>处理</Text>
                       </Pressable>
@@ -306,7 +429,7 @@ export default function OpsScreen() {
                 </View>
               );
             })}
-            {!requestErrorsQuery.isLoading && requestErrors.length === 0 ? <Text style={{ color: colors.subtext }}>暂无请求错误。</Text> : null}
+            {!requestErrorsQuery.isLoading && !genericErrorsQuery.isLoading && !upstreamErrorsQuery.isLoading && requestErrors.length === 0 ? <Text style={{ color: colors.subtext }}>暂无请求错误。</Text> : null}
           </View>
         </View>
 
