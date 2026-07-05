@@ -685,15 +685,76 @@ function isAdminApiKeyUpdateBody(body: Record<string, Exclude<ApiKeyRequestValue
   return keys.length > 0 && keys.every((key) => adminFields.has(key));
 }
 
+function getApiKeyOwnerQuery(userId?: number) {
+  return userId ? buildQuery({ user_id: userId }) : '';
+}
+
+function isInactiveStatus(status: string) {
+  return ['inactive', 'disabled', 'revoked', 'false', '0'].includes(status.trim().toLowerCase());
+}
+
+function uniqueApiKeyBodies(bodies: Record<string, Exclude<ApiKeyRequestValue, undefined>>[]) {
+  const seen = new Set<string>();
+
+  return bodies.filter((body) => {
+    const key = JSON.stringify(body);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildApiKeyUpdateBodies(
+  body: UpdateApiKeyRequest,
+  primaryBody: Record<string, Exclude<ApiKeyRequestValue, undefined>>,
+  legacyBody: Record<string, Exclude<ApiKeyRequestValue, undefined>>
+) {
+  const bodies = [primaryBody, legacyBody];
+
+  if (typeof body.status === 'string' && body.status.trim()) {
+    const enabled = !isInactiveStatus(body.status);
+    bodies.push({ ...primaryBody, enabled, active: enabled });
+    bodies.push({ ...legacyBody, status: enabled ? 'active' : 'disabled' });
+    bodies.push({ ...legacyBody, enabled, active: enabled });
+  }
+
+  return uniqueApiKeyBodies(bodies);
+}
+
 export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest, userId?: number) {
   const primaryBody = toPrimaryApiKeyRequestBody(body);
   const legacyBody = toLegacyApiKeyRequestBody(body);
-  const requests = [
-    { path: `/api/v1/keys/${apiKeyId}`, body: primaryBody },
-    { path: `/api/v1/api-keys/${apiKeyId}`, body: primaryBody },
-    ...(userId ? [{ path: `/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`, body: legacyBody }] : []),
-    ...(isAdminApiKeyUpdateBody(legacyBody) ? [{ path: `/api/v1/admin/api-keys/${apiKeyId}`, body: legacyBody }] : []),
-  ];
+  const ownerQuery = getApiKeyOwnerQuery(userId);
+  const bodyVariants = buildApiKeyUpdateBodies(body, primaryBody, legacyBody);
+  const requests: { path: string; body: Record<string, Exclude<ApiKeyRequestValue, undefined>> }[] = [];
+  const seen = new Set<string>();
+
+  const addRequest = (path: string, requestBody: Record<string, Exclude<ApiKeyRequestValue, undefined>>) => {
+    const key = `${path}:${JSON.stringify(requestBody)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    requests.push({ path, body: requestBody });
+  };
+
+  bodyVariants.forEach((requestBody) => {
+    addRequest(`/api/v1/keys/${apiKeyId}${ownerQuery}`, requestBody);
+  });
+
+  if (userId) {
+    bodyVariants.forEach((requestBody) => {
+      addRequest(`/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`, requestBody);
+    });
+  }
+
+  bodyVariants.forEach((requestBody) => {
+    addRequest(`/api/v1/api-keys/${apiKeyId}${ownerQuery}`, requestBody);
+    addRequest(`/api/v1/keys/${apiKeyId}`, requestBody);
+  });
+
+  if (isAdminApiKeyUpdateBody(legacyBody)) {
+    addRequest(`/api/v1/admin/api-keys/${apiKeyId}`, legacyBody);
+  }
+
   let firstError: unknown;
   let lastError: unknown;
 
@@ -715,12 +776,15 @@ export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequ
 }
 
 export async function deleteAdminApiKey(apiKeyId: number, userId?: number) {
+  const ownerQuery = getApiKeyOwnerQuery(userId);
   const paths = [
-    `/api/v1/keys/${apiKeyId}`,
-    `/api/v1/api-keys/${apiKeyId}`,
+    `/api/v1/keys/${apiKeyId}${ownerQuery}`,
     ...(userId ? [`/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`] : []),
+    `/api/v1/api-keys/${apiKeyId}${ownerQuery}`,
+    `/api/v1/api-keys/${apiKeyId}`,
+    `/api/v1/keys/${apiKeyId}`,
     `/api/v1/admin/api-keys/${apiKeyId}`,
-  ];
+  ].filter((path, index, list) => list.indexOf(path) === index);
   let firstError: unknown;
   let lastError: unknown;
 

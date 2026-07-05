@@ -195,6 +195,10 @@ function getNextStatus(status?: string) {
   return isDisabledStatus(status) ? 'active' : 'inactive';
 }
 
+function getApiKeyOwnerId(item?: AdminApiKey | null) {
+  return item?.user_id || item?.user?.id || undefined;
+}
+
 function getLocalDateKey(value = new Date()) {
   const year = value.getFullYear();
   const month = `${value.getMonth() + 1}`.padStart(2, '0');
@@ -605,7 +609,8 @@ export default function ApiKeysScreen() {
   function openEditForm(item: AdminApiKey) {
     setFormMode('edit');
     setEditingItem(item);
-    setFormUserId(item.user_id ? String(item.user_id) : '');
+    const ownerId = getApiKeyOwnerId(item);
+    setFormUserId(ownerId ? String(ownerId) : '');
     setFormName(item.name || '');
     setFormKey('');
     setFormStatus(isDisabledStatus(item.status) ? 'inactive' : 'active');
@@ -646,7 +651,7 @@ export default function ApiKeysScreen() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: getNextStatus(item.status) }, item.user_id),
+    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: getNextStatus(item.status) }, getApiKeyOwnerId(item)),
     onMutate: () => setFormError(null),
     onSuccess: (_data, item) => {
       const status = getNextStatus(item.status);
@@ -667,7 +672,7 @@ export default function ApiKeysScreen() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (item: AdminApiKey) => deleteAdminApiKey(item.id, item.user_id),
+    mutationFn: (item: AdminApiKey) => deleteAdminApiKey(item.id, getApiKeyOwnerId(item)),
     onMutate: () => setFormError(null),
     onSuccess: (_data, item) => {
       queryClient.setQueriesData<ApiKeySearchResult>(
@@ -892,7 +897,7 @@ export default function ApiKeysScreen() {
                   }
 
                   if (editingItem?.id) {
-                    updateMutation.mutate({ id: editingItem.id, userId: editingItem.user_id });
+                    updateMutation.mutate({ id: editingItem.id, userId: getApiKeyOwnerId(editingItem) });
                   }
                 }}
               >
