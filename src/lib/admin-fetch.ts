@@ -32,6 +32,17 @@ function formatAuthorizationHeader(value: string) {
   return value.toLowerCase().startsWith('bearer ') ? value : `Bearer ${value}`;
 }
 
+function stripBearerPrefix(value: string) {
+  return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : value.trim();
+}
+
+function isJwtLike(value: string) {
+  const token = stripBearerPrefix(value);
+  const parts = token.split('.');
+
+  return parts.length === 3 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
 function compactResponseText(value: string) {
   const cleaned = value.replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
@@ -57,7 +68,9 @@ export async function adminFetch<T>(
   const headers = new Headers(init.headers);
   headers.set('Content-Type', 'application/json');
   if (adminApiKey) {
-    headers.set('x-api-key', adminApiKey);
+    if (!isJwtLike(adminApiKey)) {
+      headers.set('x-api-key', stripBearerPrefix(adminApiKey));
+    }
     if (!headers.has('Authorization')) {
       headers.set('Authorization', formatAuthorizationHeader(adminApiKey));
     }

@@ -230,7 +230,7 @@ export default function SettingsScreen() {
             <View>
               <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 8 }}>
                 <KeyRound color={colors.subtext} size={14} />
-                <Text style={{ fontSize: 12, color: colors.subtext }}>Admin Key</Text>
+                <Text style={{ fontSize: 12, color: colors.subtext }}>Admin Key / JWT</Text>
               </View>
               <Controller
                 control={control}
@@ -240,7 +240,7 @@ export default function SettingsScreen() {
                     <TextInput
                       value={value}
                       onChangeText={onChange}
-                      placeholder="admin-xxxxxxxx"
+                      placeholder="admin-xxxxxxxx 或网页登录 JWT"
                       placeholderTextColor={colors.placeholder}
                       autoCapitalize="none"
                       autoCorrect={false}

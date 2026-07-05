@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { ChevronDown, Copy, FileCode2, KeyRound, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { useSnapshot } from 'valtio';
 
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
@@ -193,6 +194,17 @@ function isDisabledStatus(status?: string) {
 
 function getNextStatus(status?: string) {
   return isDisabledStatus(status) ? 'active' : 'inactive';
+}
+
+function stripBearerPrefix(value: string) {
+  return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : value.trim();
+}
+
+function isJwtCredential(value?: string) {
+  const token = stripBearerPrefix(value || '');
+  const parts = token.split('.');
+
+  return parts.length === 3 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
 }
 
 function getApiKeyOwnerId(item?: AdminApiKey | null) {
@@ -461,6 +473,7 @@ function Field({
 
 export default function ApiKeysScreen() {
   const colors = useAppTheme();
+  const adminConfig = useSnapshot(adminConfigState);
   const queryClient = useQueryClient();
   const [searchText, setSearchText] = useState('');
   const keyword = useDebouncedValue(searchText, 300);
@@ -478,6 +491,7 @@ export default function ApiKeysScreen() {
   const [formGroupId, setFormGroupId] = useState('');
   const [formExpiresAt, setFormExpiresAt] = useState('');
   const [formExpiresInDays, setFormExpiresInDays] = useState('');
+  const usesJwtCredential = isJwtCredential(adminConfig.adminApiKey);
 
   const apiKeysQuery = useQuery({
     queryKey: ['admin-api-keys', keyword],
@@ -790,6 +804,15 @@ export default function ApiKeysScreen() {
         bottomInsetClassName="pb-8"
         contentGapClassName="mt-3 gap-3"
       >
+        {!usesJwtCredential ? (
+          <View style={{ backgroundColor: colors.dangerBg, borderColor: colors.danger, borderRadius: 16, borderWidth: 1, padding: 12 }}>
+            <Text style={{ color: colors.danger, fontSize: 13, fontWeight: '800' }}>当前为 Admin Key 模式</Text>
+            <Text style={{ color: colors.errorText, fontSize: 12, lineHeight: 18, marginTop: 4 }}>
+              后端的 API Key 编辑、禁用和删除接口需要 Web 登录 JWT。请在服务器配置中填入网页登录 JWT，才能和 Web 端一样联动保存。
+            </Text>
+          </View>
+        ) : null}
+
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <View style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 16, flexDirection: 'row', paddingHorizontal: 14 }}>
             <Search color={colors.subtext} size={18} />

@@ -12,6 +12,17 @@ function formatAuthorizationHeader(value) {
   return value.toLowerCase().startsWith('bearer ') ? value : `Bearer ${value}`;
 }
 
+function stripBearerPrefix(value) {
+  return value.toLowerCase().startsWith('bearer ') ? value.slice(7).trim() : value.trim();
+}
+
+function isJwtLike(value) {
+  const token = stripBearerPrefix(value);
+  const parts = token.split('.');
+
+  return parts.length === 3 && parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
 function isSuccessPayload(json) {
   if (!json || typeof json !== 'object') {
     return true;
@@ -39,7 +50,7 @@ async function fetchAdminJson(path) {
 
   const response = await fetch(`${upstreamBaseUrl}${path}`, {
     headers: {
-      'x-api-key': adminApiKey,
+      ...(isJwtLike(adminApiKey) ? {} : { 'x-api-key': stripBearerPrefix(adminApiKey) }),
       Authorization: formatAuthorizationHeader(adminApiKey),
     },
   });
@@ -189,7 +200,9 @@ function stripInternalApiKeyFields(body) {
 function buildUpstreamHeaders(req) {
   const headers = new Headers();
 
-  headers.set('x-api-key', adminApiKey);
+  if (!isJwtLike(adminApiKey)) {
+    headers.set('x-api-key', stripBearerPrefix(adminApiKey));
+  }
   headers.set('Authorization', formatAuthorizationHeader(adminApiKey));
 
   const contentType = req.headers['content-type'];
@@ -327,13 +340,21 @@ async function proxyApiKeyMutationRequest(req, res) {
   const query = buildForwardQuery(req.query, ['user_id', 'userId', 'owner_id', 'ownerId']);
   const paths = [];
   const ownerId = getOwnerIdFromRequest(req);
+  const jwtCredential = isJwtLike(adminApiKey);
 
-  if (ownerId) {
+  if (jwtCredential) {
+    paths.push(`/api/v1/keys/${apiKeyId}${query}`);
+    paths.push(`/api/v1/api-keys/${apiKeyId}${query}`);
+  } else if (ownerId) {
     paths.push(`/api/v1/admin/users/${ownerId}/api-keys/${apiKeyId}${query}`);
   } else {
-    const owner = await findApiKeyOwner(apiKeyId);
-    if (owner?.user?.id) {
-      paths.push(`/api/v1/admin/users/${owner.user.id}/api-keys/${apiKeyId}${query}`);
+    try {
+      const owner = await findApiKeyOwner(apiKeyId);
+      if (owner?.user?.id) {
+        paths.push(`/api/v1/admin/users/${owner.user.id}/api-keys/${apiKeyId}${query}`);
+      }
+    } catch {
+      // Fall through to the public key routes below and return their real error.
     }
   }
 
@@ -396,6 +417,11 @@ app.get('/healthz', (_req, res) => {
 });
 
 app.get('/api/v1/keys', async (req, res) => {
+  if (isJwtLike(adminApiKey)) {
+    await proxyUpstreamRequest(req, res);
+    return;
+  }
+
   try {
     const page = Math.max(Number(req.query.page || 1), 1);
     const pageSize = Math.min(Math.max(Number(req.query.page_size || 10), 1), 100);

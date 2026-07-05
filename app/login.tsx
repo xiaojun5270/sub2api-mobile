@@ -101,7 +101,7 @@ export default function LoginScreen() {
             </View>
 
             <View>
-              <Text style={{ marginBottom: 8, fontSize: 12, color: colors.subtext }}>Admin Key</Text>
+              <Text style={{ marginBottom: 8, fontSize: 12, color: colors.subtext }}>Admin Key / JWT</Text>
               <Controller
                 control={control}
                 name="adminApiKey"
@@ -116,7 +116,7 @@ export default function LoginScreen() {
                         }
                         onChange(text);
                       }}
-                      placeholder="admin-xxxxxxxx"
+                      placeholder="admin-xxxxxxxx 或网页登录 JWT"
                       placeholderTextColor={colors.placeholder}
                       autoCapitalize="none"
                       autoCorrect={false}
