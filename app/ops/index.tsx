@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { Activity, AlertTriangle, BellRing, Gauge, ServerCog, TerminalSquare } from 'lucide-react-native';
+import { Activity, BellRing, ChevronDown, Gauge, ServerCog, TerminalSquare } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
+import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { LineTrendChart } from '@/src/components/line-trend-chart';
@@ -22,6 +23,21 @@ import {
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
 import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
+
+type OpsTimeRange = '1h' | '24h' | '7d' | '30d';
+type OpsFilterMenu = 'platform' | 'group' | 'time' | null;
+
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
+const OPS_TIME_RANGE_OPTIONS: Array<FilterOption & { value: OpsTimeRange }> = [
+  { label: '近1小时', value: '1h' },
+  { label: '近24小时', value: '24h' },
+  { label: '近7天', value: '7d' },
+  { label: '近30天', value: '30d' },
+];
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -299,6 +315,97 @@ function formatDimensions(value: unknown) {
   return '-';
 }
 
+function getTimeRangeLabel(value: OpsTimeRange) {
+  return OPS_TIME_RANGE_OPTIONS.find((option) => option.value === value)?.label ?? '近1小时';
+}
+
+function getTokenStatsTimeRange(value: OpsTimeRange) {
+  if (value === '24h') return '1d';
+  if (value === '30d') return '30d';
+  return value === '1h' ? '1h' : undefined;
+}
+
+function parseGroupId(value: string) {
+  const groupId = Number(value);
+  return Number.isFinite(groupId) && groupId > 0 ? groupId : undefined;
+}
+
+function cleanDimensionValue(value?: string) {
+  if (!value || isEmptyDimension(value)) return undefined;
+  return value.trim();
+}
+
+function dimensionValue(source: unknown, keys: string[]) {
+  const direct = cleanDimensionValue(firstTextValue(source, keys));
+  if (direct) return direct;
+
+  for (const nestedKey of ['extra', 'dimensions', 'metadata', 'group']) {
+    const nested = nestedRecord(source, nestedKey);
+    const nestedValue = cleanDimensionValue(firstTextValue(nested, keys));
+    if (nestedValue) return nestedValue;
+  }
+
+  return undefined;
+}
+
+function platformValue(source: unknown) {
+  return dimensionValue(source, ['platform', 'provider']);
+}
+
+function groupValue(source: unknown) {
+  const value = dimensionValue(source, ['group_id', 'groupId']);
+  const groupId = value ? Number(value) : Number.NaN;
+  return Number.isFinite(groupId) && groupId > 0 ? String(groupId) : undefined;
+}
+
+function collectFilterOptions(
+  sources: unknown[],
+  getValue: (source: unknown) => string | undefined,
+  getLabel: (value: string) => string
+) {
+  const options = new Map<string, string>();
+
+  sources.forEach((source) => {
+    const value = getValue(source);
+    if (value && !options.has(value)) {
+      options.set(value, getLabel(value));
+    }
+  });
+
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function matchesFilter(source: unknown, platform: string, group: string) {
+  const sourcePlatform = platformValue(source);
+  const sourceGroup = groupValue(source);
+
+  if (platform && sourcePlatform !== platform) return false;
+  if (group && sourceGroup !== group) return false;
+
+  return true;
+}
+
+function filterByDimension<T>(items: T[], platform: string, group: string) {
+  if (!platform && !group) return items;
+  return items.filter((item) => matchesFilter(item, platform, group));
+}
+
+function pickTrendDimension(points: OpsMetricPoint[], platform: string, group: string) {
+  if (group) {
+    const groupPoints = points.filter((point) => groupValue(point) === group);
+    return groupPoints.length > 0 ? groupPoints : points;
+  }
+
+  if (platform) {
+    const platformOnlyPoints = points.filter((point) => platformValue(point) === platform && !groupValue(point));
+    if (platformOnlyPoints.length > 0) return platformOnlyPoints;
+    return points.filter((point) => platformValue(point) === platform);
+  }
+
+  return getOverallTrendPoints(points);
+}
+
 function InfoTile({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'success' }) {
   const colors = useAppTheme();
   const backgroundColor = tone === 'danger' ? colors.errorBg : tone === 'success' ? colors.successBg : colors.mutedCard;
@@ -326,17 +433,45 @@ function SectionTitle({ title, icon: Icon }: { title: string; icon: LucideIcon }
 export default function OpsScreen() {
   const colors = useAppTheme();
   const queryClient = useQueryClient();
+  const [timeRange, setTimeRange] = useState<OpsTimeRange>('1h');
+  const [platformFilter, setPlatformFilter] = useState('');
+  const [groupFilter, setGroupFilter] = useState('');
+  const [activeFilterMenu, setActiveFilterMenu] = useState<OpsFilterMenu>(null);
+  const selectedGroupId = parseGroupId(groupFilter);
 
-  const overviewQuery = useQuery({ queryKey: ['ops-overview'], queryFn: getOpsDashboardOverview, staleTime: 30_000 });
-  const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot'], queryFn: getOpsDashboardSnapshot, staleTime: 30_000 });
-  const realtimeQuery = useQuery({ queryKey: ['ops-realtime'], queryFn: getOpsRealtimeTraffic, staleTime: 15_000 });
-  const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency'], queryFn: getOpsConcurrency, staleTime: 15_000 });
-  const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats'], queryFn: getOpsOpenAiTokenStats, staleTime: 30_000 });
-  const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend'], queryFn: getOpsThroughputTrend, staleTime: 60_000 });
-  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs'], queryFn: () => getOpsSystemLogs(), staleTime: 30_000 });
+  const opsQueryParams = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+    time_range: timeRange,
+  }), [platformFilter, selectedGroupId, timeRange]);
+
+  const opsRealtimeParams = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+    window: '1h',
+  }), [platformFilter, selectedGroupId]);
+
+  const opsDimensionParams = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+  }), [platformFilter, selectedGroupId]);
+
+  const opsTokenStatsParams = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+    time_range: getTokenStatsTimeRange(timeRange),
+  }), [platformFilter, selectedGroupId, timeRange]);
+
+  const overviewQuery = useQuery({ queryKey: ['ops-overview', opsQueryParams], queryFn: () => getOpsDashboardOverview(opsQueryParams), staleTime: 30_000 });
+  const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot', opsQueryParams], queryFn: () => getOpsDashboardSnapshot(opsQueryParams), staleTime: 30_000 });
+  const realtimeQuery = useQuery({ queryKey: ['ops-realtime', opsRealtimeParams], queryFn: () => getOpsRealtimeTraffic(opsRealtimeParams), staleTime: 15_000 });
+  const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency', opsDimensionParams], queryFn: () => getOpsConcurrency(opsDimensionParams), staleTime: 15_000 });
+  const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats', opsTokenStatsParams], queryFn: () => getOpsOpenAiTokenStats(opsTokenStatsParams), staleTime: 30_000 });
+  const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend', opsQueryParams], queryFn: () => getOpsThroughputTrend(opsQueryParams), staleTime: 60_000 });
+  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs', opsQueryParams], queryFn: () => getOpsSystemLogs({ ...opsQueryParams, page: 1, page_size: 20 }), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
-  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events'], queryFn: () => getOpsAlertEvents(), staleTime: 30_000 });
+  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events', opsQueryParams], queryFn: () => getOpsAlertEvents({ ...opsQueryParams, limit: 20 }), staleTime: 30_000 });
 
   const resolveAlertMutation = useMutation({
     mutationFn: (id: number | string) => updateOpsAlertEventStatus(id, 'resolved'),
@@ -351,8 +486,58 @@ export default function OpsScreen() {
   const runtimeAlert = runtimeAlertQuery.data;
   const logsHealth = logsHealthQuery.data;
   const rawSystemLogs = getItems(systemLogsQuery.data);
-  const systemLogs = rawSystemLogs.slice(0, 8);
-  const alertEvents = getItems(alertEventsQuery.data).slice(0, 8);
+  const rawAlertEvents = getItems(alertEventsQuery.data);
+  const throughputSource = firstNonEmptyTrend(
+    throughputQuery.data,
+    snapshotArray(snapshot, ['throughput_trend', 'throughputTrend']),
+    snapshot
+  );
+  const rawConcurrencyItems = getItems(concurrency);
+  const filteredSystemLogs = useMemo(
+    () => filterByDimension(rawSystemLogs, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawSystemLogs]
+  );
+  const filteredAlertEvents = useMemo(
+    () => filterByDimension(rawAlertEvents, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawAlertEvents]
+  );
+  const filteredThroughputSource = useMemo(
+    () => filterByDimension(throughputSource, platformFilter, groupFilter),
+    [groupFilter, platformFilter, throughputSource]
+  );
+  const filteredConcurrencyItems = useMemo(
+    () => filterByDimension(rawConcurrencyItems, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawConcurrencyItems]
+  );
+  const dimensionSources = useMemo(
+    () => [
+      ...throughputSource,
+      ...rawConcurrencyItems,
+      ...rawSystemLogs,
+      ...rawAlertEvents,
+      overview,
+      realtime,
+      concurrency,
+    ],
+    [concurrency, overview, rawAlertEvents, rawConcurrencyItems, rawSystemLogs, realtime, throughputSource]
+  );
+  const platformOptions = useMemo(
+    () => [
+      { label: '全部平台', value: '' },
+      ...collectFilterOptions(dimensionSources, platformValue, (value) => value.toUpperCase()),
+    ],
+    [dimensionSources]
+  );
+  const groupOptions = useMemo(
+    () => [
+      { label: '全部分组', value: '' },
+      ...collectFilterOptions(dimensionSources, groupValue, (value) => `分组 #${value}`),
+    ],
+    [dimensionSources]
+  );
+  const timeOptions = OPS_TIME_RANGE_OPTIONS.map(({ label, value }) => ({ label, value }));
+  const systemLogs = filteredSystemLogs.slice(0, 8);
+  const alertEvents = filteredAlertEvents.slice(0, 8);
   const overviewRecord = isRecord(overview) ? overview : undefined;
   const qpsMetrics = nestedRecord(overview, 'qps') ?? nestedRecord(realtime, 'qps');
   const tpsMetrics = nestedRecord(overview, 'tps') ?? nestedRecord(realtime, 'tps');
@@ -391,8 +576,6 @@ export default function OpsScreen() {
   const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
   const queueSize = firstNumber(systemMetrics, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
   const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
-  const avgQps = firstNumber(qpsMetrics, ['avg', 'average', 'mean']) || firstNumber(overview, ['qps_avg', 'qpsAvg', 'avg_qps', 'avgQps']) || qps;
-  const avgTps = firstNumber(tpsMetrics, ['avg', 'average', 'mean']) || firstNumber(overview, ['tps_avg', 'tpsAvg', 'avg_tps', 'avgTps']) || tokenPerSecond;
   const tokenConsumed = firstNumber(overview, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']) || firstNumber(tokenStats, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']);
   const businessLimited = firstNumber(overview, ['business_limited_count', 'businessLimitedCount']);
   const upstreamErrorCount = firstNumber(overview, ['upstream_error_count_excl_429_529', 'upstreamErrorCountExcl429529', 'upstream_errors_excl_429_529', 'upstreamErrorsExcl429529']);
@@ -414,17 +597,11 @@ export default function OpsScreen() {
   const logsErrorCount = firstNumber(nestedRecord(logsHealth, 'levels'), ['error', 'errors']);
   const logsHealthStatus = logsTotal > 0 ? '正常' : firstText(logsHealth, ['status', 'state', 'health']);
 
-  const throughputSource = firstNonEmptyTrend(
-    throughputQuery.data,
-    snapshotArray(snapshot, ['throughput_trend', 'throughputTrend']),
-    snapshot
-  );
-  const throughputOverallSource = getOverallTrendPoints(throughputSource);
+  const throughputOverallSource = pickTrendDimension(filteredThroughputSource, platformFilter, groupFilter);
 
   const throughputPoints = summarizeTrendByBucket(throughputOverallSource, ['success_count', 'successCount', 'requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'count', 'value']);
   const accountSwitchPoints = summarizeTrendByBucket(throughputOverallSource, ['account_switch_count', 'accountSwitchCount', 'avg_account_switch_count', 'avgAccountSwitchCount', 'switch_count', 'switchCount'], 'average');
-  const concurrencyItems = getItems(concurrency);
-  const concurrencyRows = concurrencyItems.length > 0 ? concurrencyItems : currentConcurrency || queueSize ? [{
+  const concurrencyRows = filteredConcurrencyItems.length > 0 ? filteredConcurrencyItems : (!platformFilter && !groupFilter && (currentConcurrency || queueSize)) ? [{
     platform: firstText(concurrency, ['platform', 'provider']) !== '--' ? firstText(concurrency, ['platform', 'provider']) : 'overall',
     current_concurrency: currentConcurrency,
     queue_size: queueSize,
@@ -449,6 +626,59 @@ export default function OpsScreen() {
 
   const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching;
   const lastRefreshText = formatKnownTime(firstTextValue(overview, ['created_at', 'createdAt', 'updated_at', 'updatedAt']), firstTextValue(logsHealth, ['latest_log_at', 'latestLogAt']));
+  const activeFilterOptions: FilterOption[] = activeFilterMenu === 'platform'
+    ? platformOptions
+    : activeFilterMenu === 'group'
+      ? groupOptions
+      : activeFilterMenu === 'time'
+        ? timeOptions
+        : [];
+
+  function selectFilterOption(value: string) {
+    if (activeFilterMenu === 'platform') {
+      setPlatformFilter(value);
+    }
+    if (activeFilterMenu === 'group') {
+      setGroupFilter(value);
+    }
+    if (activeFilterMenu === 'time') {
+      setTimeRange(value as OpsTimeRange);
+    }
+    setActiveFilterMenu(null);
+  }
+
+  function isFilterOptionSelected(value: string) {
+    if (activeFilterMenu === 'platform') return value === platformFilter;
+    if (activeFilterMenu === 'group') return value === groupFilter;
+    if (activeFilterMenu === 'time') return value === timeRange;
+    return false;
+  }
+
+  function renderFilterChip(menu: Exclude<OpsFilterMenu, null>, label: string, selected: boolean) {
+    const active = activeFilterMenu === menu;
+    const highlighted = active || selected;
+
+    return (
+      <Pressable
+        key={menu}
+        style={{
+          alignItems: 'center',
+          backgroundColor: highlighted ? colors.successBg : colors.mutedCard,
+          borderColor: highlighted ? colors.primary : colors.border,
+          borderRadius: 999,
+          borderWidth: 1,
+          flexDirection: 'row',
+          gap: 5,
+          paddingHorizontal: 12,
+          paddingVertical: 7,
+        }}
+        onPress={() => setActiveFilterMenu((current) => (current === menu ? null : menu))}
+      >
+        <Text style={{ color: highlighted ? colors.primary : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
+        <ChevronDown color={highlighted ? colors.primary : colors.badgeDefaultText} size={13} />
+      </Pressable>
+    );
+  }
 
   return (
     <>
@@ -473,17 +703,39 @@ export default function OpsScreen() {
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <View style={{ alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {['全部平台', '全部分组', '近1小时'].map((label) => (
-              <View key={label} style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 }}>
-                <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
-              </View>
-            ))}
+            {renderFilterChip('platform', platformFilter ? platformFilter.toUpperCase() : '全部平台', Boolean(platformFilter))}
+            {renderFilterChip('group', groupFilter ? `分组 #${groupFilter}` : '全部分组', Boolean(groupFilter))}
+            {renderFilterChip('time', getTimeRangeLabel(timeRange), true)}
             <View style={{ backgroundColor: alertCount > 0 ? colors.errorBg : colors.successBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 }}>
               <Text style={{ color: alertCount > 0 ? colors.errorText : colors.success, fontSize: 12, fontWeight: '800' }}>
                 {alertCount > 0 ? `预警 ${formatCompactNumber(alertCount)}` : '预警规则'}
               </Text>
             </View>
           </View>
+          {activeFilterMenu ? (
+            <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, padding: 10 }}>
+              {activeFilterOptions.map((option) => {
+                const selected = isFilterOptionSelected(option.value);
+
+                return (
+                  <Pressable
+                    key={`${activeFilterMenu}-${option.value || 'all'}`}
+                    style={{
+                      backgroundColor: selected ? colors.primary : colors.card,
+                      borderColor: selected ? colors.primary : colors.border,
+                      borderRadius: 999,
+                      borderWidth: 1,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                    }}
+                    onPress={() => selectFilterOption(option.value)}
+                  >
+                    <Text style={{ color: selected ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
         </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
@@ -494,8 +746,6 @@ export default function OpsScreen() {
             <InfoTile label="TPS" value={formatCompactNumber(tokenPerSecond)} tone={tokenPerSecond > 0 ? 'success' : 'default'} />
             <InfoTile label="请求数" value={formatCompactNumber(totalRequests)} />
             <InfoTile label="Token数" value={formatCompactNumber(tokenConsumed)} />
-            <InfoTile label="平均 QPS" value={avgQps.toFixed(avgQps >= 10 ? 0 : 2)} />
-            <InfoTile label="平均 TPS" value={formatCompactNumber(avgTps)} />
             <InfoTile label="SLA" value={slaPercent === undefined ? '--' : formatPercent(slaPercent)} tone={slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : 'danger'} />
             <InfoTile label="错误率" value={formatPercent(errorRate * 100)} tone={errorRate > 0 ? 'danger' : 'success'} />
             <InfoTile label="错误数" value={formatCompactNumber(errors)} tone={errors > 0 ? 'danger' : 'default'} />

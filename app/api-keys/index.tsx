@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
+import * as Linking from 'expo-linking';
 import { Stack } from 'expo-router';
 import { ChevronDown, Copy, FileCode2, KeyRound, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
@@ -17,6 +18,9 @@ import type { AdminApiKey, PaginatedData } from '@/src/types/admin';
 type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?: AdminApiKey[]; api_keys?: AdminApiKey[]; keys?: AdminApiKey[]; data?: ApiKeySearchResult };
 type ApiKeyFormMode = 'create' | 'edit' | null;
 type FilterMenu = 'group' | 'status' | null;
+type CcSwitchClientType = 'claude' | 'gemini';
+
+const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-5.5';
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -81,6 +85,54 @@ function removeApiKeyFromResult(result: ApiKeySearchResult | undefined, deletedI
     return {
       ...result,
       data: removeApiKeyFromResult(shaped.data, deletedId),
+    };
+  }
+
+  return result;
+}
+
+function updateApiKeyInResult(
+  result: ApiKeySearchResult | undefined,
+  apiKeyId: number,
+  updates: Partial<AdminApiKey>
+): ApiKeySearchResult | undefined {
+  if (!result) return result;
+
+  const updateItems = (items: AdminApiKey[]) => items.map((item) => (
+    item.id === apiKeyId ? { ...item, ...updates } : item
+  ));
+
+  if (Array.isArray(result)) {
+    return updateItems(result);
+  }
+
+  if (Array.isArray(result.items)) {
+    return {
+      ...result,
+      items: updateItems(result.items),
+    };
+  }
+
+  const shaped = result as { api_keys?: AdminApiKey[]; keys?: AdminApiKey[]; data?: ApiKeySearchResult };
+
+  if (Array.isArray(shaped.api_keys)) {
+    return {
+      ...result,
+      api_keys: updateItems(shaped.api_keys),
+    };
+  }
+
+  if (Array.isArray(shaped.keys)) {
+    return {
+      ...result,
+      keys: updateItems(shaped.keys),
+    };
+  }
+
+  if (shaped.data) {
+    return {
+      ...result,
+      data: updateApiKeyInResult(shaped.data, apiKeyId, updates),
     };
   }
 
@@ -159,7 +211,7 @@ function sumUsageCost(rows: Record<string, unknown>[], predicate: (dateKey?: str
   return rows.reduce((sum, row) => {
     const dateKey = getDateKey(firstTextValue(row, ['date', 'day', 'created_at', 'createdAt']));
     if (!predicate(dateKey)) return sum;
-    return sum + (firstNumberValue(row, ['total_cost', 'totalCost', 'actual_cost', 'actualCost', 'cost']) ?? 0);
+    return sum + (firstNumberValue(row, ['total_actual_cost', 'totalActualCost', 'actual_cost', 'actualCost', 'total_cost', 'totalCost', 'cost']) ?? 0);
   }, 0);
 }
 
@@ -195,6 +247,114 @@ function formatRateLimit(item: AdminApiKey) {
   if (entries.length === 0) return '-';
 
   return entries.map(([label, value]) => `${label} ${formatNumber(value as number)}`).join(' · ');
+}
+
+function base64EncodeAscii(value: string) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let output = '';
+  let index = 0;
+
+  while (index < value.length) {
+    const first = value.charCodeAt(index++) & 0xff;
+    const second = index < value.length ? value.charCodeAt(index++) & 0xff : Number.NaN;
+    const third = index < value.length ? value.charCodeAt(index++) & 0xff : Number.NaN;
+    const triplet = (first << 16) | ((Number.isNaN(second) ? 0 : second) << 8) | (Number.isNaN(third) ? 0 : third);
+
+    output += chars[(triplet >> 18) & 63];
+    output += chars[(triplet >> 12) & 63];
+    output += Number.isNaN(second) ? '=' : chars[(triplet >> 6) & 63];
+    output += Number.isNaN(third) ? '=' : chars[triplet & 63];
+  }
+
+  return output;
+}
+
+function getServiceBaseUrl() {
+  return adminConfigState.baseUrl
+    .trim()
+    .replace(/\/api\/v1\/?$/, '')
+    .replace(/\/api\/?$/, '')
+    .replace(/\/$/, '');
+}
+
+function resolveCcSwitchImportConfig(platform: string | undefined, clientType: CcSwitchClientType, baseUrl: string) {
+  switch (platform || 'anthropic') {
+    case 'antigravity':
+      return {
+        app: clientType === 'gemini' ? 'gemini' : 'claude',
+        endpoint: `${baseUrl}/antigravity`,
+      };
+    case 'openai':
+      return {
+        app: 'codex',
+        endpoint: baseUrl,
+        model: OPENAI_CC_SWITCH_CODEX_MODEL,
+      };
+    case 'gemini':
+      return {
+        app: 'gemini',
+        endpoint: baseUrl,
+      };
+    default:
+      return {
+        app: 'claude',
+        endpoint: baseUrl,
+      };
+  }
+}
+
+function toQueryString(entries: [string, string][]) {
+  return entries.map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+}
+
+function buildCcSwitchImportDeeplink({
+  apiKey,
+  baseUrl,
+  clientType,
+  platform,
+  providerName,
+}: {
+  apiKey: string;
+  baseUrl: string;
+  clientType: CcSwitchClientType;
+  platform?: string;
+  providerName: string;
+}) {
+  const config = resolveCcSwitchImportConfig(platform, clientType, baseUrl);
+  const usageScript = `({
+    request: {
+      url: "{{baseUrl}}/v1/usage",
+      method: "GET",
+      headers: { "Authorization": "Bearer {{apiKey}}" }
+    },
+    extractor: function(response) {
+      const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
+      const unit = response?.unit ?? response?.quota?.unit ?? "USD";
+      return {
+        isValid: response?.is_active ?? response?.isValid ?? true,
+        remaining,
+        unit
+      };
+    }
+  })`;
+  const entries: [string, string][] = [
+    ['resource', 'provider'],
+    ['app', config.app],
+    ['name', providerName],
+    ['homepage', baseUrl],
+    ['endpoint', config.endpoint],
+    ['apiKey', apiKey],
+    ['configFormat', 'json'],
+    ['usageEnabled', 'true'],
+    ['usageScript', base64EncodeAscii(usageScript)],
+    ['usageAutoInterval', '30'],
+  ];
+
+  if (config.model) {
+    entries.splice(2, 0, ['model', config.model]);
+  }
+
+  return `ccswitch://v1/import?${toQueryString(entries)}`;
 }
 
 function getGroupLabel(item: AdminApiKey) {
@@ -474,7 +634,7 @@ export default function ApiKeysScreen() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id }: { id: number }) => updateAdminApiKey(id, getFormPayload(false, 'edit')),
+    mutationFn: ({ id, userId }: { id: number; userId?: number }) => updateAdminApiKey(id, getFormPayload(false, 'edit'), userId),
     onSuccess: () => {
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
@@ -486,8 +646,18 @@ export default function ApiKeysScreen() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: getNextStatus(item.status) }),
-    onSuccess: () => {
+    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: getNextStatus(item.status) }, item.user_id),
+    onMutate: () => setFormError(null),
+    onSuccess: (_data, item) => {
+      const status = getNextStatus(item.status);
+      queryClient.setQueriesData<ApiKeySearchResult>(
+        { queryKey: ['admin-api-keys'] },
+        (current) => updateApiKeyInResult(current, item.id, { status })
+      );
+      queryClient.setQueriesData<ApiKeySearchResult>(
+        { queryKey: ['user-api-keys'] },
+        (current) => updateApiKeyInResult(current, item.id, { status })
+      );
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
@@ -498,6 +668,7 @@ export default function ApiKeysScreen() {
 
   const deleteMutation = useMutation({
     mutationFn: (item: AdminApiKey) => deleteAdminApiKey(item.id, item.user_id),
+    onMutate: () => setFormError(null),
     onSuccess: (_data, item) => {
       queryClient.setQueriesData<ApiKeySearchResult>(
         { queryKey: ['admin-api-keys'] },
@@ -516,24 +687,51 @@ export default function ApiKeysScreen() {
   });
 
   async function copyKey(item: AdminApiKey) {
+    setFormError(null);
     await Clipboard.setStringAsync(item.key || '');
     const copyId = String(item.id || item.key);
     setCopiedKey(copyId);
     setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1400);
   }
 
-  async function copyCcsConfig(item: AdminApiKey) {
-    const serviceBaseUrl = adminConfigState.baseUrl.trim().replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '').replace(/\/$/, '');
-    const payload = {
-      name: item.name || `Key #${item.id}`,
-      base_url: serviceBaseUrl ? `${serviceBaseUrl}/v1` : '',
-      api_key: item.key || '',
-    };
+  async function executeCcsImport(item: AdminApiKey, clientType: CcSwitchClientType) {
+    setFormError(null);
+    const serviceBaseUrl = getServiceBaseUrl();
+    const platform = item.group?.platform || 'anthropic';
+    const deeplink = buildCcSwitchImportDeeplink({
+      apiKey: item.key || '',
+      baseUrl: serviceBaseUrl,
+      clientType,
+      platform,
+      providerName: 'Sub2API',
+    });
     const copyId = `ccs-${item.id || item.key}`;
 
-    await Clipboard.setStringAsync(JSON.stringify(payload, null, 2));
-    setCopiedKey(copyId);
-    setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1400);
+    try {
+      await Linking.openURL(deeplink);
+      setCopiedKey(copyId);
+      setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1400);
+    } catch {
+      await Clipboard.setStringAsync(deeplink);
+      setCopiedKey(copyId);
+      Alert.alert('导入 CCS', '未能直接打开 CCS，已复制导入链接。');
+      setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1800);
+    }
+  }
+
+  function importCcsConfig(item: AdminApiKey) {
+    const platform = item.group?.platform || 'anthropic';
+
+    if (platform === 'antigravity') {
+      Alert.alert('导入 CCS', '请选择要导入的客户端。', [
+        { text: '取消', style: 'cancel' },
+        { text: 'Claude Code', onPress: () => void executeCcsImport(item, 'claude') },
+        { text: 'Gemini CLI', onPress: () => void executeCcsImport(item, 'gemini') },
+      ]);
+      return;
+    }
+
+    void executeCcsImport(item, platform === 'gemini' ? 'gemini' : 'claude');
   }
 
   function confirmDelete(item: AdminApiKey) {
@@ -694,7 +892,7 @@ export default function ApiKeysScreen() {
                   }
 
                   if (editingItem?.id) {
-                    updateMutation.mutate({ id: editingItem.id });
+                    updateMutation.mutate({ id: editingItem.id, userId: editingItem.user_id });
                   }
                 }}
               >
@@ -737,9 +935,11 @@ export default function ApiKeysScreen() {
           const dailyRows = dailyUsageByKey.get(item.id) ?? [];
           const todayKey = getLocalDateKey();
           const last30StartKey = getLast30DayStartKey();
-          const todayCost = sumUsageCost(dailyRows, (dateKey) => dateKey === todayKey);
+          const dailyTodayCost = sumUsageCost(dailyRows, (dateKey) => dateKey === todayKey);
           const dailyLast30Cost = sumUsageCost(dailyRows, (dateKey) => Boolean(dateKey && dateKey >= last30StartKey && dateKey <= todayKey));
-          const dashboardCost = firstNumberValue(usage, ['total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0;
+          const dashboardTodayCost = firstNumberValue(usage, ['today_actual_cost', 'todayActualCost', 'today_cost', 'todayCost']) ?? 0;
+          const dashboardCost = firstNumberValue(usage, ['total_actual_cost', 'totalActualCost', 'total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0;
+          const todayCost = dailyTodayCost > 0 ? dailyTodayCost : dashboardTodayCost;
           const last30Cost = dailyLast30Cost > 0 ? dailyLast30Cost : dashboardCost;
 
           return (
@@ -784,7 +984,7 @@ export default function ApiKeysScreen() {
                   </Pressable>
                   <Pressable
                     style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }}
-                    onPress={() => copyCcsConfig(item)}
+                    onPress={() => importCcsConfig(item)}
                   >
                     <FileCode2 color={copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText} size={13} />
                     <Text style={{ color: copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>

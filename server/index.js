@@ -116,7 +116,8 @@ async function proxyUpstreamRequest(req, res, options = {}) {
     headers,
   };
 
-  if (!['GET', 'HEAD'].includes(req.method)) {
+  const hasBody = req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0;
+  if (!['GET', 'HEAD'].includes(req.method) && (req.method !== 'DELETE' || hasBody)) {
     init.body = JSON.stringify(req.body || {});
   }
 
@@ -124,13 +125,14 @@ async function proxyUpstreamRequest(req, res, options = {}) {
     const response = await fetch(upstreamUrl, init);
     const upstreamContentType = response.headers.get('content-type');
     const isJson = upstreamContentType?.includes('application/json');
+    const rawText = await response.text();
 
     let responseBody;
-    if (isJson) {
-      const json = await response.json();
+    if (isJson && rawText.trim()) {
+      const json = JSON.parse(rawText);
       responseBody = options.redactAccounts && req.path.startsWith('/accounts') ? redactAccountCredentials(json) : json;
     } else {
-      responseBody = await response.text();
+      responseBody = rawText;
     }
 
     if (upstreamContentType) {
@@ -242,6 +244,10 @@ app.get('/api/v1/keys', async (req, res) => {
 });
 
 app.use('/api/v1/keys/:id', async (req, res) => {
+  await proxyUpstreamRequest(req, res);
+});
+
+app.use('/api/v1/api-keys', async (req, res) => {
   await proxyUpstreamRequest(req, res);
 });
 

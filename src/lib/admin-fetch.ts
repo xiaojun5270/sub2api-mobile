@@ -32,6 +32,12 @@ function formatAuthorizationHeader(value: string) {
   return value.toLowerCase().startsWith('bearer ') ? value : `Bearer ${value}`;
 }
 
+function compactResponseText(value: string) {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  return cleaned.length > 180 ? `${cleaned.slice(0, 180)}...` : cleaned;
+}
+
 export async function adminFetch<T>(
   path: string,
   init: RequestInit = {},
@@ -67,6 +73,7 @@ export async function adminFetch<T>(
   });
 
   let json: unknown;
+  const method = (init.method || 'GET').toUpperCase();
   const rawText = await response.text();
 
   if (!rawText.trim()) {
@@ -80,7 +87,17 @@ export async function adminFetch<T>(
   try {
     json = JSON.parse(rawText);
   } catch {
-    throw new Error('INVALID_SERVER_RESPONSE');
+    const detail = compactResponseText(rawText);
+    const looksLikeHtml = /^</.test(detail) || /<html/i.test(rawText);
+    if (!response.ok) {
+      throw new Error(detail || `HTTP_${response.status}`);
+    }
+
+    if (method !== 'GET' && !looksLikeHtml) {
+      return rawText as T;
+    }
+
+    throw new Error(detail || 'INVALID_SERVER_RESPONSE');
   }
 
   if (hasNumericCode(json)) {
@@ -101,7 +118,11 @@ export async function adminFetch<T>(
   }
 
   if (!response.ok) {
-    const message = isRecord(json) && typeof json.message === 'string' ? json.message : 'REQUEST_FAILED';
+    const message = isRecord(json) && typeof json.message === 'string'
+      ? json.message
+      : isRecord(json) && typeof json.detail === 'string'
+        ? json.detail
+        : 'REQUEST_FAILED';
     throw new Error(message);
   }
 

@@ -145,6 +145,48 @@ function extractItems<T>(payload: unknown, preferredKeys: string[] = []): T[] {
   return [];
 }
 
+function hasApiKeyUsageShape(value: unknown) {
+  if (!isRecord(value)) return false;
+  return firstNumberField(value, [
+    'api_key_id',
+    'apiKeyId',
+    'today_actual_cost',
+    'todayActualCost',
+    'total_actual_cost',
+    'totalActualCost',
+    'total_cost',
+    'totalCost',
+    'actual_cost',
+    'actualCost',
+  ]) !== undefined;
+}
+
+function extractApiKeyUsageRows(payload: unknown): Record<string, unknown>[] {
+  const items = extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'data', 'api_keys', 'apiKeys', 'keys']);
+  if (items.length > 0) return items;
+
+  if (!isRecord(payload)) return [];
+
+  for (const key of ['stats', 'data', 'payload', 'result', 'response']) {
+    const value = payload[key];
+    if (Array.isArray(value)) return value as Record<string, unknown>[];
+    if (isRecord(value)) {
+      const nested = extractApiKeyUsageRows(value);
+      if (nested.length > 0) return nested;
+    }
+  }
+
+  return Object.entries(payload)
+    .filter(([, value]) => hasApiKeyUsageShape(value))
+    .map(([key, value]) => {
+      const row = value as Record<string, unknown>;
+      const apiKeyId = firstNumberField(row, ['api_key_id', 'apiKeyId', 'id']) ?? Number(key);
+      return Number.isFinite(apiKeyId) && apiKeyId > 0 && row.api_key_id === undefined
+        ? { ...row, api_key_id: apiKeyId }
+        : row;
+    });
+}
+
 function toPaginatedData<T>(payload: unknown, preferredKeys: string[] = []): PaginatedData<T> {
   const items = extractItems<T>(payload, preferredKeys);
   const total = firstNumberField(payload, ['total', 'total_count', 'count']) ?? items.length;
@@ -177,6 +219,25 @@ async function adminFetchWithOptionalQuery<T>(
     return adminFetch<T>(path);
   }
 }
+
+type OpsQueryParams = {
+  time_range?: string;
+  start_time?: string;
+  end_time?: string;
+  platform?: string;
+  group_id?: number | null;
+  mode?: string;
+  window?: string;
+  page?: number;
+  page_size?: number;
+  level?: string;
+  status?: string;
+  severity?: string;
+  limit?: number;
+  top_n?: number;
+  search?: string;
+  q?: string;
+};
 
 type ApiKeyRequestValue = string | number | boolean | null | string[] | undefined;
 
@@ -466,6 +527,7 @@ export function getDashboardTrend(params: {
   account_id?: number;
   group_id?: number;
   user_id?: number;
+  api_key_id?: number;
 }) {
   return adminFetch<DashboardTrend>(`/api/v1/admin/dashboard/trend${buildQuery(params)}`);
 }
@@ -593,46 +655,73 @@ export async function createAdminApiKey(body: CreateApiKeyRequest) {
     });
   } catch {
     try {
-      return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
+      return await adminFetch<AdminApiKey>('/api/v1/api-keys', {
         method: 'POST',
-        body: JSON.stringify(legacyBody),
+        body: JSON.stringify(primaryBody),
       });
-    } catch (error) {
-      if (!body.user_id) {
-        throw error;
-      }
+    } catch {
+      try {
+        return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
+          method: 'POST',
+          body: JSON.stringify(legacyBody),
+        });
+      } catch (error) {
+        if (!body.user_id) {
+          throw error;
+        }
 
-      return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
-        method: 'POST',
-        body: JSON.stringify(legacyBody),
-      });
+        return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
+          method: 'POST',
+          body: JSON.stringify(legacyBody),
+        });
+      }
     }
   }
 }
 
-export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
+function isAdminApiKeyUpdateBody(body: Record<string, Exclude<ApiKeyRequestValue, undefined>>) {
+  const adminFields = new Set(['group_id', 'reset_rate_limit_usage']);
+  const keys = Object.keys(body);
+  return keys.length > 0 && keys.every((key) => adminFields.has(key));
+}
+
+export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest, userId?: number) {
   const primaryBody = toPrimaryApiKeyRequestBody(body);
   const legacyBody = toLegacyApiKeyRequestBody(body);
+  const requests = [
+    { path: `/api/v1/keys/${apiKeyId}`, body: primaryBody },
+    { path: `/api/v1/api-keys/${apiKeyId}`, body: primaryBody },
+    ...(userId ? [{ path: `/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`, body: legacyBody }] : []),
+    ...(isAdminApiKeyUpdateBody(legacyBody) ? [{ path: `/api/v1/admin/api-keys/${apiKeyId}`, body: legacyBody }] : []),
+  ];
+  let firstError: unknown;
+  let lastError: unknown;
 
-  try {
-    return await adminFetch<AdminApiKey>(`/api/v1/keys/${apiKeyId}`, {
-      method: 'PUT',
-      body: JSON.stringify(primaryBody),
-    });
-  } catch {
-    return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
-      method: 'PUT',
-      body: JSON.stringify(legacyBody),
-    });
+  for (const request of requests) {
+    try {
+      return await adminFetch<AdminApiKey>(request.path, {
+        method: 'PUT',
+        body: JSON.stringify(request.body),
+      });
+    } catch (error) {
+      if (!firstError) {
+        firstError = error;
+      }
+      lastError = error;
+    }
   }
+
+  throw firstError ?? lastError;
 }
 
 export async function deleteAdminApiKey(apiKeyId: number, userId?: number) {
   const paths = [
     `/api/v1/keys/${apiKeyId}`,
-    `/api/v1/admin/api-keys/${apiKeyId}`,
+    `/api/v1/api-keys/${apiKeyId}`,
     ...(userId ? [`/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`] : []),
+    `/api/v1/admin/api-keys/${apiKeyId}`,
   ];
+  let firstError: unknown;
   let lastError: unknown;
 
   for (const path of paths) {
@@ -641,29 +730,57 @@ export async function deleteAdminApiKey(apiKeyId: number, userId?: number) {
         method: 'DELETE',
       });
     } catch (error) {
+      if (!firstError) {
+        firstError = error;
+      }
       lastError = error;
     }
   }
 
-  throw lastError;
+  throw firstError ?? lastError;
 }
 
 export async function getApiKeysUsageDashboard(apiKeyIds: number[] = []) {
-  const payload = await adminFetch<unknown>('/api/v1/usage/dashboard/api-keys-usage', {
-    method: 'POST',
-    body: JSON.stringify({ api_key_ids: apiKeyIds }),
-  });
+  try {
+    const payload = await adminFetch<unknown>('/api/v1/admin/dashboard/api-keys-usage', {
+      method: 'POST',
+      body: JSON.stringify({ api_key_ids: apiKeyIds }),
+    });
 
-  return extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'data', 'api_keys', 'apiKeys', 'keys']);
+    return extractApiKeyUsageRows(payload);
+  } catch {
+    const payload = await adminFetch<unknown>('/api/v1/usage/dashboard/api-keys-usage', {
+      method: 'POST',
+      body: JSON.stringify({ api_key_ids: apiKeyIds }),
+    });
+
+    return extractApiKeyUsageRows(payload);
+  }
 }
 
 export async function getApiKeyDailyUsage(apiKeyId: number) {
   try {
-    const payload = await adminFetch<unknown>(`/api/v1/user/api-keys/${apiKeyId}/usage/daily`);
+    const payload = await adminFetch<unknown>(`/api/v1/user/api-keys/${apiKeyId}/usage/daily${buildQuery({ days: 30, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })}`);
     return extractItems<Record<string, unknown>>(payload, ['items', 'data', 'usage', 'records', 'rows']);
   } catch {
-    const payload = await adminFetch<unknown>(`/api/v1/usage${buildQuery({ api_key_id: apiKeyId })}`);
-    return extractItems<Record<string, unknown>>(payload, ['items', 'data', 'usage', 'records', 'rows']);
+    try {
+      const today = new Date();
+      const start = new Date(today);
+      start.setDate(start.getDate() - 29);
+      const startDate = start.toISOString().slice(0, 10);
+      const endDate = today.toISOString().slice(0, 10);
+      const payload = await adminFetch<unknown>(`/api/v1/admin/dashboard/trend${buildQuery({
+        api_key_id: apiKeyId,
+        end_date: endDate,
+        granularity: 'day',
+        start_date: startDate,
+      })}`);
+
+      return extractItems<Record<string, unknown>>(payload, ['trend', 'items', 'data', 'usage', 'records', 'rows']);
+    } catch {
+      const payload = await adminFetch<unknown>(`/api/v1/usage${buildQuery({ api_key_id: apiKeyId, page: 1, page_size: 200 })}`);
+      return extractItems<Record<string, unknown>>(payload, ['items', 'data', 'usage', 'records', 'rows']);
+    }
   }
 }
 
@@ -814,20 +931,20 @@ export function batchClearAccountErrors(accountIds: number[]) {
   });
 }
 
-export function getOpsDashboardOverview() {
-  return adminFetch<OpsDashboardOverview>('/api/v1/admin/ops/dashboard/overview');
+export function getOpsDashboardOverview(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<OpsDashboardOverview>('/api/v1/admin/ops/dashboard/overview', params);
 }
 
-export function getOpsDashboardSnapshot() {
-  return adminFetch<OpsDashboardSnapshot>('/api/v1/admin/ops/dashboard/snapshot-v2');
+export function getOpsDashboardSnapshot(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<OpsDashboardSnapshot>('/api/v1/admin/ops/dashboard/snapshot-v2', params);
 }
 
-export function getOpsRealtimeTraffic() {
-  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/realtime-traffic');
+export function getOpsRealtimeTraffic(params: Pick<OpsQueryParams, 'window' | 'platform' | 'group_id'> = {}) {
+  return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/realtime-traffic', params);
 }
 
-export function getOpsConcurrency() {
-  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/concurrency');
+export function getOpsConcurrency(params: Pick<OpsQueryParams, 'platform' | 'group_id'> = {}) {
+  return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/concurrency', params);
 }
 
 export function getOpsUserConcurrency() {
@@ -838,8 +955,8 @@ export function getOpsAccountAvailability() {
   return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/account-availability');
 }
 
-export function getOpsOpenAiTokenStats() {
-  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/dashboard/openai-token-stats');
+export function getOpsOpenAiTokenStats(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/dashboard/openai-token-stats', params);
 }
 
 export function getOpsRuntimeAlert() {
@@ -879,7 +996,7 @@ export function resolveOpsUpstreamError(errorId: number | string) {
   });
 }
 
-export function getOpsSystemLogs(params: { page?: number; page_size?: number; level?: string; search?: string } = {}) {
+export function getOpsSystemLogs(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/system-logs', params);
 }
 
@@ -893,7 +1010,7 @@ export function cleanupOpsSystemLogs() {
   });
 }
 
-export function getOpsAlertEvents(params: { page?: number; page_size?: number; status?: string } = {}) {
+export function getOpsAlertEvents(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/alert-events', params);
 }
 
@@ -904,24 +1021,24 @@ export function updateOpsAlertEventStatus(eventId: number | string, status: stri
   });
 }
 
-export function getOpsErrorTrend() {
-  return adminFetch<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-trend');
+export function getOpsErrorTrend(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-trend', params);
 }
 
 export function getOpsErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/errors', params);
 }
 
-export function getOpsErrorDistribution() {
-  return adminFetch<{ distribution?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-distribution');
+export function getOpsErrorDistribution(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<{ distribution?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-distribution', params);
 }
 
-export function getOpsLatencyHistogram() {
-  return adminFetch<{ histogram?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/latency-histogram');
+export function getOpsLatencyHistogram(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<{ histogram?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/latency-histogram', params);
 }
 
-export function getOpsThroughputTrend() {
-  return adminFetch<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/throughput-trend');
+export function getOpsThroughputTrend(params: OpsQueryParams = {}) {
+  return adminFetchWithOptionalQuery<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/throughput-trend', params);
 }
 
 export function getSystemVersion() {
