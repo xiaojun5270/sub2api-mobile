@@ -132,14 +132,15 @@ export type AdminApiKey = {
   user_id: number;
   user_email?: string;
   key: string;
+  custom_key?: string;
   name: string;
   group_id?: number | null;
   group_name?: string | null;
   status: string;
   quota: number;
   quota_used: number;
-  ip_whitelist?: string | null;
-  ip_blacklist?: string | null;
+  ip_whitelist?: string | string[] | null;
+  ip_blacklist?: string | string[] | null;
   rate_limit_5h?: number;
   rate_limit_1d?: number;
   rate_limit_7d?: number;
@@ -166,9 +167,13 @@ export type CreateApiKeyRequest = {
   user_id?: number;
   name?: string;
   key?: string;
+  custom_key?: string;
   group_id?: number | null;
   quota?: number | null;
   expires_at?: string | null;
+  expires_in_days?: number | null;
+  ip_whitelist?: string | string[] | null;
+  ip_blacklist?: string | string[] | null;
   rate_limit_5h?: number | null;
   rate_limit_1d?: number | null;
   rate_limit_7d?: number | null;
@@ -178,13 +183,18 @@ export type CreateApiKeyRequest = {
 export type UpdateApiKeyRequest = {
   name?: string;
   key?: string;
+  custom_key?: string;
   group_id?: number | null;
   quota?: number | null;
   expires_at?: string | null;
+  ip_whitelist?: string | string[] | null;
+  ip_blacklist?: string | string[] | null;
   rate_limit_5h?: number | null;
   rate_limit_1d?: number | null;
   rate_limit_7d?: number | null;
   status?: string;
+  reset_quota?: boolean;
+  reset_rate_limit_usage?: boolean;
 };
 
 export type BalanceOperation = 'set' | 'add' | 'subtract';

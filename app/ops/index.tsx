@@ -391,19 +391,30 @@ export default function OpsScreen() {
   const requestErrors = requestErrorItems.length > 0 ? requestErrorItems : genericErrorItems.length > 0 ? genericErrorItems : upstreamErrorItems;
   const systemLogs = getItems(systemLogsQuery.data).slice(0, 8);
   const alertEvents = getItems(alertEventsQuery.data).slice(0, 8);
+  const overviewRecord = isRecord(overview) ? overview : undefined;
+  const qpsMetrics = nestedRecord(overview, 'qps') ?? nestedRecord(realtime, 'qps');
+  const tpsMetrics = nestedRecord(overview, 'tps') ?? nestedRecord(realtime, 'tps');
+  const durationMetrics = nestedRecord(overview, 'duration') ?? nestedRecord(overview, 'latency');
+  const ttftMetrics = nestedRecord(overview, 'ttft');
+  const systemMetrics = nestedRecord(overview, 'system_metrics') ?? nestedRecord(overview, 'systemMetrics') ?? overviewRecord;
 
-  const successCount = firstNumber(overview, ['success_count', 'successCount', 'successes', 'success']);
-  const errors = firstNumber(overview, ['error_count_total', 'errorCountTotal', 'errors', 'error_count', 'errorCount', 'request_errors', 'requestErrors', 'total_errors', 'totalErrors']);
-  const realtimeRequests = firstNumber(realtime, ['total_requests', 'totalRequests', 'requests']);
-  const totalRequests = firstNumber(overview, ['total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount']) || realtimeRequests || successCount + errors;
+  const successCount = firstNumber(overview, ['success_count', 'successCount', 'request_count_success', 'requestCountSuccess', 'successes', 'success']);
+  const errors = firstNumber(overview, ['error_count_total', 'errorCountTotal', 'request_error_count', 'requestErrorCount', 'errors', 'error_count', 'errorCount', 'request_errors', 'requestErrors', 'total_errors', 'totalErrors']);
+  const realtimeRequests = firstNumber(realtime, ['request_count_total', 'requestCountTotal', 'total_requests', 'totalRequests', 'requests']);
+  const totalRequests = firstNumber(overview, ['request_count_total', 'requestCountTotal', 'total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount']) || realtimeRequests || successCount + errors;
   const rawErrorRate = firstNumberValue(overview, ['error_rate', 'errorRate', 'errors_rate']);
   const errorRate = rawErrorRate !== undefined ? (rawErrorRate > 1 ? rawErrorRate / 100 : rawErrorRate) : totalRequests > 0 ? errors / totalRequests : 0;
-  const qps = firstNumber(overview, ['qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
+  const rawUpstreamErrorRate = firstNumberValue(overview, ['upstream_error_rate', 'upstreamErrorRate']);
+  const upstreamErrorRate = rawUpstreamErrorRate !== undefined ? (rawUpstreamErrorRate > 1 ? rawUpstreamErrorRate / 100 : rawUpstreamErrorRate) : 0;
+  const rawSla = firstNumberValue(overview, ['sla', 'sla_rate', 'slaRate', 'success_rate', 'successRate']);
+  const slaPercent = rawSla !== undefined ? (rawSla > 1 ? rawSla : rawSla * 100) : undefined;
+  const healthScore = firstNumberValue(overview, ['health_score', 'healthScore']);
+  const qps = firstNumber(qpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
   const rpm = firstNumber(overview, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || firstNumber(realtime, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || qps * 60;
-  const avgLatency = firstNumber(overview, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs', 'latency_ms', 'latencyMs', 'avg_duration_ms', 'avgDurationMs']) || firstNumber(realtime, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs']);
-  const p95Latency = firstNumber(overview, ['duration_p95_ms', 'durationP95Ms', 'p95_latency_ms', 'p95LatencyMs', 'p95', 'latency_p95_ms', 'latencyP95Ms']);
-  const p99Latency = firstNumber(overview, ['duration_p99_ms', 'durationP99Ms', 'p99_latency_ms', 'p99LatencyMs', 'p99', 'latency_p99_ms', 'latencyP99Ms']);
-  const ttftAvg = firstNumber(overview, ['ttft_avg_ms', 'ttftAvgMs', 'time_to_first_token_avg_ms', 'timeToFirstTokenAvgMs']);
+  const avgLatency = firstNumber(durationMetrics, ['avg_ms', 'avgMs', 'avg', 'average_ms', 'averageMs']) || firstNumber(overview, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs', 'latency_ms', 'latencyMs', 'avg_duration_ms', 'avgDurationMs']) || firstNumber(realtime, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs']);
+  const p95Latency = firstNumber(durationMetrics, ['p95_ms', 'p95Ms', 'p95']) || firstNumber(overview, ['duration_p95_ms', 'durationP95Ms', 'p95_latency_ms', 'p95LatencyMs', 'p95', 'latency_p95_ms', 'latencyP95Ms']);
+  const p99Latency = firstNumber(durationMetrics, ['p99_ms', 'p99Ms', 'p99']) || firstNumber(overview, ['duration_p99_ms', 'durationP99Ms', 'p99_latency_ms', 'p99LatencyMs', 'p99', 'latency_p99_ms', 'latencyP99Ms']);
+  const ttftAvg = firstNumber(ttftMetrics, ['avg_ms', 'avgMs', 'avg']) || firstNumber(overview, ['ttft_avg_ms', 'ttftAvgMs', 'time_to_first_token_avg_ms', 'timeToFirstTokenAvgMs']);
   const healthyAccountCount = accountAvailabilityItems.filter(isHealthyAccount).length;
   const activeAccountCount = accountAvailabilityItems.filter((item) => `${item.status ?? ''}`.toLowerCase() === 'active').length;
   const unavailableAccountCount = accountAvailabilityItems.length > 0 ? accountAvailabilityItems.length - healthyAccountCount : 0;
@@ -414,16 +425,15 @@ export default function OpsScreen() {
   const totalAlertEvents = firstNumberValue(runtimeAlert, ['events_total', 'eventsTotal', 'total']) ?? firstNumber(alertEventsQuery.data, ['total']);
   const enabledAlertRules = firstNumber(runtimeAlert, ['rules_enabled', 'rulesEnabled']);
   const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
-  const queueSize = firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
-  const tokenPerSecond = firstNumber(overview, ['tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
+  const queueSize = firstNumber(systemMetrics, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
+  const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
   const tokenConsumed = firstNumber(overview, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']) || firstNumber(tokenStats, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']);
   const businessLimited = firstNumber(overview, ['business_limited_count', 'businessLimitedCount']);
-  const cpuUsage = firstNumber(overview, ['cpu_usage_percent', 'cpuUsagePercent']);
-  const memoryUsage = firstNumber(overview, ['memory_usage_percent', 'memoryUsagePercent']);
-  const memoryUsed = firstNumber(overview, ['memory_used_mb', 'memoryUsedMb']);
-  const overviewRecord = isRecord(overview) ? overview : undefined;
-  const dbStatus = formatHealth(overviewRecord?.db_ok ?? overviewRecord?.dbOk);
-  const redisStatus = formatHealth(overviewRecord?.redis_ok ?? overviewRecord?.redisOk);
+  const cpuUsage = firstNumber(systemMetrics, ['cpu_usage_percent', 'cpuUsagePercent']) || firstNumber(overview, ['cpu_usage_percent', 'cpuUsagePercent']);
+  const memoryUsage = firstNumber(systemMetrics, ['memory_usage_percent', 'memoryUsagePercent']) || firstNumber(overview, ['memory_usage_percent', 'memoryUsagePercent']);
+  const memoryUsed = firstNumber(systemMetrics, ['memory_used_mb', 'memoryUsedMb']) || firstNumber(overview, ['memory_used_mb', 'memoryUsedMb']);
+  const dbStatus = formatHealth(systemMetrics?.db_ok ?? systemMetrics?.dbOk);
+  const redisStatus = formatHealth(systemMetrics?.redis_ok ?? systemMetrics?.redisOk);
   const activeUsers = firstNumber(userConcurrency, ['active_users', 'activeUsers', 'users', 'total']);
   const logsTotal = firstNumber(logsHealth, ['total_logs', 'totalLogs', 'total']);
   const logsErrorCount = firstNumber(nestedRecord(logsHealth, 'levels'), ['error', 'errors']);
@@ -579,7 +589,10 @@ export default function OpsScreen() {
             <InfoTile label="QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} tone={qps > 0 ? 'success' : 'default'} />
             <InfoTile label="RPM" value={formatCompactNumber(rpm)} />
             <InfoTile label="成功请求" value={formatCompactNumber(successCount)} tone={successCount > 0 ? 'success' : 'default'} />
+            <InfoTile label="健康分" value={healthScore === undefined ? '--' : formatCompactNumber(healthScore)} tone={healthScore === undefined ? 'default' : healthScore >= 90 ? 'success' : healthScore < 60 ? 'danger' : 'default'} />
+            <InfoTile label="SLA" value={slaPercent === undefined ? '--' : formatPercent(slaPercent)} tone={slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : 'danger'} />
             <InfoTile label="错误率" value={formatPercent(errorRate * 100)} tone={errorRate > 0 ? 'danger' : 'success'} />
+            <InfoTile label="上游错误率" value={formatPercent(upstreamErrorRate * 100)} tone={upstreamErrorRate > 0 ? 'danger' : 'success'} />
             <InfoTile label="业务限流" value={formatCompactNumber(businessLimited)} tone={businessLimited > 0 ? 'danger' : 'default'} />
             <InfoTile label="并发中" value={formatCompactNumber(currentConcurrency)} />
             <InfoTile label="队列" value={formatCompactNumber(queueSize)} tone={queueSize > 0 ? 'danger' : 'default'} />

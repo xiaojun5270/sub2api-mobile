@@ -178,6 +178,65 @@ async function adminFetchWithOptionalQuery<T>(
   }
 }
 
+type ApiKeyRequestValue = string | number | boolean | null | string[] | undefined;
+
+function cleanApiKeyRequestBody(body: Record<string, ApiKeyRequestValue>) {
+  const payload: Record<string, Exclude<ApiKeyRequestValue, undefined>> = {};
+
+  Object.entries(body).forEach(([key, value]) => {
+    if (value !== undefined) {
+      payload[key] = value;
+    }
+  });
+
+  return payload;
+}
+
+function expiryDateFromDays(days?: number | null) {
+  if (typeof days !== 'number' || !Number.isFinite(days) || days <= 0) return undefined;
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + days);
+
+  return expiresAt.toISOString();
+}
+
+function toPrimaryApiKeyRequestBody(body: CreateApiKeyRequest | UpdateApiKeyRequest) {
+  const payload = cleanApiKeyRequestBody(body as Record<string, ApiKeyRequestValue>);
+  const customKey = body.custom_key || body.key;
+
+  delete payload.key;
+  delete payload.user_id;
+
+  if (customKey?.trim()) {
+    payload.custom_key = customKey.trim();
+  } else {
+    delete payload.custom_key;
+  }
+
+  return payload;
+}
+
+function toLegacyApiKeyRequestBody(body: CreateApiKeyRequest | UpdateApiKeyRequest) {
+  const payload = cleanApiKeyRequestBody(body as Record<string, ApiKeyRequestValue>);
+
+  if (!payload.key && body.custom_key?.trim()) {
+    payload.key = body.custom_key.trim();
+  }
+
+  if (!payload.expires_at) {
+    const expiresAt = expiryDateFromDays('expires_in_days' in body ? body.expires_in_days : undefined);
+    if (expiresAt) {
+      payload.expires_at = expiresAt;
+    }
+  }
+
+  delete payload.custom_key;
+  delete payload.expires_in_days;
+
+  return payload;
+}
+
 function keyMatchesSearch(item: AdminApiKey, search: string) {
   if (!search) return true;
 
@@ -209,7 +268,7 @@ function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?
   const groupId = firstNumberField(source, ['group_id', 'groupId']);
   const groupName = firstStringField(source, ['group_name', 'groupName']);
   const userEmail = firstStringField(source, ['user_email', 'userEmail', 'email']) ?? owner?.email;
-  const key = firstStringField(source, ['key', 'api_key', 'apiKey', 'key_value', 'keyValue', 'token', 'value']) ?? '';
+  const key = firstStringField(source, ['key', 'custom_key', 'customKey', 'api_key', 'apiKey', 'key_value', 'keyValue', 'token', 'value']) ?? '';
   const name = firstStringField(source, ['name', 'label', 'title', 'remark', 'description']) || (key ? `Key ${key.slice(0, 8)}` : `Key #${id || '--'}`);
   const enabled = firstBooleanField(source, ['enabled', 'is_active', 'isActive', 'active']);
   const status = firstStringField(source, ['status', 'state']) || (enabled === false ? 'disabled' : 'active');
@@ -233,6 +292,7 @@ function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?
     user_id: userId,
     user_email: userEmail,
     key,
+    custom_key: firstStringField(source, ['custom_key', 'customKey']) ?? (raw as AdminApiKey).custom_key,
     name,
     group_id: groupId ?? ((raw as AdminApiKey).group_id ?? null),
     group_name: groupName ?? (raw as AdminApiKey).group_name,
@@ -423,16 +483,19 @@ export async function searchAdminApiKeys(search = '') {
 }
 
 export async function createAdminApiKey(body: CreateApiKeyRequest) {
+  const primaryBody = toPrimaryApiKeyRequestBody(body);
+  const legacyBody = toLegacyApiKeyRequestBody(body);
+
   try {
     return await adminFetch<AdminApiKey>('/api/v1/keys', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(primaryBody),
     });
   } catch {
     try {
       return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(legacyBody),
       });
     } catch (error) {
       if (!body.user_id) {
@@ -441,22 +504,25 @@ export async function createAdminApiKey(body: CreateApiKeyRequest) {
 
       return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify(legacyBody),
       });
     }
   }
 }
 
 export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
+  const primaryBody = toPrimaryApiKeyRequestBody(body);
+  const legacyBody = toLegacyApiKeyRequestBody(body);
+
   try {
     return await adminFetch<AdminApiKey>(`/api/v1/keys/${apiKeyId}`, {
       method: 'PUT',
-      body: JSON.stringify(body),
+      body: JSON.stringify(primaryBody),
     });
   } catch {
     return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
       method: 'PUT',
-      body: JSON.stringify(body),
+      body: JSON.stringify(legacyBody),
     });
   }
 }
@@ -473,11 +539,13 @@ export async function deleteAdminApiKey(apiKeyId: number) {
   }
 }
 
-export function getApiKeysUsageDashboard() {
-  return adminFetch<Array<Record<string, unknown>>>('/api/v1/usage/dashboard/api-keys-usage', {
+export async function getApiKeysUsageDashboard(apiKeyIds: number[] = []) {
+  const payload = await adminFetch<unknown>('/api/v1/usage/dashboard/api-keys-usage', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ api_key_ids: apiKeyIds }),
   });
+
+  return extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'data', 'api_keys', 'apiKeys', 'keys']);
 }
 
 export function updateUserBalance(

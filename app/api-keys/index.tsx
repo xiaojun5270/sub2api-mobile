@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
-import { KeyRound, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from 'lucide-react-native';
+import { Copy, KeyRound, Pencil, Plus, Power, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 
@@ -42,8 +42,8 @@ function getApiKeyItems(result?: ApiKeySearchResult) {
 
 function maskKey(value?: string) {
   if (!value) return '--';
-  if (value.length <= 18) return value;
-  return `${value.slice(0, 10)}...${value.slice(-6)}`;
+  if (value.length <= 12) return `${value.slice(0, 4)}***`;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 function formatNumber(value?: number | null) {
@@ -116,6 +116,31 @@ function isDisabledStatus(status?: string) {
   return ['disabled', 'inactive', 'revoked'].includes(`${status || ''}`.toLowerCase());
 }
 
+function getNextStatus(status?: string) {
+  return isDisabledStatus(status) ? 'active' : 'inactive';
+}
+
+function hasPositiveValue(value?: number | null) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function formatIpValue(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.join(', ') : '未限制';
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  return '未限制';
+}
+
+function getIpFormValue(value?: string | string[] | null) {
+  if (Array.isArray(value)) return value.join('\n');
+  return value || '';
+}
+
 function getUserLabel(item: AdminApiKey) {
   return item.user?.email || item.user_email || item.user?.username || `${item.user_id || '--'}`;
 }
@@ -157,12 +182,14 @@ function Field({
   onChangeText,
   placeholder,
   keyboardType,
+  multiline,
 }: {
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   placeholder?: string;
   keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
+  multiline?: boolean;
 }) {
   const colors = useAppTheme();
 
@@ -175,12 +202,15 @@ function Field({
         placeholder={placeholder}
         placeholderTextColor={colors.placeholder}
         keyboardType={keyboardType}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : 'center'}
         style={{
           backgroundColor: colors.muted,
           borderColor: colors.border,
           borderRadius: 12,
           borderWidth: 1,
           color: colors.text,
+          minHeight: multiline ? 86 : undefined,
           paddingHorizontal: 12,
           paddingVertical: 11,
         }}
@@ -201,9 +231,13 @@ export default function ApiKeysScreen() {
   const [formUserId, setFormUserId] = useState('');
   const [formName, setFormName] = useState('');
   const [formKey, setFormKey] = useState('');
+  const [formStatus, setFormStatus] = useState('active');
   const [formGroupId, setFormGroupId] = useState('');
   const [formQuota, setFormQuota] = useState('');
   const [formExpiresAt, setFormExpiresAt] = useState('');
+  const [formExpiresInDays, setFormExpiresInDays] = useState('');
+  const [formIpWhitelist, setFormIpWhitelist] = useState('');
+  const [formIpBlacklist, setFormIpBlacklist] = useState('');
   const [formRateLimit5h, setFormRateLimit5h] = useState('');
   const [formRateLimit1d, setFormRateLimit1d] = useState('');
   const [formRateLimit7d, setFormRateLimit7d] = useState('');
@@ -213,16 +247,20 @@ export default function ApiKeysScreen() {
     queryFn: () => searchAdminApiKeys(keyword),
   });
 
-  const usageQuery = useQuery({
-    queryKey: ['api-keys-usage-dashboard'],
-    queryFn: getApiKeysUsageDashboard,
-    staleTime: 30_000,
-  });
-
   const allApiKeys = useMemo(
     () => getApiKeyItems(apiKeysQuery.data as ApiKeySearchResult | undefined),
     [apiKeysQuery.data]
   );
+  const apiKeyIds = useMemo(
+    () => allApiKeys.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0),
+    [allApiKeys]
+  );
+  const usageQuery = useQuery({
+    queryKey: ['api-keys-usage-dashboard', apiKeyIds.join(',')],
+    queryFn: () => getApiKeysUsageDashboard(apiKeyIds),
+    enabled: apiKeyIds.length > 0,
+    staleTime: 30_000,
+  });
   const usageByKey = useMemo(() => {
     const entries = new Map<number, Record<string, unknown>>();
 
@@ -280,19 +318,24 @@ export default function ApiKeysScreen() {
     setFormUserId('');
     setFormName('');
     setFormKey('');
+    setFormStatus('active');
     setFormGroupId('');
     setFormQuota('');
     setFormExpiresAt('');
+    setFormExpiresInDays('');
+    setFormIpWhitelist('');
+    setFormIpBlacklist('');
     setFormRateLimit5h('');
     setFormRateLimit1d('');
     setFormRateLimit7d('');
     setFormError(null);
   }
 
-  function getFormPayload(includeUserId: boolean) {
+  function getFormPayload(includeUserId: boolean, mode: 'create' | 'edit') {
     const userId = toNullableNumber(formUserId);
     const groupId = toNullableNumber(formGroupId);
     const quota = toNullableNumber(formQuota);
+    const expiresInDays = toNullableNumber(formExpiresInDays);
     const rateLimit5h = toNullableNumber(formRateLimit5h);
     const rateLimit1d = toNullableNumber(formRateLimit1d);
     const rateLimit7d = toNullableNumber(formRateLimit7d);
@@ -300,13 +343,17 @@ export default function ApiKeysScreen() {
     return {
       ...(includeUserId && userId ? { user_id: userId } : {}),
       ...(formName.trim() ? { name: formName.trim() } : {}),
-      ...(formKey.trim() ? { key: formKey.trim() } : {}),
-      group_id: groupId,
-      quota,
-      expires_at: formExpiresAt.trim() || null,
-      rate_limit_5h: rateLimit5h,
-      rate_limit_1d: rateLimit1d,
-      rate_limit_7d: rateLimit7d,
+      ...(formKey.trim() ? { custom_key: formKey.trim(), key: formKey.trim() } : {}),
+      ...(mode === 'edit' ? { status: formStatus } : {}),
+      ...(mode === 'edit' || groupId !== null ? { group_id: groupId } : {}),
+      ...(mode === 'edit' || quota !== null ? { quota } : {}),
+      ...(mode === 'create' && expiresInDays !== null ? { expires_in_days: expiresInDays } : {}),
+      ...(mode === 'edit' ? { expires_at: formExpiresAt.trim() || null } : {}),
+      ...(mode === 'edit' || formIpWhitelist.trim() ? { ip_whitelist: formIpWhitelist.trim() || null } : {}),
+      ...(mode === 'edit' || formIpBlacklist.trim() ? { ip_blacklist: formIpBlacklist.trim() || null } : {}),
+      ...(mode === 'edit' || rateLimit5h !== null ? { rate_limit_5h: rateLimit5h } : {}),
+      ...(mode === 'edit' || rateLimit1d !== null ? { rate_limit_1d: rateLimit1d } : {}),
+      ...(mode === 'edit' || rateLimit7d !== null ? { rate_limit_7d: rateLimit7d } : {}),
     };
   }
 
@@ -316,9 +363,13 @@ export default function ApiKeysScreen() {
     setFormUserId('');
     setFormName('');
     setFormKey('');
+    setFormStatus('active');
     setFormGroupId('');
     setFormQuota('');
     setFormExpiresAt('');
+    setFormExpiresInDays('');
+    setFormIpWhitelist('');
+    setFormIpBlacklist('');
     setFormRateLimit5h('');
     setFormRateLimit1d('');
     setFormRateLimit7d('');
@@ -331,9 +382,13 @@ export default function ApiKeysScreen() {
     setFormUserId(item.user_id ? String(item.user_id) : '');
     setFormName(item.name || '');
     setFormKey('');
+    setFormStatus(isDisabledStatus(item.status) ? 'inactive' : 'active');
     setFormGroupId(item.group_id ? String(item.group_id) : '');
     setFormQuota(item.quota ? String(item.quota) : '');
     setFormExpiresAt(item.expires_at || '');
+    setFormExpiresInDays('');
+    setFormIpWhitelist(getIpFormValue(item.ip_whitelist));
+    setFormIpBlacklist(getIpFormValue(item.ip_blacklist));
     setFormRateLimit5h(item.rate_limit_5h ? String(item.rate_limit_5h) : '');
     setFormRateLimit1d(item.rate_limit_1d ? String(item.rate_limit_1d) : '');
     setFormRateLimit7d(item.rate_limit_7d ? String(item.rate_limit_7d) : '');
@@ -342,12 +397,11 @@ export default function ApiKeysScreen() {
 
   const createMutation = useMutation({
     mutationFn: () => {
-      const userId = toNullableNumber(formUserId);
-      if (!userId) {
-        throw new Error('请输入用户 ID');
+      if (!formName.trim()) {
+        throw new Error('请输入名称');
       }
 
-      return createAdminApiKey(getFormPayload(true));
+      return createAdminApiKey(getFormPayload(true, 'create'));
     },
     onSuccess: () => {
       resetForm();
@@ -359,7 +413,7 @@ export default function ApiKeysScreen() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id }: { id: number }) => updateAdminApiKey(id, getFormPayload(false)),
+    mutationFn: ({ id }: { id: number }) => updateAdminApiKey(id, getFormPayload(false, 'edit')),
     onSuccess: () => {
       resetForm();
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
@@ -370,7 +424,27 @@ export default function ApiKeysScreen() {
   });
 
   const toggleMutation = useMutation({
-    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: isDisabledStatus(item.status) ? 'active' : 'disabled' }),
+    mutationFn: (item: AdminApiKey) => updateAdminApiKey(item.id, { status: getNextStatus(item.status) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+    },
+    onError: (error) => setFormError(getErrorMessage(error)),
+  });
+
+  const resetQuotaMutation = useMutation({
+    mutationFn: (id: number) => updateAdminApiKey(id, { reset_quota: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
+      queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+    },
+    onError: (error) => setFormError(getErrorMessage(error)),
+  });
+
+  const resetRateMutation = useMutation({
+    mutationFn: (id: number) => updateAdminApiKey(id, { reset_rate_limit_usage: true }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
@@ -403,6 +477,28 @@ export default function ApiKeysScreen() {
         text: '删除',
         style: 'destructive',
         onPress: () => deleteMutation.mutate(item.id),
+      },
+    ]);
+  }
+
+  function confirmResetQuota(item: AdminApiKey) {
+    Alert.alert('重置额度用量', `确认将 ${item.name || `Key #${item.id}`} 的已用额度清零吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '重置',
+        style: 'destructive',
+        onPress: () => resetQuotaMutation.mutate(item.id),
+      },
+    ]);
+  }
+
+  function confirmResetRateUsage(item: AdminApiKey) {
+    Alert.alert('重置限流用量', `确认重置 ${item.name || `Key #${item.id}`} 的 5H / 1D / 7D 用量吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '重置',
+        style: 'destructive',
+        onPress: () => resetRateMutation.mutate(item.id),
       },
     ]);
   }
@@ -476,16 +572,50 @@ export default function ApiKeysScreen() {
           <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
             <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800' }}>{formMode === 'create' ? '创建 API Key' : '编辑 API Key'}</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
-              {formMode === 'create' ? <Field label="用户 ID" value={formUserId} onChangeText={setFormUserId} placeholder="必填" keyboardType="number-pad" /> : null}
+              {formMode === 'create' ? <Field label="用户 ID" value={formUserId} onChangeText={setFormUserId} placeholder="旧接口回退时可选" keyboardType="number-pad" /> : null}
               <Field label="名称" value={formName} onChangeText={setFormName} placeholder="例如：生产 Key" />
-              <Field label="Key" value={formKey} onChangeText={setFormKey} placeholder={formMode === 'create' ? '留空则由后端生成' : '留空不修改'} />
+              <Field label="自定义 Key" value={formKey} onChangeText={setFormKey} placeholder={formMode === 'create' ? '留空则由后端生成' : '留空不修改'} />
               <Field label="分组 ID" value={formGroupId} onChangeText={setFormGroupId} placeholder="留空表示不绑定" keyboardType="number-pad" />
               <Field label="额度" value={formQuota} onChangeText={setFormQuota} placeholder="留空表示不限" keyboardType="decimal-pad" />
-              <Field label="过期时间" value={formExpiresAt} onChangeText={setFormExpiresAt} placeholder="2026-12-31T23:59:59Z" />
+              {formMode === 'create' ? (
+                <Field label="有效天数" value={formExpiresInDays} onChangeText={setFormExpiresInDays} placeholder="例如 30，留空不过期" keyboardType="number-pad" />
+              ) : (
+                <Field label="过期时间" value={formExpiresAt} onChangeText={setFormExpiresAt} placeholder="2026-12-31T23:59:59Z" />
+              )}
               <Field label="5H 限流" value={formRateLimit5h} onChangeText={setFormRateLimit5h} placeholder="留空表示不限" keyboardType="decimal-pad" />
               <Field label="1D 限流" value={formRateLimit1d} onChangeText={setFormRateLimit1d} placeholder="留空表示不限" keyboardType="decimal-pad" />
               <Field label="7D 限流" value={formRateLimit7d} onChangeText={setFormRateLimit7d} placeholder="留空表示不限" keyboardType="decimal-pad" />
+              <Field label="IP 白名单" value={formIpWhitelist} onChangeText={setFormIpWhitelist} placeholder="每行一个 IP / CIDR，留空不限制" multiline />
+              <Field label="IP 黑名单" value={formIpBlacklist} onChangeText={setFormIpBlacklist} placeholder="每行一个 IP / CIDR，留空不限制" multiline />
             </View>
+            {formMode === 'edit' ? (
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                {[
+                  { label: '启用', value: 'active' },
+                  { label: '禁用', value: 'inactive' },
+                ].map((option) => {
+                  const selected = formStatus === option.value;
+
+                  return (
+                    <Pressable
+                      key={option.value}
+                      onPress={() => setFormStatus(option.value)}
+                      style={{
+                        alignItems: 'center',
+                        backgroundColor: selected ? colors.primary : colors.mutedCard,
+                        borderColor: selected ? colors.primary : colors.border,
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        flex: 1,
+                        paddingVertical: 10,
+                      }}
+                    >
+                      <Text style={{ color: selected ? colors.primaryText : colors.badgeDefaultText, fontSize: 13, fontWeight: '800' }}>{option.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             {formError ? (
               <View style={{ backgroundColor: colors.errorBg, borderRadius: 12, marginTop: 12, padding: 12 }}>
                 <Text style={{ color: colors.errorText, fontSize: 13 }}>{formError}</Text>
@@ -544,6 +674,15 @@ export default function ApiKeysScreen() {
           const actualCost = firstNumberValue(usage, ['actual_cost', 'actualCost']);
           const usageLastUsedAt = firstTextValue(usage, ['last_used_at', 'lastUsedAt']);
           const lastUsedAt = item.last_used_at || usageLastUsedAt;
+          const canResetQuota = [item.quota, item.quota_used].some(hasPositiveValue);
+          const canResetRateUsage = [
+            item.rate_limit_5h,
+            item.rate_limit_1d,
+            item.rate_limit_7d,
+            item.usage_5h,
+            item.usage_1d,
+            item.usage_7d,
+          ].some(hasPositiveValue);
 
           return (
             <ListCard
@@ -578,6 +717,8 @@ export default function ApiKeysScreen() {
                   <InfoTile label="5H 限流" value={formatLimit(item.rate_limit_5h)} />
                   <InfoTile label="1D 限流" value={formatLimit(item.rate_limit_1d)} />
                   <InfoTile label="7D 限流" value={formatLimit(item.rate_limit_7d)} />
+                  <InfoTile label="IP 白名单" value={formatIpValue(item.ip_whitelist)} />
+                  <InfoTile label="IP 黑名单" value={formatIpValue(item.ip_blacklist)} />
                   <InfoTile label="过期时间" value={formatDisplayTime(item.expires_at)} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
                   <InfoTile label="5H 窗口" value={formatDisplayTime(item.window_5h_start)} />
                   <InfoTile label="1D 窗口" value={formatDisplayTime(item.window_1d_start)} />
@@ -587,9 +728,10 @@ export default function ApiKeysScreen() {
 
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   <Pressable
-                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 }}
+                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }}
                     onPress={() => copyKey(item)}
                   >
+                    <Copy color={copiedKey === copyId ? colors.success : colors.badgeDefaultText} size={13} />
                     <Text style={{ color: copiedKey === copyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
                       {copiedKey === copyId ? '已复制' : '复制'}
                     </Text>
@@ -610,6 +752,22 @@ export default function ApiKeysScreen() {
                       >
                         <Power color={disabled ? colors.success : colors.badgeDefaultText} size={13} />
                         <Text style={{ color: disabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{disabled ? '启用' : '禁用'}</Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={!canResetQuota || resetQuotaMutation.isPending}
+                        style={{ backgroundColor: canResetQuota ? colors.mutedCard : colors.badgeMutedBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6, opacity: canResetQuota ? 1 : 0.55 }}
+                        onPress={() => confirmResetQuota(item)}
+                      >
+                        <RotateCcw color={colors.badgeDefaultText} size={13} />
+                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>重置额度</Text>
+                      </Pressable>
+                      <Pressable
+                        disabled={!canResetRateUsage || resetRateMutation.isPending}
+                        style={{ backgroundColor: canResetRateUsage ? colors.mutedCard : colors.badgeMutedBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6, opacity: canResetRateUsage ? 1 : 0.55 }}
+                        onPress={() => confirmResetRateUsage(item)}
+                      >
+                        <RotateCcw color={colors.badgeDefaultText} size={13} />
+                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>重置限流</Text>
                       </Pressable>
                       <Pressable
                         disabled={deleteMutation.isPending}
