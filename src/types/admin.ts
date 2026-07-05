@@ -130,19 +130,30 @@ export type UserUsageSummary = {
 export type AdminApiKey = {
   id: number;
   user_id: number;
+  user_email?: string;
   key: string;
   name: string;
   group_id?: number | null;
+  group_name?: string | null;
   status: string;
   quota: number;
   quota_used: number;
+  ip_whitelist?: string | null;
+  ip_blacklist?: string | null;
+  rate_limit_5h?: number;
+  rate_limit_1d?: number;
+  rate_limit_7d?: number;
   last_used_at?: string | null;
   expires_at?: string | null;
   created_at?: string;
   updated_at?: string;
+  deleted_at?: string | null;
   usage_5h?: number;
   usage_1d?: number;
   usage_7d?: number;
+  window_5h_start?: string | null;
+  window_1d_start?: string | null;
+  window_7d_start?: string | null;
   group?: AdminGroup;
   user?: {
     id: number;
@@ -158,6 +169,9 @@ export type CreateApiKeyRequest = {
   group_id?: number | null;
   quota?: number | null;
   expires_at?: string | null;
+  rate_limit_5h?: number | null;
+  rate_limit_1d?: number | null;
+  rate_limit_7d?: number | null;
   status?: string;
 };
 
@@ -167,6 +181,9 @@ export type UpdateApiKeyRequest = {
   group_id?: number | null;
   quota?: number | null;
   expires_at?: string | null;
+  rate_limit_5h?: number | null;
+  rate_limit_1d?: number | null;
+  rate_limit_7d?: number | null;
   status?: string;
 };
 

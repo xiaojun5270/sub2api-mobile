@@ -186,8 +186,10 @@ function keyMatchesSearch(item: AdminApiKey, search: string) {
     item.name,
     item.key,
     item.status,
+    item.group_name,
     item.group?.name,
     item.group_id,
+    item.user_email,
     item.user?.email,
     item.user?.username,
     item.user_id,
@@ -196,11 +198,17 @@ function keyMatchesSearch(item: AdminApiKey, search: string) {
   return haystack.includes(normalized);
 }
 
+function isDeletedApiKey(item: AdminApiKey) {
+  return Boolean(item.deleted_at) || item.key?.startsWith('__deleted');
+}
+
 function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?: AdminUser): AdminApiKey {
   const source = raw as Record<string, unknown>;
   const id = firstNumberField(source, ['id', 'api_key_id', 'apiKeyId', 'key_id', 'keyId']) ?? 0;
   const userId = firstNumberField(source, ['user_id', 'userId', 'owner_id', 'ownerId']) ?? owner?.id ?? 0;
   const groupId = firstNumberField(source, ['group_id', 'groupId']);
+  const groupName = firstStringField(source, ['group_name', 'groupName']);
+  const userEmail = firstStringField(source, ['user_email', 'userEmail', 'email']) ?? owner?.email;
   const key = firstStringField(source, ['key', 'api_key', 'apiKey', 'key_value', 'keyValue', 'token', 'value']) ?? '';
   const name = firstStringField(source, ['name', 'label', 'title', 'remark', 'description']) || (key ? `Key ${key.slice(0, 8)}` : `Key #${id || '--'}`);
   const enabled = firstBooleanField(source, ['enabled', 'is_active', 'isActive', 'active']);
@@ -209,30 +217,67 @@ function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?
   const quotaUsed = firstNumberField(source, ['quota_used', 'quotaUsed', 'used_quota', 'usedQuota', 'usage', 'used']) ?? 0;
   const rawUser = isRecord(source.user) ? source.user : undefined;
   const rawGroup = isRecord(source.group) ? source.group : undefined;
+  const group = (raw as AdminApiKey).group
+    ?? (rawGroup as AdminGroup | undefined)
+    ?? (groupName || groupId
+      ? {
+          id: groupId ?? 0,
+          name: groupName ?? `#${groupId}`,
+          platform: firstStringField(source, ['platform']) ?? '',
+        } as AdminGroup
+      : undefined);
 
   return {
     ...(raw as AdminApiKey),
     id,
     user_id: userId,
+    user_email: userEmail,
     key,
     name,
     group_id: groupId ?? ((raw as AdminApiKey).group_id ?? null),
+    group_name: groupName ?? (raw as AdminApiKey).group_name,
     status,
     quota,
     quota_used: quotaUsed,
+    ip_whitelist: firstStringField(source, ['ip_whitelist', 'ipWhitelist']) ?? (raw as AdminApiKey).ip_whitelist,
+    ip_blacklist: firstStringField(source, ['ip_blacklist', 'ipBlacklist']) ?? (raw as AdminApiKey).ip_blacklist,
+    rate_limit_5h: firstNumberField(source, ['rate_limit_5h', 'rateLimit5h']),
+    rate_limit_1d: firstNumberField(source, ['rate_limit_1d', 'rateLimit1d']),
+    rate_limit_7d: firstNumberField(source, ['rate_limit_7d', 'rateLimit7d']),
     last_used_at: firstStringField(source, ['last_used_at', 'lastUsedAt', 'last_used', 'lastUsed']) ?? (raw as AdminApiKey).last_used_at,
     expires_at: firstStringField(source, ['expires_at', 'expiresAt', 'expired_at', 'expiredAt']) ?? (raw as AdminApiKey).expires_at,
     created_at: firstStringField(source, ['created_at', 'createdAt', 'created']) ?? (raw as AdminApiKey).created_at,
     updated_at: firstStringField(source, ['updated_at', 'updatedAt', 'modified_at', 'modifiedAt']) ?? (raw as AdminApiKey).updated_at,
+    deleted_at: firstStringField(source, ['deleted_at', 'deletedAt']) ?? (raw as AdminApiKey).deleted_at,
     usage_5h: firstNumberField(source, ['usage_5h', 'usage5h', 'usage_5_hours']),
     usage_1d: firstNumberField(source, ['usage_1d', 'usage1d', 'usage_today', 'today_usage']),
     usage_7d: firstNumberField(source, ['usage_7d', 'usage7d', 'usage_week', 'weekly_usage']),
-    group: (raw as AdminApiKey).group ?? (rawGroup as AdminGroup | undefined),
+    window_5h_start: firstStringField(source, ['window_5h_start', 'window5hStart']) ?? (raw as AdminApiKey).window_5h_start,
+    window_1d_start: firstStringField(source, ['window_1d_start', 'window1dStart']) ?? (raw as AdminApiKey).window_1d_start,
+    window_7d_start: firstStringField(source, ['window_7d_start', 'window7dStart']) ?? (raw as AdminApiKey).window_7d_start,
+    group,
     user: (raw as AdminApiKey).user ?? {
       id: userId,
-      email: firstStringField(rawUser, ['email']) ?? owner?.email,
+      email: firstStringField(rawUser, ['email']) ?? userEmail,
       username: firstStringField(rawUser, ['username', 'name']) ?? owner?.username,
     },
+  };
+}
+
+function toNormalizedApiKeyPage(payload: unknown, preferredKeys: string[], search = '', owner?: AdminUser): PaginatedData<AdminApiKey> {
+  const page = toPaginatedData<AdminApiKey>(payload, preferredKeys);
+  const items = page.items
+    .map((item) => normalizeAdminApiKey(item, owner))
+    .filter((item) => item.id || item.key)
+    .filter((item) => !isDeletedApiKey(item))
+    .filter((item) => keyMatchesSearch(item, search));
+
+  return {
+    ...page,
+    items,
+    total: items.length,
+    page_size: Math.max(page.page_size, items.length, 1),
+    pages: Math.max(Math.ceil(items.length / Math.max(page.page_size, 1)), 1),
   };
 }
 
@@ -243,13 +288,13 @@ async function listApiKeysFromUsers(search: string): Promise<PaginatedData<Admin
     users.map(async (user) => {
       try {
         const payload = await adminFetch<unknown>(`/api/v1/admin/users/${user.id}/api-keys`);
-        return toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']).items.map((item) => normalizeAdminApiKey(item, user));
+        return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], search, user).items;
       } catch {
         return [] as AdminApiKey[];
       }
     })
   );
-  const items = keyGroups.flat().filter((item) => item.id || item.key).filter((item) => keyMatchesSearch(item, search));
+  const items = keyGroups.flat();
 
   return {
     items,
@@ -336,38 +381,41 @@ export function getUserUsage(userId: number, period: 'day' | 'week' | 'month' = 
   return adminFetch<UserUsageSummary>(`/api/v1/admin/users/${userId}/usage${buildQuery({ period })}`);
 }
 
-export function listUserApiKeys(userId: number) {
-  return adminFetch<PaginatedData<AdminApiKey>>(`/api/v1/admin/users/${userId}/api-keys`);
+export async function listUserApiKeys(userId: number) {
+  const payload = await adminFetch<unknown>(`/api/v1/admin/users/${userId}/api-keys`);
+  return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys']);
 }
 
 export async function searchAdminApiKeys(search = '') {
   const keyword = search.trim();
-  let directError: unknown;
+  let primaryError: unknown;
+
+  try {
+    const payload = await adminFetchWithOptionalQuery<unknown>('/api/v1/keys', {
+      page: 1,
+      page_size: 100,
+      search: keyword,
+    });
+
+    return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword);
+  } catch (error) {
+    primaryError = error;
+  }
 
   try {
     const payload = await adminFetch<unknown>('/api/v1/admin/usage/search-api-keys');
-    const direct = toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']);
-    const items = direct.items.map((item) => normalizeAdminApiKey(item)).filter((item) => item.id || item.key).filter((item) => keyMatchesSearch(item, keyword));
-
-    if (items.length > 0) {
-      return {
-        ...direct,
-        items,
-        total: items.length,
-        page: 1,
-        page_size: Math.max(items.length, 1),
-        pages: 1,
-      };
-    }
+    return toNormalizedApiKeyPage(payload, ['api_keys', 'apiKeys', 'keys'], keyword);
   } catch (error) {
-    directError = error;
+    if (!primaryError) {
+      primaryError = error;
+    }
   }
 
   try {
     return await listApiKeysFromUsers(keyword);
   } catch (error) {
-    if (directError) {
-      throw directError;
+    if (primaryError) {
+      throw primaryError;
     }
 
     throw error;
@@ -376,32 +424,59 @@ export async function searchAdminApiKeys(search = '') {
 
 export async function createAdminApiKey(body: CreateApiKeyRequest) {
   try {
-    return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
+    return await adminFetch<AdminApiKey>('/api/v1/keys', {
       method: 'POST',
       body: JSON.stringify(body),
     });
-  } catch (error) {
-    if (!body.user_id) {
-      throw error;
-    }
+  } catch {
+    try {
+      return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (!body.user_id) {
+        throw error;
+      }
 
-    return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
-      method: 'POST',
+      return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    }
+  }
+}
+
+export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
+  try {
+    return await adminFetch<AdminApiKey>(`/api/v1/keys/${apiKeyId}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  } catch {
+    return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
+      method: 'PUT',
       body: JSON.stringify(body),
     });
   }
 }
 
-export function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
-  return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
+export async function deleteAdminApiKey(apiKeyId: number) {
+  try {
+    return await adminFetch(`/api/v1/keys/${apiKeyId}`, {
+      method: 'DELETE',
+    });
+  } catch {
+    return adminFetch(`/api/v1/admin/api-keys/${apiKeyId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
-export function deleteAdminApiKey(apiKeyId: number) {
-  return adminFetch(`/api/v1/admin/api-keys/${apiKeyId}`, {
-    method: 'DELETE',
+export function getApiKeysUsageDashboard() {
+  return adminFetch<Array<Record<string, unknown>>>('/api/v1/usage/dashboard/api-keys-usage', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 
@@ -578,6 +653,10 @@ export function getOpsAccountAvailability() {
 
 export function getOpsOpenAiTokenStats() {
   return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/dashboard/openai-token-stats');
+}
+
+export function getOpsRuntimeAlert() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/runtime/alert');
 }
 
 export function getOpsRequests(params: { page?: number; page_size?: number; search?: string } = {}) {
