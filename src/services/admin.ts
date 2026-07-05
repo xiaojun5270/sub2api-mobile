@@ -627,16 +627,25 @@ export async function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequ
   }
 }
 
-export async function deleteAdminApiKey(apiKeyId: number) {
-  try {
-    return await adminFetch(`/api/v1/keys/${apiKeyId}`, {
-      method: 'DELETE',
-    });
-  } catch {
-    return adminFetch(`/api/v1/admin/api-keys/${apiKeyId}`, {
-      method: 'DELETE',
-    });
+export async function deleteAdminApiKey(apiKeyId: number, userId?: number) {
+  const paths = [
+    `/api/v1/keys/${apiKeyId}`,
+    `/api/v1/admin/api-keys/${apiKeyId}`,
+    ...(userId ? [`/api/v1/admin/users/${userId}/api-keys/${apiKeyId}`] : []),
+  ];
+  let lastError: unknown;
+
+  for (const path of paths) {
+    try {
+      return await adminFetch(path, {
+        method: 'DELETE',
+      });
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  throw lastError;
 }
 
 export async function getApiKeysUsageDashboard(apiKeyIds: number[] = []) {
@@ -646,6 +655,16 @@ export async function getApiKeysUsageDashboard(apiKeyIds: number[] = []) {
   });
 
   return extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'data', 'api_keys', 'apiKeys', 'keys']);
+}
+
+export async function getApiKeyDailyUsage(apiKeyId: number) {
+  try {
+    const payload = await adminFetch<unknown>(`/api/v1/user/api-keys/${apiKeyId}/usage/daily`);
+    return extractItems<Record<string, unknown>>(payload, ['items', 'data', 'usage', 'records', 'rows']);
+  } catch {
+    const payload = await adminFetch<unknown>(`/api/v1/usage${buildQuery({ api_key_id: apiKeyId })}`);
+    return extractItems<Record<string, unknown>>(payload, ['items', 'data', 'usage', 'records', 'rows']);
+  }
 }
 
 export function updateUserBalance(

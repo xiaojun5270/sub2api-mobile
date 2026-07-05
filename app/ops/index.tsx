@@ -1,40 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { Activity, AlertTriangle, BellRing, Gauge, ListChecks, ServerCog, TerminalSquare, TimerReset } from 'lucide-react-native';
+import { Activity, AlertTriangle, BellRing, Gauge, ServerCog, TerminalSquare } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
-import { BarChartCard } from '@/src/components/bar-chart-card';
-import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
-import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { formatCompactNumber, formatDisplayTime } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
   getOpsAlertEvents,
-  getOpsAccountAvailability,
   getOpsConcurrency,
   getOpsDashboardOverview,
   getOpsDashboardSnapshot,
-  getOpsErrors,
-  getOpsErrorDistribution,
-  getOpsErrorTrend,
-  getOpsLatencyHistogram,
   getOpsOpenAiTokenStats,
-  getOpsRequestErrors,
-  getOpsRequests,
   getOpsRealtimeTraffic,
   getOpsRuntimeAlert,
   getOpsSystemLogs,
   getOpsSystemLogsHealth,
   getOpsThroughputTrend,
-  getOpsUpstreamErrors,
-  getOpsUserConcurrency,
-  getSystemVersion,
-  resolveOpsError,
-  resolveOpsRequestError,
-  resolveOpsUpstreamError,
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
 import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
@@ -42,13 +26,6 @@ import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/type
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return '加载失败，请稍后重试。';
-}
-
-function hasReturnedData(value: unknown) {
-  if (!value) return false;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
-  return true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,44 +114,6 @@ function nestedRecord(source: unknown, key: string) {
   }
 
   return isRecord(value) ? value : undefined;
-}
-
-function nestedRecordFrom(source: unknown, keys: string[]) {
-  for (const key of keys) {
-    const value = nestedRecord(source, key);
-    if (value) return value;
-  }
-
-  return undefined;
-}
-
-function firstTextFromSources(sources: unknown[], keys: string[]) {
-  for (const source of sources) {
-    const value = firstTextValue(source, keys);
-    if (value) return value;
-  }
-
-  return undefined;
-}
-
-function firstNumberFromSources(sources: unknown[], keys: string[]) {
-  for (const source of sources) {
-    const value = firstNumberValue(source, keys);
-    if (value !== undefined) return value;
-  }
-
-  return undefined;
-}
-
-function isHttpAccessLog(item: OpsRecord) {
-  const extra = nestedRecord(item, 'extra');
-  const sources = [item, extra];
-  const component = firstTextFromSources(sources, ['component'])?.toLowerCase();
-  const message = firstTextFromSources(sources, ['message'])?.toLowerCase();
-  const method = firstTextFromSources(sources, ['method', 'request_method', 'requestMethod', 'http_method', 'httpMethod']);
-  const path = firstTextFromSources(sources, ['path', 'request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint', 'endpoint', 'url', 'route']);
-
-  return component === 'http.access' || message === 'http request completed' || Boolean(method && path);
 }
 
 function formatKnownTime(...values: unknown[]) {
@@ -302,11 +241,6 @@ function snapshotArray(snapshot: OpsDashboardSnapshot | undefined, keys: string[
   return firstArray<OpsMetricPoint>(snapshot, keys);
 }
 
-function pointLabel(point: OpsMetricPoint, index: number) {
-  const value = point.label || point.time || point.date || firstText(point, ['bucket_start', 'bucketStart', 'bucket', 'name', 'type', 'timestamp']) || `${index + 1}`;
-  return getShortTimeLabel(value);
-}
-
 function pointValue(point: OpsMetricPoint, keys: string[]) {
   return firstNumber(point as Record<string, unknown>, keys);
 }
@@ -326,31 +260,43 @@ function formatHealth(value: unknown) {
   return isTruthyValue(value) ? '正常' : '异常';
 }
 
-function isHealthyAccount(item: OpsRecord) {
-  const status = `${item.status ?? ''}`.toLowerCase();
-  const schedulable = isRecord(item) ? item.schedulable : undefined;
-  const statusHealthy = !['error', 'disabled', 'inactive', 'failed', 'revoked'].includes(status);
-
-  if (schedulable !== undefined && schedulable !== null) {
-    return isTruthyValue(schedulable) && statusHealthy;
-  }
-
-  return statusHealthy && ['active', 'ok', 'normal', 'healthy'].includes(status);
+function formatAlertStatus(status: string, resolvedAt?: unknown) {
+  const normalized = status.toLowerCase();
+  if (normalized === 'resolved' || resolvedAt) return '已恢复';
+  if (normalized === 'ignored' || normalized === 'muted') return '已忽略';
+  if (normalized === 'open' || normalized === 'firing') return '触发中';
+  return textOrDash(status);
 }
 
-function MetricCard({ title, value, detail, icon }: { title: string; value: string; detail?: string; icon: LucideIcon }) {
-  const colors = useAppTheme();
+function formatDurationBetween(start?: unknown, end?: unknown) {
+  const startText = typeof start === 'string' ? start : undefined;
+  const endText = typeof end === 'string' ? end : undefined;
+  if (!startText || !endText) return '-';
 
-  return (
-    <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 16, borderWidth: 1, flex: 1, minWidth: 146, padding: 14 }}>
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-        <IconBadge icon={icon} containerSize={30} size={15} />
-        <Text style={{ color: colors.subtext, flex: 1, fontSize: 12 }}>{title}</Text>
-      </View>
-      <Text numberOfLines={1} style={{ color: colors.text, fontSize: 22, fontWeight: '800', marginTop: 8 }}>{value}</Text>
-      {detail ? <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, marginTop: 6 }}>{detail}</Text> : null}
-    </View>
-  );
+  const startTime = new Date(startText).getTime();
+  const endTime = new Date(endText).getTime();
+  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return '-';
+
+  const minutes = Math.max(Math.round((endTime - startTime) / 60000), 1);
+  if (minutes < 60) return `${minutes}m`;
+
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function formatDimensions(value: unknown) {
+  if (!value) return '-';
+  if (typeof value === 'string') return value.trim() || '-';
+  if (isRecord(value)) {
+    const text = Object.entries(value)
+      .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined && `${entryValue}`.trim())
+      .map(([key, entryValue]) => `${key}:${entryValue}`)
+      .join(' · ');
+    return text || '-';
+  }
+
+  return '-';
 }
 
 function InfoTile({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'success' }) {
@@ -385,35 +331,12 @@ export default function OpsScreen() {
   const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot'], queryFn: getOpsDashboardSnapshot, staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime'], queryFn: getOpsRealtimeTraffic, staleTime: 15_000 });
   const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency'], queryFn: getOpsConcurrency, staleTime: 15_000 });
-  const userConcurrencyQuery = useQuery({ queryKey: ['ops-user-concurrency'], queryFn: getOpsUserConcurrency, staleTime: 15_000 });
-  const accountAvailabilityQuery = useQuery({ queryKey: ['ops-account-availability'], queryFn: getOpsAccountAvailability, staleTime: 30_000 });
   const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats'], queryFn: getOpsOpenAiTokenStats, staleTime: 30_000 });
   const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend'], queryFn: getOpsThroughputTrend, staleTime: 60_000 });
-  const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend'], queryFn: getOpsErrorTrend, staleTime: 60_000 });
-  const latencyQuery = useQuery({ queryKey: ['ops-latency-histogram'], queryFn: getOpsLatencyHistogram, staleTime: 60_000 });
-  const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution'], queryFn: getOpsErrorDistribution, staleTime: 60_000 });
-  const requestsQuery = useQuery({ queryKey: ['ops-requests'], queryFn: () => getOpsRequests(), staleTime: 30_000 });
-  const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors'], queryFn: () => getOpsRequestErrors(), staleTime: 30_000 });
-  const genericErrorsQuery = useQuery({ queryKey: ['ops-errors'], queryFn: () => getOpsErrors(), staleTime: 30_000 });
-  const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors'], queryFn: () => getOpsUpstreamErrors(), staleTime: 30_000 });
   const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs'], queryFn: () => getOpsSystemLogs(), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
   const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events'], queryFn: () => getOpsAlertEvents(), staleTime: 30_000 });
-  const versionQuery = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion, staleTime: 120_000 });
-
-  const resolveErrorMutation = useMutation({
-    mutationFn: ({ id, source }: { id: number | string; source: 'request' | 'generic' | 'upstream' }) => {
-      if (source === 'upstream') return resolveOpsUpstreamError(id);
-      if (source === 'generic') return resolveOpsError(id);
-      return resolveOpsRequestError(id);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ops-request-errors'] });
-      queryClient.invalidateQueries({ queryKey: ['ops-errors'] });
-      queryClient.invalidateQueries({ queryKey: ['ops-upstream-errors'] });
-    },
-  });
 
   const resolveAlertMutation = useMutation({
     mutationFn: (id: number | string) => updateOpsAlertEventStatus(id, 'resolved'),
@@ -424,23 +347,11 @@ export default function OpsScreen() {
   const overview = overviewQuery.data || snapshot?.overview || snapshot;
   const realtime = realtimeQuery.data || snapshot?.realtime || snapshot?.overview || snapshot;
   const concurrency = concurrencyQuery.data;
-  const userConcurrency = userConcurrencyQuery.data;
-  const accountAvailability = accountAvailabilityQuery.data;
-  const accountAvailabilityItems = getItems(accountAvailability);
   const tokenStats = tokenStatsQuery.data || snapshot?.openai_token_stats;
   const runtimeAlert = runtimeAlertQuery.data;
   const logsHealth = logsHealthQuery.data;
-  const rawRecentRequests = getItems(requestsQuery.data).slice(0, 8);
-  const requestErrorItems = getItems(requestErrorsQuery.data).slice(0, 8);
-  const genericErrorItems = getItems(genericErrorsQuery.data).slice(0, 8);
-  const upstreamErrorItems = getItems(upstreamErrorsQuery.data).slice(0, 8);
-  const requestErrorSource: 'request' | 'generic' | 'upstream' = requestErrorItems.length > 0 ? 'request' : genericErrorItems.length > 0 ? 'generic' : 'upstream';
-  const requestErrors = requestErrorItems.length > 0 ? requestErrorItems : genericErrorItems.length > 0 ? genericErrorItems : upstreamErrorItems;
   const rawSystemLogs = getItems(systemLogsQuery.data);
   const systemLogs = rawSystemLogs.slice(0, 8);
-  const accessLogRequests = rawSystemLogs.filter(isHttpAccessLog).slice(0, 8);
-  const recentRequests = rawRecentRequests.length > 0 ? rawRecentRequests : accessLogRequests;
-  const recentRequestsLoading = requestsQuery.isLoading || (rawRecentRequests.length === 0 && systemLogsQuery.isLoading);
   const alertEvents = getItems(alertEventsQuery.data).slice(0, 8);
   const overviewRecord = isRecord(overview) ? overview : undefined;
   const qpsMetrics = nestedRecord(overview, 'qps') ?? nestedRecord(realtime, 'qps');
@@ -463,29 +374,42 @@ export default function OpsScreen() {
   const qps = firstNumber(qpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
   const rpm = firstNumber(overview, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || firstNumber(realtime, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || qps * 60;
   const avgLatency = firstNumber(durationMetrics, ['avg_ms', 'avgMs', 'avg', 'average_ms', 'averageMs']) || firstNumber(overview, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs', 'latency_ms', 'latencyMs', 'avg_duration_ms', 'avgDurationMs']) || firstNumber(realtime, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs']);
+  const p50Latency = firstNumber(durationMetrics, ['p50_ms', 'p50Ms', 'p50']) || firstNumber(overview, ['duration_p50_ms', 'durationP50Ms', 'p50_latency_ms', 'p50LatencyMs', 'p50', 'latency_p50_ms', 'latencyP50Ms']);
+  const p90Latency = firstNumber(durationMetrics, ['p90_ms', 'p90Ms', 'p90']) || firstNumber(overview, ['duration_p90_ms', 'durationP90Ms', 'p90_latency_ms', 'p90LatencyMs', 'p90', 'latency_p90_ms', 'latencyP90Ms']);
   const p95Latency = firstNumber(durationMetrics, ['p95_ms', 'p95Ms', 'p95']) || firstNumber(overview, ['duration_p95_ms', 'durationP95Ms', 'p95_latency_ms', 'p95LatencyMs', 'p95', 'latency_p95_ms', 'latencyP95Ms']);
   const p99Latency = firstNumber(durationMetrics, ['p99_ms', 'p99Ms', 'p99']) || firstNumber(overview, ['duration_p99_ms', 'durationP99Ms', 'p99_latency_ms', 'p99LatencyMs', 'p99', 'latency_p99_ms', 'latencyP99Ms']);
+  const maxLatency = firstNumber(durationMetrics, ['max_ms', 'maxMs', 'max']) || firstNumber(overview, ['duration_max_ms', 'durationMaxMs', 'max_latency_ms', 'maxLatencyMs', 'latency_max_ms', 'latencyMaxMs']);
+  const ttftP50 = firstNumber(ttftMetrics, ['p50_ms', 'p50Ms', 'p50']) || firstNumber(overview, ['ttft_p50_ms', 'ttftP50Ms']);
+  const ttftP90 = firstNumber(ttftMetrics, ['p90_ms', 'p90Ms', 'p90']) || firstNumber(overview, ['ttft_p90_ms', 'ttftP90Ms']);
+  const ttftP95 = firstNumber(ttftMetrics, ['p95_ms', 'p95Ms', 'p95']) || firstNumber(overview, ['ttft_p95_ms', 'ttftP95Ms']);
+  const ttftP99 = firstNumber(ttftMetrics, ['p99_ms', 'p99Ms', 'p99']) || firstNumber(overview, ['ttft_p99_ms', 'ttftP99Ms']);
   const ttftAvg = firstNumber(ttftMetrics, ['avg_ms', 'avgMs', 'avg']) || firstNumber(overview, ['ttft_avg_ms', 'ttftAvgMs', 'time_to_first_token_avg_ms', 'timeToFirstTokenAvgMs']);
-  const healthyAccountCount = accountAvailabilityItems.filter(isHealthyAccount).length;
-  const activeAccountCount = accountAvailabilityItems.filter((item) => `${item.status ?? ''}`.toLowerCase() === 'active').length;
-  const unavailableAccountCount = accountAvailabilityItems.length > 0 ? accountAvailabilityItems.length - healthyAccountCount : 0;
-  const availableAccounts = firstNumberValue(accountAvailability, ['available_accounts', 'availableAccounts', 'normal_accounts', 'normalAccounts', 'healthy_accounts', 'healthyAccounts']) ?? healthyAccountCount;
-  const unavailableAccounts = firstNumberValue(accountAvailability, ['unavailable_accounts', 'unavailableAccounts', 'error_accounts', 'errorAccounts', 'failed_accounts', 'failedAccounts']) ?? unavailableAccountCount;
-  const activeAccounts = firstNumber(overview, ['active_accounts', 'activeAccounts', 'normal_accounts', 'normalAccounts', 'healthy_accounts', 'healthyAccounts']) || activeAccountCount || availableAccounts;
+  const ttftMax = firstNumber(ttftMetrics, ['max_ms', 'maxMs', 'max']) || firstNumber(overview, ['ttft_max_ms', 'ttftMaxMs']);
   const alertCount = firstNumberValue(runtimeAlert, ['events_open', 'eventsOpen', 'open_alerts', 'openAlerts']) ?? firstNumber(overview, ['alert_count', 'alertCount', 'alerts', 'open_alerts', 'openAlerts']);
   const totalAlertEvents = firstNumberValue(runtimeAlert, ['events_total', 'eventsTotal', 'total']) ?? firstNumber(alertEventsQuery.data, ['total']);
   const enabledAlertRules = firstNumber(runtimeAlert, ['rules_enabled', 'rulesEnabled']);
   const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
   const queueSize = firstNumber(systemMetrics, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
   const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
+  const avgQps = firstNumber(qpsMetrics, ['avg', 'average', 'mean']) || firstNumber(overview, ['qps_avg', 'qpsAvg', 'avg_qps', 'avgQps']) || qps;
+  const avgTps = firstNumber(tpsMetrics, ['avg', 'average', 'mean']) || firstNumber(overview, ['tps_avg', 'tpsAvg', 'avg_tps', 'avgTps']) || tokenPerSecond;
   const tokenConsumed = firstNumber(overview, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']) || firstNumber(tokenStats, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']);
   const businessLimited = firstNumber(overview, ['business_limited_count', 'businessLimitedCount']);
+  const upstreamErrorCount = firstNumber(overview, ['upstream_error_count_excl_429_529', 'upstreamErrorCountExcl429529', 'upstream_errors_excl_429_529', 'upstreamErrorsExcl429529']);
+  const upstream429Count = firstNumber(overview, ['upstream_429_count', 'upstream429Count']);
+  const upstream529Count = firstNumber(overview, ['upstream_529_count', 'upstream529Count']);
   const cpuUsage = firstNumber(systemMetrics, ['cpu_usage_percent', 'cpuUsagePercent']) || firstNumber(overview, ['cpu_usage_percent', 'cpuUsagePercent']);
   const memoryUsage = firstNumber(systemMetrics, ['memory_usage_percent', 'memoryUsagePercent']) || firstNumber(overview, ['memory_usage_percent', 'memoryUsagePercent']);
   const memoryUsed = firstNumber(systemMetrics, ['memory_used_mb', 'memoryUsedMb']) || firstNumber(overview, ['memory_used_mb', 'memoryUsedMb']);
   const dbStatus = formatHealth(systemMetrics?.db_ok ?? systemMetrics?.dbOk);
   const redisStatus = formatHealth(systemMetrics?.redis_ok ?? systemMetrics?.redisOk);
-  const activeUsers = firstNumber(userConcurrency, ['active_users', 'activeUsers', 'users', 'total']);
+  const dbConnActive = firstNumber(systemMetrics, ['db_conn_active', 'dbConnActive']);
+  const dbConnIdle = firstNumber(systemMetrics, ['db_conn_idle', 'dbConnIdle']);
+  const dbConnWaiting = firstNumber(systemMetrics, ['db_conn_waiting', 'dbConnWaiting']);
+  const redisConnTotal = firstNumber(systemMetrics, ['redis_conn_total', 'redisConnTotal']);
+  const redisConnIdle = firstNumber(systemMetrics, ['redis_conn_idle', 'redisConnIdle']);
+  const lockKeys = firstNumber(systemMetrics, ['lock_keys', 'lockKeys', 'redis_lock_keys', 'redisLockKeys']);
+  const backgroundTasks = firstNumber(systemMetrics, ['background_jobs', 'backgroundJobs', 'job_count', 'jobCount', 'goroutine_count', 'goroutineCount']);
   const logsTotal = firstNumber(logsHealth, ['total_logs', 'totalLogs', 'total']);
   const logsErrorCount = firstNumber(nestedRecord(logsHealth, 'levels'), ['error', 'errors']);
   const logsHealthStatus = logsTotal > 0 ? '正常' : firstText(logsHealth, ['status', 'state', 'health']);
@@ -495,98 +419,43 @@ export default function OpsScreen() {
     snapshotArray(snapshot, ['throughput_trend', 'throughputTrend']),
     snapshot
   );
-  const errorSource = firstNonEmptyTrend(
-    errorTrendQuery.data,
-    snapshotArray(snapshot, ['error_trend', 'errorTrend']),
-    snapshot
-  );
-  const latencySource = firstNonEmptyTrend(
-    latencyQuery.data,
-    snapshotArray(snapshot, ['latency_histogram', 'latencyHistogram']),
-    snapshot
-  );
-  const distributionSource = firstNonEmptyTrend(
-    errorDistributionQuery.data,
-    snapshotArray(snapshot, ['error_distribution', 'errorDistribution']),
-    snapshot
-  );
   const throughputOverallSource = getOverallTrendPoints(throughputSource);
-  const errorOverallSource = getOverallTrendPoints(errorSource);
 
   const throughputPoints = summarizeTrendByBucket(throughputOverallSource, ['success_count', 'successCount', 'requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'count', 'value']);
-  const errorPoints = summarizeTrendByBucket(errorOverallSource, ['error_count_total', 'errorCountTotal', 'errors', 'error_count', 'errorCount', 'total_errors', 'totalErrors', 'count', 'value']);
-  const latencyTrendPoints = summarizeTrendByBucket(throughputOverallSource, ['duration_avg_ms', 'durationAvgMs', 'avg_latency_ms', 'avgLatencyMs', 'latency_ms', 'latencyMs', 'value'], 'average');
-  const latencyItems = latencySource.map((point, index) => ({
-    label: pointLabel(point, index),
-    value: pointValue(point, ['count', 'requests', 'request_count', 'requestCount', 'value']),
-    color: '#0f766e',
-    meta: textOrDash(formatLatency(pointValue(point, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs'])), point.label),
-  }));
-  const distributionItems = distributionSource.map((point, index) => {
-    const type = firstTextValue(point, ['error_type', 'errorType', 'type', 'name', 'label']) ?? `${index + 1}`;
-    const severity = firstTextValue(point, ['severity', 'level']);
-    const phase = firstTextValue(point, ['error_phase', 'errorPhase', 'phase', 'source']);
-
-    return {
-      label: textOrDash(severity ? `${type} · ${severity}` : type),
-      value: pointValue(point, ['count', 'errors', 'error_count', 'errorCount', 'value']),
-      color: '#f97316',
-      meta: phase ? `阶段 ${phase}` : undefined,
-    };
-  });
+  const accountSwitchPoints = summarizeTrendByBucket(throughputOverallSource, ['account_switch_count', 'accountSwitchCount', 'avg_account_switch_count', 'avgAccountSwitchCount', 'switch_count', 'switchCount'], 'average');
+  const concurrencyItems = getItems(concurrency);
+  const concurrencyRows = concurrencyItems.length > 0 ? concurrencyItems : currentConcurrency || queueSize ? [{
+    platform: firstText(concurrency, ['platform', 'provider']) !== '--' ? firstText(concurrency, ['platform', 'provider']) : 'overall',
+    current_concurrency: currentConcurrency,
+    queue_size: queueSize,
+    max_concurrency: firstNumber(concurrency, ['max_concurrency', 'maxConcurrency', 'limit', 'capacity']),
+  }] : [];
 
   const hasOverviewFallback = Boolean(snapshot);
   const firstError = hasOverviewFallback ? null : overviewQuery.error || realtimeQuery.error || snapshotQuery.error;
-  const dataSources = [
-    { label: 'overview', ok: hasReturnedData(overviewQuery.data), error: overviewQuery.error },
-    { label: 'snapshot-v2', ok: hasReturnedData(snapshotQuery.data), error: snapshotQuery.error },
-    { label: 'realtime', ok: hasReturnedData(realtimeQuery.data), error: realtimeQuery.error },
-    { label: 'requests', ok: recentRequests.length > 0, error: requestsQuery.error },
-    { label: 'request-errors', ok: requestErrorItems.length > 0, error: requestErrorsQuery.error },
-    { label: 'concurrency', ok: hasReturnedData(concurrencyQuery.data), error: concurrencyQuery.error },
-    { label: 'account-availability', ok: accountAvailabilityItems.length > 0, error: accountAvailabilityQuery.error },
-    { label: 'runtime-alert', ok: hasReturnedData(runtimeAlert), error: runtimeAlertQuery.error },
-    { label: 'throughput-trend', ok: throughputPoints.length > 0, error: throughputQuery.error },
-    { label: 'error-trend', ok: errorPoints.length > 0, error: errorTrendQuery.error },
-    { label: 'system-logs', ok: systemLogs.length > 0, error: systemLogsQuery.error },
-    { label: 'logs-health', ok: hasReturnedData(logsHealth), error: logsHealthQuery.error },
-    { label: 'alert-events', ok: alertEvents.length > 0, error: alertEventsQuery.error },
-  ];
-  const hasSourceError = dataSources.some((source) => Boolean(source.error));
-  const hasVisibleOpsData = totalRequests > 0 || successCount > 0 || tokenConsumed > 0 || qps > 0 || rpm > 0 || currentConcurrency > 0 || availableAccounts > 0 || totalAlertEvents > 0 || throughputPoints.length > 0 || recentRequests.length > 0 || requestErrors.length > 0 || systemLogs.length > 0 || alertEvents.length > 0;
-  const showDataSourceStatus = hasSourceError || (!overviewQuery.isLoading && !snapshotQuery.isLoading && !realtimeQuery.isLoading && !hasVisibleOpsData);
 
   function refetchAll() {
     overviewQuery.refetch();
     snapshotQuery.refetch();
     realtimeQuery.refetch();
     concurrencyQuery.refetch();
-    userConcurrencyQuery.refetch();
-    accountAvailabilityQuery.refetch();
     tokenStatsQuery.refetch();
     throughputQuery.refetch();
-    errorTrendQuery.refetch();
-    latencyQuery.refetch();
-    errorDistributionQuery.refetch();
-    requestsQuery.refetch();
-    requestErrorsQuery.refetch();
-    genericErrorsQuery.refetch();
-    upstreamErrorsQuery.refetch();
     systemLogsQuery.refetch();
     logsHealthQuery.refetch();
     runtimeAlertQuery.refetch();
     alertEventsQuery.refetch();
-    versionQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching;
+  const lastRefreshText = formatKnownTime(firstTextValue(overview, ['created_at', 'createdAt', 'updated_at', 'updatedAt']), firstTextValue(logsHealth, ['latest_log_at', 'latestLogAt']));
 
   return (
     <>
       <Stack.Screen options={{ title: '运维监控' }} />
       <ScreenShell
         title="运维监控"
-        subtitle="实时流量、错误、延迟、日志、告警和系统版本。"
+        subtitle={`状态：就绪 · 刷新 ${lastRefreshText}`}
         icon={ServerCog}
         variant="minimal"
         refreshing={refreshing}
@@ -602,259 +471,123 @@ export default function OpsScreen() {
           </View>
         ) : null}
 
-        {showDataSourceStatus ? (
-          <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-            <SectionTitle title="数据源状态" icon={AlertTriangle} />
-            <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 8 }}>
-              当前接口已连接，但主要运维指标没有可展示数据；下面可以定位是接口空返回、字段不匹配，还是接口报错。
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-              {dataSources.map((source) => {
-                const failed = Boolean(source.error);
-                const status = failed ? getErrorMessage(source.error) : source.ok ? '已返回' : '空';
-                return (
-                  <InfoTile
-                    key={source.label}
-                    label={source.label}
-                    value={status}
-                    tone={failed ? 'danger' : source.ok ? 'success' : 'default'}
-                  />
-                );
-              })}
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <View style={{ alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {['全部平台', '全部分组', '近1小时'].map((label) => (
+              <View key={label} style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 }}>
+                <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
+              </View>
+            ))}
+            <View style={{ backgroundColor: alertCount > 0 ? colors.errorBg : colors.successBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 }}>
+              <Text style={{ color: alertCount > 0 ? colors.errorText : colors.success, fontSize: 12, fontWeight: '800' }}>
+                {alertCount > 0 ? `预警 ${formatCompactNumber(alertCount)}` : '预警规则'}
+              </Text>
             </View>
           </View>
-        ) : null}
-
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          <MetricCard title="实时 QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} detail={`TPS ${formatCompactNumber(tokenPerSecond)}`} icon={Gauge} />
-          <MetricCard title="请求总量" value={formatCompactNumber(totalRequests)} detail={`成功 ${formatCompactNumber(successCount)}`} icon={Activity} />
-          <MetricCard title="错误数量" value={formatCompactNumber(errors)} detail={`错误率 ${formatPercent(errorRate * 100)}`} icon={AlertTriangle} />
-          <MetricCard title="平均延迟" value={`${avgLatency.toFixed(0)}ms`} detail={p95Latency ? `P95 ${p95Latency.toFixed(0)}ms` : 'P95 --'} icon={TimerReset} />
-          <MetricCard title="Token 消耗" value={formatCompactNumber(tokenConsumed)} detail={`RPM ${formatCompactNumber(rpm)}`} icon={Activity} />
-          <MetricCard title="可用账号" value={formatCompactNumber(availableAccounts || activeAccounts)} detail={`打开告警 ${formatCompactNumber(alertCount)}`} icon={ServerCog} />
         </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="实时状态" icon={Gauge} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-            <InfoTile label="QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} tone={qps > 0 ? 'success' : 'default'} />
-            <InfoTile label="RPM" value={formatCompactNumber(rpm)} />
-            <InfoTile label="成功请求" value={formatCompactNumber(successCount)} tone={successCount > 0 ? 'success' : 'default'} />
             <InfoTile label="健康分" value={healthScore === undefined ? '--' : formatCompactNumber(healthScore)} tone={healthScore === undefined ? 'default' : healthScore >= 90 ? 'success' : healthScore < 60 ? 'danger' : 'default'} />
+            <InfoTile label="QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} tone={qps > 0 ? 'success' : 'default'} />
+            <InfoTile label="TPS" value={formatCompactNumber(tokenPerSecond)} tone={tokenPerSecond > 0 ? 'success' : 'default'} />
+            <InfoTile label="请求数" value={formatCompactNumber(totalRequests)} />
+            <InfoTile label="Token数" value={formatCompactNumber(tokenConsumed)} />
+            <InfoTile label="平均 QPS" value={avgQps.toFixed(avgQps >= 10 ? 0 : 2)} />
+            <InfoTile label="平均 TPS" value={formatCompactNumber(avgTps)} />
             <InfoTile label="SLA" value={slaPercent === undefined ? '--' : formatPercent(slaPercent)} tone={slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : 'danger'} />
             <InfoTile label="错误率" value={formatPercent(errorRate * 100)} tone={errorRate > 0 ? 'danger' : 'success'} />
+            <InfoTile label="错误数" value={formatCompactNumber(errors)} tone={errors > 0 ? 'danger' : 'default'} />
             <InfoTile label="上游错误率" value={formatPercent(upstreamErrorRate * 100)} tone={upstreamErrorRate > 0 ? 'danger' : 'success'} />
+            <InfoTile label="上游错误" value={formatCompactNumber(upstreamErrorCount)} tone={upstreamErrorCount > 0 ? 'danger' : 'default'} />
+            <InfoTile label="429/529" value={`${formatCompactNumber(upstream429Count)} / ${formatCompactNumber(upstream529Count)}`} tone={upstream429Count + upstream529Count > 0 ? 'danger' : 'default'} />
             <InfoTile label="业务限流" value={formatCompactNumber(businessLimited)} tone={businessLimited > 0 ? 'danger' : 'default'} />
-            <InfoTile label="并发中" value={formatCompactNumber(currentConcurrency)} />
-            <InfoTile label="队列" value={formatCompactNumber(queueSize)} tone={queueSize > 0 ? 'danger' : 'default'} />
-            <InfoTile label="Token/s" value={formatCompactNumber(tokenPerSecond)} />
-            <InfoTile label="Token 消耗" value={formatCompactNumber(tokenConsumed)} />
             <InfoTile label="平均延迟" value={formatLatency(avgLatency)} />
+            <InfoTile label="P50 延迟" value={formatLatency(p50Latency)} />
+            <InfoTile label="P90 延迟" value={formatLatency(p90Latency)} />
             <InfoTile label="P95 延迟" value={formatLatency(p95Latency)} />
             <InfoTile label="P99 延迟" value={formatLatency(p99Latency)} />
-            <InfoTile label="TTFT" value={formatLatency(ttftAvg)} />
+            <InfoTile label="最大延迟" value={formatLatency(maxLatency)} />
+            <InfoTile label="TTFT Avg" value={formatLatency(ttftAvg)} />
+            <InfoTile label="TTFT P50" value={formatLatency(ttftP50)} />
+            <InfoTile label="TTFT P90" value={formatLatency(ttftP90)} />
+            <InfoTile label="TTFT P95" value={formatLatency(ttftP95)} />
+            <InfoTile label="TTFT P99" value={formatLatency(ttftP99)} />
+            <InfoTile label="TTFT Max" value={formatLatency(ttftMax)} />
             <InfoTile label="CPU" value={formatPercent(cpuUsage)} tone={cpuUsage > 85 ? 'danger' : 'default'} />
             <InfoTile label="内存" value={memoryUsage ? formatPercent(memoryUsage) : `${formatCompactNumber(memoryUsed)}MB`} />
             <InfoTile label="DB" value={dbStatus} tone={dbStatus === '正常' ? 'success' : dbStatus === '异常' ? 'danger' : 'default'} />
+            <InfoTile label="DB 连接" value={`${formatCompactNumber(dbConnActive)} / ${formatCompactNumber(dbConnIdle)} / ${formatCompactNumber(dbConnWaiting)}`} />
             <InfoTile label="Redis" value={redisStatus} tone={redisStatus === '正常' ? 'success' : redisStatus === '异常' ? 'danger' : 'default'} />
-            <InfoTile label="活跃用户" value={formatCompactNumber(activeUsers)} />
-            <InfoTile label="可用账号" value={formatCompactNumber(availableAccounts || activeAccounts)} tone={(availableAccounts || activeAccounts) > 0 ? 'success' : 'default'} />
-            <InfoTile label="不可用账号" value={formatCompactNumber(unavailableAccounts)} tone={unavailableAccounts > 0 ? 'danger' : 'default'} />
+            <InfoTile label="Redis 连接" value={`${formatCompactNumber(redisConnTotal)} / ${formatCompactNumber(redisConnIdle)}`} />
+            <InfoTile label="锁键" value={formatCompactNumber(lockKeys)} />
+            <InfoTile label="后台任务" value={formatCompactNumber(backgroundTasks)} />
             <InfoTile label="告警规则" value={formatCompactNumber(enabledAlertRules)} />
             <InfoTile label="告警事件" value={formatCompactNumber(totalAlertEvents)} tone={alertCount > 0 ? 'danger' : 'default'} />
-            <InfoTile label="日志状态" value={logsHealthStatus} tone={logsHealthStatus === '正常' ? 'success' : 'default'} />
-            <InfoTile label="日志总量" value={formatCompactNumber(logsTotal)} />
-            <InfoTile label="错误日志" value={formatCompactNumber(logsErrorCount)} tone={logsErrorCount > 0 ? 'danger' : 'default'} />
           </View>
         </View>
 
-        {accountAvailabilityItems.length > 0 ? (
+        {concurrencyRows.length > 0 ? (
           <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-            <SectionTitle title="账号可用性" icon={ServerCog} />
+            <SectionTitle title="并发 / 排队" icon={ServerCog} />
             <View style={{ gap: 10, marginTop: 12 }}>
-              {accountAvailabilityItems.slice(0, 8).map((item, index) => {
-                const healthy = isHealthyAccount(item);
-                const name = textOrDash(firstTextValue(item, ['account_name', 'accountName', 'name']), firstTextValue(item, ['account_id', 'accountId']), `#${index + 1}`);
-                const status = textOrDash(item.status);
-                const platform = textOrDash(item.platform);
-                const type = textOrDash(firstTextValue(item, ['type', 'account_type', 'accountType']));
-                const schedulable = textOrDash(item.schedulable);
-                const errorMessage = textOrDash(firstTextValue(item, ['error_message', 'errorMessage', 'temp_unschedulable_reason', 'tempUnschedulableReason']));
+              {concurrencyRows.slice(0, 8).map((item, index) => {
+                const platform = textOrDash(firstTextValue(item, ['platform', 'provider', 'name']), `#${index + 1}`).toUpperCase();
+                const current = firstNumber(item, ['current_concurrency', 'currentConcurrency', 'current', 'active', 'active_requests', 'activeRequests']);
+                const max = firstNumber(item, ['max_concurrency', 'maxConcurrency', 'limit', 'capacity']);
+                const queued = firstNumber(item, ['queue_size', 'queueSize', 'queued', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']);
+                const percent = max > 0 ? `${Math.round((current / max) * 100)}%` : '--';
 
                 return (
-                  <View key={`${item.account_id ?? item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{name} · {platform}</Text>
-                    {errorMessage !== '--' ? (
-                      <Text numberOfLines={2} style={{ color: colors.errorText, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{errorMessage}</Text>
-                    ) : (
-                      <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                        最近使用 {formatKnownTime(firstTextValue(item, ['last_used_at', 'lastUsedAt']))}
-                      </Text>
-                    )}
+                  <View key={`${platform}-${index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
+                    <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{platform}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                      <InfoTile label="状态" value={status} tone={healthy ? 'success' : 'danger'} />
-                      <InfoTile label="可调度" value={schedulable} tone={healthy ? 'success' : 'danger'} />
-                      <InfoTile label="类型" value={type} />
-                      <InfoTile label="账号 ID" value={textOrDash(firstTextValue(item, ['account_id', 'accountId']), item.id)} />
-                      <InfoTile label="限流恢复" value={formatKnownTime(firstTextValue(item, ['rate_limit_reset_at', 'rateLimitResetAt']))} />
-                      <InfoTile label="最近使用" value={formatKnownTime(firstTextValue(item, ['last_used_at', 'lastUsedAt']))} />
+                      <InfoTile label="并发" value={max > 0 ? `${formatCompactNumber(current)} / ${formatCompactNumber(max)}` : formatCompactNumber(current)} tone={current > 0 ? 'success' : 'default'} />
+                      <InfoTile label="占用" value={percent} />
+                      <InfoTile label="队列" value={formatCompactNumber(queued)} tone={queued > 0 ? 'danger' : 'default'} />
                     </View>
                   </View>
                 );
               })}
             </View>
           </View>
+        ) : null}
+
+        {accountSwitchPoints.length > 1 ? (
+          <LineTrendChart title="平均账号切换趋势" subtitle="账号路由切换随时间变化" points={accountSwitchPoints} color="#14b8a6" icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
 
         {throughputPoints.length > 1 ? (
           <LineTrendChart title="吞吐趋势" subtitle="请求量随时间变化" points={throughputPoints} color="#0f766e" icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
 
-        {errorPoints.length > 1 ? (
-          <LineTrendChart title="错误趋势" subtitle="请求错误随时间变化" points={errorPoints} color="#f97316" icon={AlertTriangle} formatValue={formatCompactNumber} />
-        ) : null}
-
-        {latencyTrendPoints.length > 1 && latencyTrendPoints.some((point) => point.value > 0) ? (
-          <LineTrendChart title="延迟趋势" subtitle="平均响应耗时随时间变化" points={latencyTrendPoints} color="#2563eb" icon={TimerReset} formatValue={formatLatency} />
-        ) : null}
-
-        {latencyItems.length > 0 ? (
-          <BarChartCard title="延迟分布" subtitle="不同延迟区间的请求数量" items={latencyItems} icon={TimerReset} formatValue={formatCompactNumber} />
-        ) : null}
-
-        {distributionItems.length > 0 ? (
-          <BarChartCard title="错误分布" subtitle="错误类型或来源分布" items={distributionItems} icon={AlertTriangle} formatValue={formatCompactNumber} />
-        ) : null}
-
-        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-          <SectionTitle title="最近请求" icon={Activity} />
-          <View style={{ gap: 10, marginTop: 12 }}>
-            {recentRequestsLoading ? <Text style={{ color: colors.subtext }}>正在加载最近请求...</Text> : null}
-            {recentRequests.map((item, index) => {
-              const id = item.id ?? index;
-              const extra = nestedRecord(item, 'extra');
-              const metadata = nestedRecordFrom(item, ['metadata', 'meta']);
-              const request = nestedRecordFrom(item, ['request', 'request_info', 'requestInfo']);
-              const response = nestedRecordFrom(item, ['response', 'response_info', 'responseInfo']);
-              const sources = [item, extra, metadata, request, response];
-              const requestId = textOrDash(firstTextFromSources(sources, ['request_id', 'requestId', 'client_request_id', 'clientRequestId', 'trace_id', 'traceId']), item.id);
-              const method = textOrDash(firstTextFromSources(sources, ['method', 'request_method', 'requestMethod', 'http_method', 'httpMethod']));
-              const path = textOrDash(firstTextFromSources(sources, ['path', 'request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint', 'endpoint', 'url', 'route', 'upstream_endpoint', 'upstreamEndpoint']));
-              const status = textOrDash(firstTextFromSources(sources, ['status', 'status_code', 'statusCode', 'http_status', 'httpStatus', 'code', 'response_status', 'responseStatus', 'upstream_status_code', 'upstreamStatusCode']));
-              const createdAt = textOrDash(firstTextFromSources(sources, ['created_at', 'createdAt', 'completed_at', 'completedAt', 'timestamp', 'time']));
-              const latency = firstNumberFromSources(sources, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs', 'response_latency_ms', 'responseLatencyMs', 'elapsed_ms', 'elapsedMs', 'avg_duration_ms', 'avgDurationMs']) ?? 0;
-              const platform = textOrDash(firstTextFromSources(sources, ['platform', 'provider']));
-              const model = textOrDash(firstTextFromSources(sources, ['model', 'model_name', 'modelName', 'requested_model', 'requestedModel', 'upstream_model', 'upstreamModel']));
-              const user = textOrDash(firstTextFromSources(sources, ['user_email', 'userEmail', 'email', 'user_id', 'userId']));
-              const account = textOrDash(firstTextFromSources(sources, ['account_name', 'accountName', 'account_id', 'accountId']));
-              const requestTitle = method !== '--' && path !== '--' ? `${method} ${path}` : path !== '--' ? path : requestId !== '--' ? `请求 ${requestId}` : model;
-
-              return (
-                <View key={`${id}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{requestTitle}</Text>
-                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                    {model} · {formatKnownTime(createdAt)} · {formatLatency(latency)}
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                    <InfoTile label="请求 ID" value={requestId} />
-                    <InfoTile label="状态" value={status} tone={status.startsWith('5') || status.startsWith('4') ? 'danger' : status.startsWith('2') ? 'success' : 'default'} />
-                    <InfoTile label="平台" value={platform} />
-                    <InfoTile label="用户" value={user} />
-                    <InfoTile label="账号" value={account} />
-                  </View>
-                </View>
-              );
-            })}
-            {!recentRequestsLoading && recentRequests.length === 0 ? <Text style={{ color: colors.subtext }}>暂无最近请求。</Text> : null}
-          </View>
-        </View>
-
-        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-          <SectionTitle title="请求错误" icon={AlertTriangle} />
-          <View style={{ gap: 10, marginTop: 12 }}>
-            {requestErrorsQuery.isLoading || genericErrorsQuery.isLoading || upstreamErrorsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载请求错误...</Text> : null}
-            {requestErrors.map((item, index) => {
-              const id = item.id ?? index;
-              const message = textOrDash(item.error_message, item.message, firstTextValue(item, ['reason', 'error_type', 'errorType', 'type']));
-              const path = textOrDash(firstTextValue(item, ['request_path', 'requestPath', 'inbound_endpoint', 'inboundEndpoint']), item.path, item.model);
-              const upstreamPath = textOrDash(firstTextValue(item, ['upstream_endpoint', 'upstreamEndpoint']));
-              const status = textOrDash(item.status, firstTextValue(item, ['status_code', 'statusCode', 'code']));
-              const upstreamStatus = textOrDash(firstTextValue(item, ['upstream_status_code', 'upstreamStatusCode']));
-              const severity = textOrDash(firstTextValue(item, ['severity', 'level']));
-              const phase = textOrDash(firstTextValue(item, ['error_phase', 'errorPhase', 'phase']));
-              const resolvedValue = isRecord(item) ? item.resolved : undefined;
-              const resolvedText = resolvedValue === undefined || resolvedValue === null ? '--' : isTruthyValue(resolvedValue) ? '已解决' : '未解决';
-              const duration = firstNumber(item, ['duration_ms', 'durationMs', 'response_latency_ms', 'responseLatencyMs', 'latency_ms', 'latencyMs']);
-              const ttft = firstNumber(item, ['time_to_first_token_ms', 'timeToFirstTokenMs', 'ttft_ms', 'ttftMs']);
-
-              return (
-                <View key={`${id}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                  <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'space-between' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{message}</Text>
-                      <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                        {path} · {formatKnownTime(item.created_at, item.updated_at)} {upstreamPath !== '--' ? `· 上游 ${upstreamPath}` : ''}
-                      </Text>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        <InfoTile label="错误 ID" value={`${item.id ?? '--'}`} />
-                        <InfoTile label="状态码" value={status} tone={status.startsWith('5') || status.startsWith('4') ? 'danger' : 'default'} />
-                        <InfoTile label="上游状态" value={upstreamStatus} tone={upstreamStatus.startsWith('5') || upstreamStatus.startsWith('4') ? 'danger' : 'default'} />
-                        <InfoTile label="严重级别" value={severity} tone={['P0', 'P1'].includes(severity) ? 'danger' : 'default'} />
-                        <InfoTile label="阶段" value={phase} />
-                        <InfoTile label="处理状态" value={resolvedText} tone={resolvedText === '已解决' ? 'success' : resolvedText === '未解决' ? 'danger' : 'default'} />
-                        <InfoTile label="Key 前缀" value={textOrDash(firstTextValue(item, ['api_key_prefix', 'apiKeyPrefix']))} />
-                        <InfoTile label="账号" value={textOrDash(item.account_name, firstTextValue(item, ['accountName', 'account_id', 'accountId']))} />
-                        <InfoTile label="用户" value={textOrDash(item.user_email, firstTextValue(item, ['userEmail', 'email', 'user_id', 'userId']))} />
-                        <InfoTile label="模型" value={textOrDash(item.model, firstTextValue(item, ['requested_model', 'requestedModel', 'upstream_model', 'upstreamModel']))} />
-                        <InfoTile label="响应耗时" value={formatLatency(duration)} />
-                        <InfoTile label="TTFT" value={formatLatency(ttft)} />
-                      </View>
-                    </View>
-                    {item.id && resolvedText !== '已解决' ? (
-                      <Pressable
-                        style={{ alignSelf: 'flex-start', backgroundColor: colors.successBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 }}
-                        onPress={() => resolveErrorMutation.mutate({ id: item.id as number | string, source: requestErrorSource })}
-                      >
-                        <Text style={{ color: colors.success, fontSize: 11, fontWeight: '800' }}>处理</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </View>
-              );
-            })}
-            {!requestErrorsQuery.isLoading && !genericErrorsQuery.isLoading && !upstreamErrorsQuery.isLoading && requestErrors.length === 0 ? <Text style={{ color: colors.subtext }}>暂无请求错误。</Text> : null}
-          </View>
-        </View>
-
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="系统日志" icon={TerminalSquare} />
           <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 8 }}>
-            日志健康：{logsHealthStatus} · 总量 {formatCompactNumber(logsTotal)} · 版本 {firstText(versionQuery.data, ['version', 'tag', 'build'])}
+            日志状态：{logsHealthStatus} · 总量 {formatCompactNumber(logsTotal)} · 错误 {formatCompactNumber(logsErrorCount)}
           </Text>
           <View style={{ gap: 10, marginTop: 12 }}>
             {systemLogsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载系统日志...</Text> : null}
             {systemLogs.map((item, index) => {
               const extra = nestedRecord(item, 'extra');
               const level = textOrDash(item.level, item.status);
-              const component = textOrDash(firstTextValue(item, ['component']), firstTextValue(extra, ['component', 'service']));
               const method = textOrDash(firstTextValue(extra, ['method']));
               const path = textOrDash(firstTextValue(extra, ['path', 'endpoint']));
               const status = textOrDash(firstTextValue(extra, ['status_code', 'statusCode']), item.status);
               const latency = firstNumber(extra, ['latency_ms', 'latencyMs']);
+              const detail = method !== '--' && path !== '--'
+                ? `http request completed status=${status} latency_ms=${latency || 0} method=${method} path=${path}`
+                : textOrDash(item.message, item.error_message);
 
               return (
                 <View key={`${item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }}>{component} · {level}</Text>
-                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{item.message || item.error_message || '--'}</Text>
+                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }}>{formatKnownTime(item.created_at, item.updated_at)}</Text>
+                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{detail}</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                    <InfoTile label="日志 ID" value={`${item.id ?? '--'}`} />
                     <InfoTile label="级别" value={level} tone={level === 'error' ? 'danger' : level === 'warn' ? 'default' : 'success'} />
-                    <InfoTile label="请求" value={method === '--' && path === '--' ? '--' : `${method} ${path}`} />
-                    <InfoTile label="状态码" value={status} tone={status.startsWith('5') || status.startsWith('4') ? 'danger' : 'default'} />
-                    <InfoTile label="平台" value={textOrDash(item.platform, firstTextValue(extra, ['platform']))} />
-                    <InfoTile label="模型" value={textOrDash(item.model, firstTextValue(extra, ['model']))} />
-                    <InfoTile label="耗时" value={formatLatency(latency)} />
                     <InfoTile label="时间" value={formatKnownTime(item.created_at, item.updated_at)} />
+                    <InfoTile label="日志详情" value={detail} />
                   </View>
                 </View>
               );
@@ -872,9 +605,12 @@ export default function OpsScreen() {
               const status = textOrDash(item.status);
               const title = textOrDash(firstTextValue(item, ['title']), item.message, item.error_message, '告警事件');
               const description = textOrDash(firstTextValue(item, ['description', 'reason']));
-              const metricValue = firstNumberValue(item, ['metric_value', 'metricValue', 'value']);
-              const thresholdValue = firstNumberValue(item, ['threshold_value', 'thresholdValue', 'threshold']);
               const isResolved = status.toLowerCase() === 'resolved' || Boolean(item.resolved_at);
+              const firedAt = firstTextValue(item, ['fired_at', 'firedAt']) ?? item.created_at;
+              const resolvedAt = firstTextValue(item, ['resolved_at', 'resolvedAt']);
+              const displayStatus = formatAlertStatus(status, resolvedAt);
+              const dimensions = formatDimensions(isRecord(item) ? item.dimensions : undefined);
+              const emailSent = isRecord(item) && item.email_sent !== undefined ? (isTruthyValue(item.email_sent) ? '已发送' : '已忽略') : '-';
 
               return (
                 <View key={`${item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
@@ -882,19 +618,20 @@ export default function OpsScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{title}</Text>
                       <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                        {severity} · {formatKnownTime(firstTextValue(item, ['fired_at', 'firedAt']), item.created_at, item.updated_at)}
+                        {formatKnownTime(firedAt)} · {severity} · {displayStatus}
                       </Text>
                       {description !== '--' ? (
                         <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{description}</Text>
                       ) : null}
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        <InfoTile label="告警 ID" value={`${item.id ?? '--'}`} />
+                        <InfoTile label="时间" value={formatKnownTime(firedAt)} />
                         <InfoTile label="级别" value={severity} tone={['P0', 'P1'].includes(severity) ? 'danger' : 'default'} />
-                        <InfoTile label="状态" value={status} tone={isResolved ? 'success' : 'danger'} />
-                        <InfoTile label="当前值" value={metricValue === undefined ? '--' : formatCompactNumber(metricValue)} />
-                        <InfoTile label="阈值" value={thresholdValue === undefined ? '--' : formatCompactNumber(thresholdValue)} />
-                        <InfoTile label="触发时间" value={formatKnownTime(firstTextValue(item, ['fired_at', 'firedAt']), item.created_at)} />
-                        <InfoTile label="恢复时间" value={formatKnownTime(firstTextValue(item, ['resolved_at', 'resolvedAt']))} />
+                        <InfoTile label="平台" value={firstTextValue(item, ['platform', 'provider']) ?? '-'} />
+                        <InfoTile label="规则 ID" value={textOrDash(firstTextValue(item, ['rule_id', 'ruleId']))} />
+                        <InfoTile label="标题" value={title} />
+                        <InfoTile label="持续时间" value={formatDurationBetween(firedAt, resolvedAt)} />
+                        <InfoTile label="维度" value={dimensions} />
+                        <InfoTile label="邮件已发送" value={emailSent} />
                       </View>
                     </View>
                     {item.id && !isResolved ? (
@@ -912,18 +649,6 @@ export default function OpsScreen() {
             {!alertEventsQuery.isLoading && alertEvents.length === 0 ? <Text style={{ color: colors.subtext }}>暂无告警事件。</Text> : null}
           </View>
         </View>
-
-        <ListCard title="系统版本" meta={`版本 ${firstText(versionQuery.data, ['version', 'tag', 'build'])} · 镜像 ${firstText(versionQuery.data, ['image', 'container'])}`} icon={ListChecks}>
-          <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 20 }}>
-            更新、回滚、重启接口已存在，但属于高风险操作，当前先展示版本信息，避免误触生产服务。
-          </Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-            <InfoTile label="版本" value={firstText(versionQuery.data, ['version', 'tag', 'build'])} />
-            <InfoTile label="提交" value={firstText(versionQuery.data, ['commit', 'git_commit', 'sha'])} />
-            <InfoTile label="构建时间" value={firstText(versionQuery.data, ['build_time', 'built_at', 'created_at'])} />
-            <InfoTile label="镜像" value={firstText(versionQuery.data, ['image', 'container'])} />
-          </View>
-        </ListCard>
       </ScreenShell>
     </>
   );

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
-import { Copy, KeyRound, Pencil, Plus, Power, RefreshCw, RotateCcw, Search, Trash2 } from 'lucide-react-native';
+import { ChevronDown, Copy, FileCode2, KeyRound, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 
@@ -10,11 +10,13 @@ import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatDisplayTime } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
-import { createAdminApiKey, deleteAdminApiKey, getApiKeysUsageDashboard, searchAdminApiKeys, updateAdminApiKey } from '@/src/services/admin';
+import { createAdminApiKey, deleteAdminApiKey, getApiKeyDailyUsage, getApiKeysUsageDashboard, searchAdminApiKeys, updateAdminApiKey } from '@/src/services/admin';
+import { adminConfigState } from '@/src/store/admin-config';
 import type { AdminApiKey, PaginatedData } from '@/src/types/admin';
 
 type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?: AdminApiKey[]; api_keys?: AdminApiKey[]; keys?: AdminApiKey[]; data?: ApiKeySearchResult };
 type ApiKeyFormMode = 'create' | 'edit' | null;
+type FilterMenu = 'group' | 'status' | null;
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
@@ -38,6 +40,51 @@ function getApiKeyItems(result?: ApiKeySearchResult) {
   const withData = result as { data?: ApiKeySearchResult };
   if (withData.data) return getApiKeyItems(withData.data);
   return [];
+}
+
+function removeApiKeyFromResult(result: ApiKeySearchResult | undefined, deletedId: number): ApiKeySearchResult | undefined {
+  if (!result) return result;
+
+  if (Array.isArray(result)) {
+    return result.filter((item) => item.id !== deletedId);
+  }
+
+  if (Array.isArray(result.items)) {
+    const items = result.items.filter((item) => item.id !== deletedId);
+    const removedCount = result.items.length - items.length;
+    const currentTotal = 'total' in result && typeof result.total === 'number' ? result.total : result.items.length;
+
+    return {
+      ...result,
+      items,
+      total: Math.max(currentTotal - removedCount, 0),
+    };
+  }
+
+  const shaped = result as { api_keys?: AdminApiKey[]; keys?: AdminApiKey[]; data?: ApiKeySearchResult };
+
+  if (Array.isArray(shaped.api_keys)) {
+    return {
+      ...result,
+      api_keys: shaped.api_keys.filter((item) => item.id !== deletedId),
+    };
+  }
+
+  if (Array.isArray(shaped.keys)) {
+    return {
+      ...result,
+      keys: shaped.keys.filter((item) => item.id !== deletedId),
+    };
+  }
+
+  if (shaped.data) {
+    return {
+      ...result,
+      data: removeApiKeyFromResult(shaped.data, deletedId),
+    };
+  }
+
+  return result;
 }
 
 function maskKey(value?: string) {
@@ -77,33 +124,9 @@ function firstTextValue(source: unknown, keys: string[]) {
   return undefined;
 }
 
-function formatLimit(value?: number | null) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '不限';
-  return formatNumber(value);
-}
-
-function formatCost(value?: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
-  return value.toFixed(value >= 100 ? 1 : 3).replace(/\.?0+$/, '');
-}
-
-function formatQuota(item: AdminApiKey) {
-  const used = Number(item.quota_used ?? 0);
-  const quota = Number(item.quota ?? 0);
-
-  if (!Number.isFinite(quota) || quota <= 0) {
-    return `${formatNumber(used)} / 不限`;
-  }
-
-  return `${formatNumber(used)} / ${formatNumber(quota)}`;
-}
-
-function formatQuotaRemaining(item: AdminApiKey) {
-  const used = Number(item.quota_used ?? 0);
-  const quota = Number(item.quota ?? 0);
-
-  if (!Number.isFinite(quota) || quota <= 0) return '不限';
-  return formatNumber(Math.max(quota - used, 0));
+function formatMoney(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '$0.0000';
+  return `$${value.toFixed(4)}`;
 }
 
 function isExpired(value?: string | null) {
@@ -120,29 +143,58 @@ function getNextStatus(status?: string) {
   return isDisabledStatus(status) ? 'active' : 'inactive';
 }
 
-function hasPositiveValue(value?: number | null) {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+function getLocalDateKey(value = new Date()) {
+  const year = value.getFullYear();
+  const month = `${value.getMonth() + 1}`.padStart(2, '0');
+  const day = `${value.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
-function formatIpValue(value?: string | string[] | null) {
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(', ') : '未限制';
-  }
-
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim();
-  }
-
-  return '未限制';
+function getDateKey(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  return value.slice(0, 10);
 }
 
-function getIpFormValue(value?: string | string[] | null) {
-  if (Array.isArray(value)) return value.join('\n');
-  return value || '';
+function sumUsageCost(rows: Record<string, unknown>[], predicate: (dateKey?: string) => boolean) {
+  return rows.reduce((sum, row) => {
+    const dateKey = getDateKey(firstTextValue(row, ['date', 'day', 'created_at', 'createdAt']));
+    if (!predicate(dateKey)) return sum;
+    return sum + (firstNumberValue(row, ['total_cost', 'totalCost', 'actual_cost', 'actualCost', 'cost']) ?? 0);
+  }, 0);
 }
 
-function getUserLabel(item: AdminApiKey) {
-  return item.user?.email || item.user_email || item.user?.username || `${item.user_id || '--'}`;
+function getLast30DayStartKey() {
+  const value = new Date();
+  value.setDate(value.getDate() - 29);
+  return getLocalDateKey(value);
+}
+
+function getGroupFilterKey(item: AdminApiKey) {
+  return item.group_id ? `id:${item.group_id}` : `name:${getGroupLabel(item)}`;
+}
+
+function getStatusFilterKey(status?: string) {
+  return isDisabledStatus(status) ? 'disabled' : 'active';
+}
+
+function formatStatusLabel(status?: string) {
+  return isDisabledStatus(status) ? '禁用' : '活跃';
+}
+
+function formatExpiry(value?: string | null) {
+  return value ? formatDisplayTime(value) : '永久有效';
+}
+
+function formatRateLimit(item: AdminApiKey) {
+  const entries = [
+    ['5H', item.rate_limit_5h],
+    ['1D', item.rate_limit_1d],
+    ['7D', item.rate_limit_7d],
+  ].filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+  if (entries.length === 0) return '-';
+
+  return entries.map(([label, value]) => `${label} ${formatNumber(value as number)}`).join(' · ');
 }
 
 function getGroupLabel(item: AdminApiKey) {
@@ -173,6 +225,30 @@ function InfoTile({ label, value, tone = 'default' }: { label: string; value: st
       <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
       <Text numberOfLines={1} style={{ color: valueColor, fontSize: 13, fontWeight: '800', marginTop: 5 }}>{value}</Text>
     </View>
+  );
+}
+
+function FilterButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const colors = useAppTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        alignItems: 'center',
+        backgroundColor: active ? colors.successBg : colors.mutedCard,
+        borderColor: active ? colors.success : colors.border,
+        borderRadius: 12,
+        borderWidth: 1,
+        flexDirection: 'row',
+        gap: 6,
+        minHeight: 38,
+        paddingHorizontal: 12,
+      }}
+    >
+      <Text numberOfLines={1} style={{ color: active ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
+      <ChevronDown color={active ? colors.success : colors.subtext} size={14} />
+    </Pressable>
   );
 }
 
@@ -224,6 +300,9 @@ export default function ApiKeysScreen() {
   const queryClient = useQueryClient();
   const [searchText, setSearchText] = useState('');
   const keyword = useDebouncedValue(searchText, 300);
+  const [groupFilter, setGroupFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [openFilterMenu, setOpenFilterMenu] = useState<FilterMenu>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<ApiKeyFormMode>(null);
@@ -233,14 +312,8 @@ export default function ApiKeysScreen() {
   const [formKey, setFormKey] = useState('');
   const [formStatus, setFormStatus] = useState('active');
   const [formGroupId, setFormGroupId] = useState('');
-  const [formQuota, setFormQuota] = useState('');
   const [formExpiresAt, setFormExpiresAt] = useState('');
   const [formExpiresInDays, setFormExpiresInDays] = useState('');
-  const [formIpWhitelist, setFormIpWhitelist] = useState('');
-  const [formIpBlacklist, setFormIpBlacklist] = useState('');
-  const [formRateLimit5h, setFormRateLimit5h] = useState('');
-  const [formRateLimit1d, setFormRateLimit1d] = useState('');
-  const [formRateLimit7d, setFormRateLimit7d] = useState('');
 
   const apiKeysQuery = useQuery({
     queryKey: ['admin-api-keys', keyword],
@@ -273,44 +346,59 @@ export default function ApiKeysScreen() {
 
     return entries;
   }, [usageQuery.data]);
-  const apiKeys = useMemo(() => {
-    const normalized = keyword.trim().toLowerCase();
-    if (!normalized) return allApiKeys;
+  const dailyUsageQuery = useQuery({
+    queryKey: ['api-key-daily-usage', apiKeyIds.join(',')],
+    queryFn: async () => {
+      const results = await Promise.all(
+        apiKeyIds.map(async (id) => ({
+          id,
+          rows: await getApiKeyDailyUsage(id).catch(() => [] as Record<string, unknown>[]),
+        }))
+      );
 
-    return allApiKeys.filter((item) => {
-      const haystack = [
-        item.name,
-        item.key,
-        item.status,
-        item.group_name,
-        item.group?.name,
-        item.group_id,
-        item.user_email,
-        item.user?.email,
-        item.user?.username,
-        item.user_id,
-      ].filter(Boolean).join(' ').toLowerCase();
+      return results;
+    },
+    enabled: apiKeyIds.length > 0,
+    staleTime: 30_000,
+  });
+  const dailyUsageByKey = useMemo(() => {
+    const entries = new Map<number, Record<string, unknown>[]>();
 
-      return haystack.includes(normalized);
+    (dailyUsageQuery.data ?? []).forEach((item) => {
+      entries.set(item.id, item.rows);
     });
-  }, [allApiKeys, keyword]);
-  const summary = useMemo(() => {
-    const disabled = apiKeys.filter((item) => isDisabledStatus(item.status)).length;
-    const expired = apiKeys.filter((item) => isExpired(item.expires_at)).length;
-    const quotaUsed = apiKeys.reduce((sum, item) => sum + Number(item.quota_used ?? 0), 0);
-    const requestCount = apiKeys.reduce((sum, item) => sum + (firstNumberValue(usageByKey.get(item.id), ['request_count', 'requestCount']) ?? 0), 0);
-    const totalCost = apiKeys.reduce((sum, item) => sum + (firstNumberValue(usageByKey.get(item.id), ['total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0), 0);
 
-    return {
-      total: apiKeys.length,
-      active: Math.max(apiKeys.length - disabled - expired, 0),
-      disabled,
-      expired,
-      quotaUsed,
-      requestCount,
-      totalCost,
-    };
-  }, [apiKeys, usageByKey]);
+    return entries;
+  }, [dailyUsageQuery.data]);
+  const groupOptions = useMemo(() => {
+    const entries = new Map<string, string>();
+
+    allApiKeys.forEach((item) => {
+      entries.set(getGroupFilterKey(item), getGroupLabel(item));
+    });
+
+    return [{ key: 'all', label: '全部分组' }, ...Array.from(entries, ([key, label]) => ({ key, label }))];
+  }, [allApiKeys]);
+  const statusOptions = useMemo(() => {
+    const entries = new Map<string, string>([
+      ['all', '全部状态'],
+      ['active', '活跃'],
+      ['disabled', '禁用'],
+    ]);
+
+    allApiKeys.forEach((item) => {
+      entries.set(getStatusFilterKey(item.status), formatStatusLabel(item.status));
+    });
+
+    return Array.from(entries, ([key, label]) => ({ key, label }));
+  }, [allApiKeys]);
+  const selectedGroupLabel = groupOptions.find((item) => item.key === groupFilter)?.label ?? '全部分组';
+  const selectedStatusLabel = statusOptions.find((item) => item.key === statusFilter)?.label ?? '全部状态';
+  const apiKeys = useMemo(() => allApiKeys.filter((item) => {
+    const matchesGroup = groupFilter === 'all' || getGroupFilterKey(item) === groupFilter;
+    const matchesStatus = statusFilter === 'all' || getStatusFilterKey(item.status) === statusFilter;
+    return matchesGroup && matchesStatus;
+  }), [allApiKeys, groupFilter, statusFilter]);
 
   function resetForm() {
     setFormMode(null);
@@ -320,25 +408,15 @@ export default function ApiKeysScreen() {
     setFormKey('');
     setFormStatus('active');
     setFormGroupId('');
-    setFormQuota('');
     setFormExpiresAt('');
     setFormExpiresInDays('');
-    setFormIpWhitelist('');
-    setFormIpBlacklist('');
-    setFormRateLimit5h('');
-    setFormRateLimit1d('');
-    setFormRateLimit7d('');
     setFormError(null);
   }
 
   function getFormPayload(includeUserId: boolean, mode: 'create' | 'edit') {
     const userId = toNullableNumber(formUserId);
     const groupId = toNullableNumber(formGroupId);
-    const quota = toNullableNumber(formQuota);
     const expiresInDays = toNullableNumber(formExpiresInDays);
-    const rateLimit5h = toNullableNumber(formRateLimit5h);
-    const rateLimit1d = toNullableNumber(formRateLimit1d);
-    const rateLimit7d = toNullableNumber(formRateLimit7d);
 
     return {
       ...(includeUserId && userId ? { user_id: userId } : {}),
@@ -346,14 +424,8 @@ export default function ApiKeysScreen() {
       ...(formKey.trim() ? { custom_key: formKey.trim(), key: formKey.trim() } : {}),
       ...(mode === 'edit' ? { status: formStatus } : {}),
       ...(mode === 'edit' || groupId !== null ? { group_id: groupId } : {}),
-      ...(mode === 'edit' || quota !== null ? { quota } : {}),
       ...(mode === 'create' && expiresInDays !== null ? { expires_in_days: expiresInDays } : {}),
       ...(mode === 'edit' ? { expires_at: formExpiresAt.trim() || null } : {}),
-      ...(mode === 'edit' || formIpWhitelist.trim() ? { ip_whitelist: formIpWhitelist.trim() || null } : {}),
-      ...(mode === 'edit' || formIpBlacklist.trim() ? { ip_blacklist: formIpBlacklist.trim() || null } : {}),
-      ...(mode === 'edit' || rateLimit5h !== null ? { rate_limit_5h: rateLimit5h } : {}),
-      ...(mode === 'edit' || rateLimit1d !== null ? { rate_limit_1d: rateLimit1d } : {}),
-      ...(mode === 'edit' || rateLimit7d !== null ? { rate_limit_7d: rateLimit7d } : {}),
     };
   }
 
@@ -365,14 +437,8 @@ export default function ApiKeysScreen() {
     setFormKey('');
     setFormStatus('active');
     setFormGroupId('');
-    setFormQuota('');
     setFormExpiresAt('');
     setFormExpiresInDays('');
-    setFormIpWhitelist('');
-    setFormIpBlacklist('');
-    setFormRateLimit5h('');
-    setFormRateLimit1d('');
-    setFormRateLimit7d('');
     setFormError(null);
   }
 
@@ -384,14 +450,8 @@ export default function ApiKeysScreen() {
     setFormKey('');
     setFormStatus(isDisabledStatus(item.status) ? 'inactive' : 'active');
     setFormGroupId(item.group_id ? String(item.group_id) : '');
-    setFormQuota(item.quota ? String(item.quota) : '');
     setFormExpiresAt(item.expires_at || '');
     setFormExpiresInDays('');
-    setFormIpWhitelist(getIpFormValue(item.ip_whitelist));
-    setFormIpBlacklist(getIpFormValue(item.ip_blacklist));
-    setFormRateLimit5h(item.rate_limit_5h ? String(item.rate_limit_5h) : '');
-    setFormRateLimit1d(item.rate_limit_1d ? String(item.rate_limit_1d) : '');
-    setFormRateLimit7d(item.rate_limit_7d ? String(item.rate_limit_7d) : '');
     setFormError(null);
   }
 
@@ -408,6 +468,7 @@ export default function ApiKeysScreen() {
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['api-key-daily-usage'] });
     },
     onError: (error) => setFormError(getErrorMessage(error)),
   });
@@ -419,6 +480,7 @@ export default function ApiKeysScreen() {
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['api-key-daily-usage'] });
     },
     onError: (error) => setFormError(getErrorMessage(error)),
   });
@@ -429,36 +491,26 @@ export default function ApiKeysScreen() {
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
-    },
-    onError: (error) => setFormError(getErrorMessage(error)),
-  });
-
-  const resetQuotaMutation = useMutation({
-    mutationFn: (id: number) => updateAdminApiKey(id, { reset_quota: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
-    },
-    onError: (error) => setFormError(getErrorMessage(error)),
-  });
-
-  const resetRateMutation = useMutation({
-    mutationFn: (id: number) => updateAdminApiKey(id, { reset_rate_limit_usage: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['api-key-daily-usage'] });
     },
     onError: (error) => setFormError(getErrorMessage(error)),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteAdminApiKey(id),
-    onSuccess: () => {
+    mutationFn: (item: AdminApiKey) => deleteAdminApiKey(item.id, item.user_id),
+    onSuccess: (_data, item) => {
+      queryClient.setQueriesData<ApiKeySearchResult>(
+        { queryKey: ['admin-api-keys'] },
+        (current) => removeApiKeyFromResult(current, item.id)
+      );
+      queryClient.setQueriesData<ApiKeySearchResult>(
+        { queryKey: ['user-api-keys'] },
+        (current) => removeApiKeyFromResult(current, item.id)
+      );
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['api-keys-usage-dashboard'] });
+      queryClient.invalidateQueries({ queryKey: ['api-key-daily-usage'] });
     },
     onError: (error) => setFormError(getErrorMessage(error)),
   });
@@ -470,35 +522,27 @@ export default function ApiKeysScreen() {
     setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1400);
   }
 
+  async function copyCcsConfig(item: AdminApiKey) {
+    const serviceBaseUrl = adminConfigState.baseUrl.trim().replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const payload = {
+      name: item.name || `Key #${item.id}`,
+      base_url: serviceBaseUrl ? `${serviceBaseUrl}/v1` : '',
+      api_key: item.key || '',
+    };
+    const copyId = `ccs-${item.id || item.key}`;
+
+    await Clipboard.setStringAsync(JSON.stringify(payload, null, 2));
+    setCopiedKey(copyId);
+    setTimeout(() => setCopiedKey((current) => (current === copyId ? null : current)), 1400);
+  }
+
   function confirmDelete(item: AdminApiKey) {
     Alert.alert('删除 API Key', `确认删除 ${item.name || `Key #${item.id}`} 吗？`, [
       { text: '取消', style: 'cancel' },
       {
         text: '删除',
         style: 'destructive',
-        onPress: () => deleteMutation.mutate(item.id),
-      },
-    ]);
-  }
-
-  function confirmResetQuota(item: AdminApiKey) {
-    Alert.alert('重置额度用量', `确认将 ${item.name || `Key #${item.id}`} 的已用额度清零吗？`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '重置',
-        style: 'destructive',
-        onPress: () => resetQuotaMutation.mutate(item.id),
-      },
-    ]);
-  }
-
-  function confirmResetRateUsage(item: AdminApiKey) {
-    Alert.alert('重置限流用量', `确认重置 ${item.name || `Key #${item.id}`} 的 5H / 1D / 7D 用量吗？`, [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '重置',
-        style: 'destructive',
-        onPress: () => resetRateMutation.mutate(item.id),
+        onPress: () => deleteMutation.mutate(item),
       },
     ]);
   }
@@ -511,10 +555,11 @@ export default function ApiKeysScreen() {
         subtitle="查看、创建、编辑、启停和删除 API Key。"
         icon={KeyRound}
         variant="minimal"
-        refreshing={apiKeysQuery.isRefetching || usageQuery.isRefetching}
+        refreshing={apiKeysQuery.isRefetching || usageQuery.isRefetching || dailyUsageQuery.isRefetching}
         onRefresh={() => {
           void apiKeysQuery.refetch();
           void usageQuery.refetch();
+          void dailyUsageQuery.refetch();
         }}
         right={(
           <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -529,6 +574,7 @@ export default function ApiKeysScreen() {
               onPress={() => {
                 void apiKeysQuery.refetch();
                 void usageQuery.refetch();
+                void dailyUsageQuery.refetch();
               }}
               style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 8 }}
             >
@@ -552,19 +598,41 @@ export default function ApiKeysScreen() {
               style={{ color: colors.text, flex: 1, fontSize: 15, paddingHorizontal: 10, paddingVertical: 12 }}
             />
           </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-            <InfoTile label="密钥总数" value={formatNumber(summary.total)} />
-            <InfoTile label="正常可用" value={formatNumber(summary.active)} tone="success" />
-            <InfoTile label="禁用/撤销" value={formatNumber(summary.disabled)} />
-            <InfoTile label="已过期" value={formatNumber(summary.expired)} tone={summary.expired > 0 ? 'danger' : 'default'} />
-            <InfoTile label="已用额度" value={formatNumber(summary.quotaUsed)} />
-            <InfoTile label="请求总数" value={formatNumber(summary.requestCount)} />
-            <InfoTile label="总费用" value={formatCost(summary.totalCost)} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+            <FilterButton
+              label={selectedGroupLabel}
+              active={groupFilter !== 'all'}
+              onPress={() => setOpenFilterMenu((current) => (current === 'group' ? null : 'group'))}
+            />
+            <FilterButton
+              label={selectedStatusLabel}
+              active={statusFilter !== 'all'}
+              onPress={() => setOpenFilterMenu((current) => (current === 'status' ? null : 'status'))}
+            />
           </View>
-          {usageQuery.error ? (
-            <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 10 }}>
-              用量统计未返回：{getErrorMessage(usageQuery.error)}
-            </Text>
+          {openFilterMenu ? (
+            <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 14, borderWidth: 1, gap: 8, marginTop: 10, padding: 8 }}>
+              {(openFilterMenu === 'group' ? groupOptions : statusOptions).map((option) => {
+                const selected = openFilterMenu === 'group' ? option.key === groupFilter : option.key === statusFilter;
+
+                return (
+                  <Pressable
+                    key={option.key}
+                    onPress={() => {
+                      if (openFilterMenu === 'group') {
+                        setGroupFilter(option.key);
+                      } else {
+                        setStatusFilter(option.key);
+                      }
+                      setOpenFilterMenu(null);
+                    }}
+                    style={{ backgroundColor: selected ? colors.successBg : 'transparent', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 9 }}
+                  >
+                    <Text style={{ color: selected ? colors.success : colors.text, fontSize: 13, fontWeight: selected ? '800' : '600' }}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           ) : null}
         </View>
 
@@ -576,17 +644,11 @@ export default function ApiKeysScreen() {
               <Field label="名称" value={formName} onChangeText={setFormName} placeholder="例如：生产 Key" />
               <Field label="自定义 Key" value={formKey} onChangeText={setFormKey} placeholder={formMode === 'create' ? '留空则由后端生成' : '留空不修改'} />
               <Field label="分组 ID" value={formGroupId} onChangeText={setFormGroupId} placeholder="留空表示不绑定" keyboardType="number-pad" />
-              <Field label="额度" value={formQuota} onChangeText={setFormQuota} placeholder="留空表示不限" keyboardType="decimal-pad" />
               {formMode === 'create' ? (
                 <Field label="有效天数" value={formExpiresInDays} onChangeText={setFormExpiresInDays} placeholder="例如 30，留空不过期" keyboardType="number-pad" />
               ) : (
                 <Field label="过期时间" value={formExpiresAt} onChangeText={setFormExpiresAt} placeholder="2026-12-31T23:59:59Z" />
               )}
-              <Field label="5H 限流" value={formRateLimit5h} onChangeText={setFormRateLimit5h} placeholder="留空表示不限" keyboardType="decimal-pad" />
-              <Field label="1D 限流" value={formRateLimit1d} onChangeText={setFormRateLimit1d} placeholder="留空表示不限" keyboardType="decimal-pad" />
-              <Field label="7D 限流" value={formRateLimit7d} onChangeText={setFormRateLimit7d} placeholder="留空表示不限" keyboardType="decimal-pad" />
-              <Field label="IP 白名单" value={formIpWhitelist} onChangeText={setFormIpWhitelist} placeholder="每行一个 IP / CIDR，留空不限制" multiline />
-              <Field label="IP 黑名单" value={formIpBlacklist} onChangeText={setFormIpBlacklist} placeholder="每行一个 IP / CIDR，留空不限制" multiline />
             </View>
             {formMode === 'edit' ? (
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
@@ -667,28 +729,24 @@ export default function ApiKeysScreen() {
 
         {apiKeys.map((item: AdminApiKey) => {
           const copyId = String(item.id || item.key);
+          const ccsCopyId = `ccs-${item.id || item.key}`;
           const disabled = isDisabledStatus(item.status);
           const usage = usageByKey.get(item.id);
-          const requestCount = firstNumberValue(usage, ['request_count', 'requestCount']);
-          const totalCost = firstNumberValue(usage, ['total_cost', 'totalCost']);
-          const actualCost = firstNumberValue(usage, ['actual_cost', 'actualCost']);
           const usageLastUsedAt = firstTextValue(usage, ['last_used_at', 'lastUsedAt']);
           const lastUsedAt = item.last_used_at || usageLastUsedAt;
-          const canResetQuota = [item.quota, item.quota_used].some(hasPositiveValue);
-          const canResetRateUsage = [
-            item.rate_limit_5h,
-            item.rate_limit_1d,
-            item.rate_limit_7d,
-            item.usage_5h,
-            item.usage_1d,
-            item.usage_7d,
-          ].some(hasPositiveValue);
+          const dailyRows = dailyUsageByKey.get(item.id) ?? [];
+          const todayKey = getLocalDateKey();
+          const last30StartKey = getLast30DayStartKey();
+          const todayCost = sumUsageCost(dailyRows, (dateKey) => dateKey === todayKey);
+          const dailyLast30Cost = sumUsageCost(dailyRows, (dateKey) => Boolean(dateKey && dateKey >= last30StartKey && dateKey <= todayKey));
+          const dashboardCost = firstNumberValue(usage, ['total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0;
+          const last30Cost = dailyLast30Cost > 0 ? dailyLast30Cost : dashboardCost;
 
           return (
             <ListCard
               key={item.id || item.key}
               title={item.name || `Key #${item.id || '--'}`}
-              meta={`用户 ${getUserLabel(item)} · 分组 ${getGroupLabel(item)}`}
+              meta={`分组 ${getGroupLabel(item)} · 创建 ${formatDisplayTime(item.created_at)}`}
               icon={KeyRound}
             >
               <View style={{ gap: 12 }}>
@@ -703,26 +761,14 @@ export default function ApiKeysScreen() {
                 </View>
 
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  <InfoTile label="Key ID" value={`#${item.id}`} />
-                  <InfoTile label="用户" value={getUserLabel(item)} />
+                  <InfoTile label="API 密钥" value={maskKey(item.key)} />
                   <InfoTile label="分组" value={getGroupLabel(item)} />
-                  <InfoTile label="额度" value={formatQuota(item)} />
-                  <InfoTile label="剩余额度" value={formatQuotaRemaining(item)} />
-                  <InfoTile label="请求数" value={requestCount === undefined ? '--' : formatNumber(requestCount)} />
-                  <InfoTile label="总费用" value={formatCost(totalCost)} />
-                  <InfoTile label="实际费用" value={formatCost(actualCost)} />
-                  <InfoTile label="5H 用量" value={formatNumber(item.usage_5h)} />
-                  <InfoTile label="1D 用量" value={formatNumber(item.usage_1d)} />
-                  <InfoTile label="7D 用量" value={formatNumber(item.usage_7d)} />
-                  <InfoTile label="5H 限流" value={formatLimit(item.rate_limit_5h)} />
-                  <InfoTile label="1D 限流" value={formatLimit(item.rate_limit_1d)} />
-                  <InfoTile label="7D 限流" value={formatLimit(item.rate_limit_7d)} />
-                  <InfoTile label="IP 白名单" value={formatIpValue(item.ip_whitelist)} />
-                  <InfoTile label="IP 黑名单" value={formatIpValue(item.ip_blacklist)} />
-                  <InfoTile label="过期时间" value={formatDisplayTime(item.expires_at)} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
-                  <InfoTile label="5H 窗口" value={formatDisplayTime(item.window_5h_start)} />
-                  <InfoTile label="1D 窗口" value={formatDisplayTime(item.window_1d_start)} />
-                  <InfoTile label="7D 窗口" value={formatDisplayTime(item.window_7d_start)} />
+                  <InfoTile label="今日用量" value={formatMoney(todayCost)} />
+                  <InfoTile label="近30天用量" value={formatMoney(last30Cost)} />
+                  <InfoTile label="速率限制" value={formatRateLimit(item)} />
+                  <InfoTile label="过期时间" value={formatExpiry(item.expires_at)} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
+                  <InfoTile label="状态" value={formatStatusLabel(item.status)} tone={disabled ? 'danger' : 'success'} />
+                  <InfoTile label="上次使用时间" value={formatDisplayTime(lastUsedAt)} />
                   <InfoTile label="创建时间" value={formatDisplayTime(item.created_at)} />
                 </View>
 
@@ -733,18 +779,20 @@ export default function ApiKeysScreen() {
                   >
                     <Copy color={copiedKey === copyId ? colors.success : colors.badgeDefaultText} size={13} />
                     <Text style={{ color: copiedKey === copyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
-                      {copiedKey === copyId ? '已复制' : '复制'}
+                      {copiedKey === copyId ? '已复制' : '使用密钥'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }}
+                    onPress={() => copyCcsConfig(item)}
+                  >
+                    <FileCode2 color={copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText} size={13} />
+                    <Text style={{ color: copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
+                      {copiedKey === ccsCopyId ? '已复制' : '导入 CCS'}
                     </Text>
                   </Pressable>
                   {item.id ? (
                     <>
-                      <Pressable
-                        style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
-                        onPress={() => openEditForm(item)}
-                      >
-                        <Pencil color={colors.badgeDefaultText} size={13} />
-                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
-                      </Pressable>
                       <Pressable
                         disabled={toggleMutation.isPending}
                         style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
@@ -754,20 +802,11 @@ export default function ApiKeysScreen() {
                         <Text style={{ color: disabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{disabled ? '启用' : '禁用'}</Text>
                       </Pressable>
                       <Pressable
-                        disabled={!canResetQuota || resetQuotaMutation.isPending}
-                        style={{ backgroundColor: canResetQuota ? colors.mutedCard : colors.badgeMutedBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6, opacity: canResetQuota ? 1 : 0.55 }}
-                        onPress={() => confirmResetQuota(item)}
+                        style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
+                        onPress={() => openEditForm(item)}
                       >
-                        <RotateCcw color={colors.badgeDefaultText} size={13} />
-                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>重置额度</Text>
-                      </Pressable>
-                      <Pressable
-                        disabled={!canResetRateUsage || resetRateMutation.isPending}
-                        style={{ backgroundColor: canResetRateUsage ? colors.mutedCard : colors.badgeMutedBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6, opacity: canResetRateUsage ? 1 : 0.55 }}
-                        onPress={() => confirmResetRateUsage(item)}
-                      >
-                        <RotateCcw color={colors.badgeDefaultText} size={13} />
-                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>重置限流</Text>
+                        <Pencil color={colors.badgeDefaultText} size={13} />
+                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
                       </Pressable>
                       <Pressable
                         disabled={deleteMutation.isPending}

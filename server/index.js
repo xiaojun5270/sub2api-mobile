@@ -8,6 +8,10 @@ const upstreamBaseUrl = (process.env.SUB2API_BASE_URL || '').trim().replace(/\/$
 const adminApiKey = (process.env.SUB2API_ADMIN_API_KEY || '').trim();
 const allowedOrigin = (process.env.ALLOW_ORIGIN || '*').trim();
 
+function formatAuthorizationHeader(value) {
+  return value.toLowerCase().startsWith('bearer ') ? value : `Bearer ${value}`;
+}
+
 function isSuccessPayload(json) {
   if (!json || typeof json !== 'object') {
     return true;
@@ -36,6 +40,7 @@ async function fetchAdminJson(path) {
   const response = await fetch(`${upstreamBaseUrl}${path}`, {
     headers: {
       'x-api-key': adminApiKey,
+      Authorization: formatAuthorizationHeader(adminApiKey),
     },
   });
 
@@ -94,6 +99,7 @@ async function proxyUpstreamRequest(req, res, options = {}) {
   const headers = new Headers();
 
   headers.set('x-api-key', adminApiKey);
+  headers.set('Authorization', formatAuthorizationHeader(adminApiKey));
 
   const contentType = req.headers['content-type'];
   if (contentType) {
@@ -233,6 +239,10 @@ app.get('/api/v1/keys', async (req, res) => {
       message: error instanceof Error ? error.message : 'KEYS_AGGREGATION_FAILED',
     });
   }
+});
+
+app.use('/api/v1/keys/:id', async (req, res) => {
+  await proxyUpstreamRequest(req, res);
 });
 
 app.use('/api/v1/admin', async (req, res) => {

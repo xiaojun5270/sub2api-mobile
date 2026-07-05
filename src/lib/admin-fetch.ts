@@ -28,6 +28,10 @@ function buildRequestUrl(baseUrl: string, path: string) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
+function formatAuthorizationHeader(value: string) {
+  return value.toLowerCase().startsWith('bearer ') ? value : `Bearer ${value}`;
+}
+
 export async function adminFetch<T>(
   path: string,
   init: RequestInit = {},
@@ -48,6 +52,9 @@ export async function adminFetch<T>(
   headers.set('Content-Type', 'application/json');
   if (adminApiKey) {
     headers.set('x-api-key', adminApiKey);
+    if (!headers.has('Authorization')) {
+      headers.set('Authorization', formatAuthorizationHeader(adminApiKey));
+    }
   }
 
   if (options?.idempotencyKey) {
@@ -61,6 +68,14 @@ export async function adminFetch<T>(
 
   let json: unknown;
   const rawText = await response.text();
+
+  if (!rawText.trim()) {
+    if (!response.ok) {
+      throw new Error('REQUEST_FAILED');
+    }
+
+    return undefined as T;
+  }
 
   try {
     json = JSON.parse(rawText);
