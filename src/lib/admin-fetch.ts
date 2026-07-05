@@ -69,7 +69,8 @@ export async function adminFetch<T>(
   }
 
   if (hasNumericCode(json)) {
-    if (!response.ok || json.code !== 0) {
+    const okCode = json.code === 0 || (json.code >= 200 && json.code < 300);
+    if (!response.ok || !okCode) {
       throw new Error(json.reason || json.message || 'REQUEST_FAILED');
     }
 

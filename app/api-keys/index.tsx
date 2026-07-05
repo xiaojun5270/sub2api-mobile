@@ -291,8 +291,8 @@ export default function ApiKeysScreen() {
 
           return (
             <ListCard
-              key={item.id}
-              title={item.name || `Key #${item.id}`}
+              key={item.id || item.key}
+              title={item.name || `Key #${item.id || '--'}`}
               meta={`用户 ${item.user?.email || item.user_id || '--'} · 分组 ${item.group?.name || item.group_id || '未分组'}`}
               icon={KeyRound}
             >
@@ -351,13 +351,15 @@ export default function ApiKeysScreen() {
                       {copiedId === item.id ? '已复制' : '复制'}
                     </Text>
                   </Pressable>
-                  <Pressable
-                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
-                    onPress={() => startEdit(item)}
-                  >
-                    <Pencil color={colors.badgeDefaultText} size={13} />
-                    <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>调整分组</Text>
-                  </Pressable>
+                  {item.id ? (
+                    <Pressable
+                      style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
+                      onPress={() => startEdit(item)}
+                    >
+                      <Pencil color={colors.badgeDefaultText} size={13} />
+                      <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>调整分组</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
               </View>
             </ListCard>

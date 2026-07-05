@@ -13,18 +13,23 @@ import { formatCompactNumber, formatDisplayTime } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
   getOpsAlertEvents,
+  getOpsAccountAvailability,
+  getOpsConcurrency,
   getOpsDashboardOverview,
   getOpsDashboardSnapshot,
   getOpsErrors,
   getOpsErrorDistribution,
   getOpsErrorTrend,
   getOpsLatencyHistogram,
+  getOpsOpenAiTokenStats,
   getOpsRequestErrors,
+  getOpsRequests,
   getOpsRealtimeTraffic,
   getOpsSystemLogs,
   getOpsSystemLogsHealth,
   getOpsThroughputTrend,
   getOpsUpstreamErrors,
+  getOpsUserConcurrency,
   getSystemVersion,
   resolveOpsError,
   resolveOpsRequestError,
@@ -97,6 +102,14 @@ function firstArray<T>(source: unknown, keys: string[]): T[] {
     }
   }
 
+  for (const value of Object.values(source)) {
+    if (Array.isArray(value)) return value as T[];
+    if (isRecord(value)) {
+      const nested = firstArray<T>(value, keys);
+      if (nested.length > 0) return nested;
+    }
+  }
+
   return [];
 }
 
@@ -157,7 +170,7 @@ function snapshotArray(snapshot: OpsDashboardSnapshot | undefined, keys: string[
 }
 
 function pointLabel(point: OpsMetricPoint, index: number) {
-  const value = point.label || point.time || point.date || `${index + 1}`;
+  const value = point.label || point.time || point.date || firstText(point, ['bucket', 'name', 'type', 'timestamp']) || `${index + 1}`;
   if (value.length > 12) return value.slice(5, 16);
   return value;
 }
@@ -217,16 +230,21 @@ export default function OpsScreen() {
   const overviewQuery = useQuery({ queryKey: ['ops-overview'], queryFn: getOpsDashboardOverview, staleTime: 30_000 });
   const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot'], queryFn: getOpsDashboardSnapshot, staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime'], queryFn: getOpsRealtimeTraffic, staleTime: 15_000 });
+  const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency'], queryFn: getOpsConcurrency, staleTime: 15_000 });
+  const userConcurrencyQuery = useQuery({ queryKey: ['ops-user-concurrency'], queryFn: getOpsUserConcurrency, staleTime: 15_000 });
+  const accountAvailabilityQuery = useQuery({ queryKey: ['ops-account-availability'], queryFn: getOpsAccountAvailability, staleTime: 30_000 });
+  const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats'], queryFn: getOpsOpenAiTokenStats, staleTime: 30_000 });
   const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend'], queryFn: getOpsThroughputTrend, staleTime: 60_000 });
   const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend'], queryFn: getOpsErrorTrend, staleTime: 60_000 });
   const latencyQuery = useQuery({ queryKey: ['ops-latency-histogram'], queryFn: getOpsLatencyHistogram, staleTime: 60_000 });
   const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution'], queryFn: getOpsErrorDistribution, staleTime: 60_000 });
-  const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors'], queryFn: () => getOpsRequestErrors({ page_size: 8 }), staleTime: 30_000 });
-  const genericErrorsQuery = useQuery({ queryKey: ['ops-errors'], queryFn: () => getOpsErrors({ page_size: 8 }), staleTime: 30_000 });
-  const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors'], queryFn: () => getOpsUpstreamErrors({ page_size: 8 }), staleTime: 30_000 });
-  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs'], queryFn: () => getOpsSystemLogs({ page_size: 8 }), staleTime: 30_000 });
+  const requestsQuery = useQuery({ queryKey: ['ops-requests'], queryFn: () => getOpsRequests(), staleTime: 30_000 });
+  const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors'], queryFn: () => getOpsRequestErrors(), staleTime: 30_000 });
+  const genericErrorsQuery = useQuery({ queryKey: ['ops-errors'], queryFn: () => getOpsErrors(), staleTime: 30_000 });
+  const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors'], queryFn: () => getOpsUpstreamErrors(), staleTime: 30_000 });
+  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs'], queryFn: () => getOpsSystemLogs(), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
-  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events'], queryFn: () => getOpsAlertEvents({ page_size: 8 }), staleTime: 30_000 });
+  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events'], queryFn: () => getOpsAlertEvents(), staleTime: 30_000 });
   const versionQuery = useQuery({ queryKey: ['system-version'], queryFn: getSystemVersion, staleTime: 120_000 });
 
   const resolveErrorMutation = useMutation({
@@ -250,26 +268,35 @@ export default function OpsScreen() {
   const snapshot = snapshotQuery.data;
   const overview = overviewQuery.data || snapshot?.overview || snapshot;
   const realtime = realtimeQuery.data || snapshot?.realtime || snapshot?.overview || snapshot;
-  const requestErrorItems = getItems(requestErrorsQuery.data);
-  const genericErrorItems = getItems(genericErrorsQuery.data);
-  const upstreamErrorItems = getItems(upstreamErrorsQuery.data);
+  const concurrency = concurrencyQuery.data;
+  const userConcurrency = userConcurrencyQuery.data;
+  const accountAvailability = accountAvailabilityQuery.data;
+  const tokenStats = tokenStatsQuery.data || snapshot?.openai_token_stats;
+  const recentRequests = getItems(requestsQuery.data).slice(0, 8);
+  const requestErrorItems = getItems(requestErrorsQuery.data).slice(0, 8);
+  const genericErrorItems = getItems(genericErrorsQuery.data).slice(0, 8);
+  const upstreamErrorItems = getItems(upstreamErrorsQuery.data).slice(0, 8);
   const requestErrorSource: 'request' | 'generic' | 'upstream' = requestErrorItems.length > 0 ? 'request' : genericErrorItems.length > 0 ? 'generic' : 'upstream';
   const requestErrors = requestErrorItems.length > 0 ? requestErrorItems : genericErrorItems.length > 0 ? genericErrorItems : upstreamErrorItems;
-  const systemLogs = getItems(systemLogsQuery.data);
-  const alertEvents = getItems(alertEventsQuery.data);
+  const systemLogs = getItems(systemLogsQuery.data).slice(0, 8);
+  const alertEvents = getItems(alertEventsQuery.data).slice(0, 8);
 
-  const totalRequests = firstNumber(overview, ['total_requests', 'requests', 'request_count']) || firstNumber(realtime, ['total_requests', 'requests']);
-  const errors = firstNumber(overview, ['errors', 'error_count', 'request_errors']);
-  const errorRate = firstNumber(overview, ['error_rate']);
-  const qps = firstNumber(overview, ['qps']) || firstNumber(realtime, ['qps']);
-  const rpm = firstNumber(overview, ['rpm']) || firstNumber(realtime, ['rpm']);
-  const avgLatency = firstNumber(overview, ['avg_latency_ms', 'average_latency_ms', 'latency_ms']) || firstNumber(realtime, ['avg_latency_ms']);
-  const p95Latency = firstNumber(overview, ['p95_latency_ms', 'p95', 'latency_p95_ms']);
-  const activeAccounts = firstNumber(overview, ['active_accounts', 'normal_accounts', 'healthy_accounts']);
-  const alertCount = firstNumber(overview, ['alert_count', 'alerts', 'open_alerts']);
-  const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'active_requests', 'inflight_requests', 'concurrency']);
-  const queueSize = firstNumber(realtime, ['queue_size', 'queued_requests', 'pending_requests']);
-  const tokenPerSecond = firstNumber(realtime, ['tps', 'tokens_per_second', 'token_per_second']);
+  const totalRequests = firstNumber(overview, ['total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount']) || firstNumber(realtime, ['total_requests', 'totalRequests', 'requests']);
+  const errors = firstNumber(overview, ['errors', 'error_count', 'errorCount', 'request_errors', 'requestErrors', 'total_errors', 'totalErrors']);
+  const rawErrorRate = firstNumber(overview, ['error_rate', 'errorRate', 'errors_rate']);
+  const errorRate = rawErrorRate > 1 ? rawErrorRate / 100 : rawErrorRate;
+  const qps = firstNumber(overview, ['qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
+  const rpm = firstNumber(overview, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || firstNumber(realtime, ['rpm', 'requests_per_minute', 'requestsPerMinute']);
+  const avgLatency = firstNumber(overview, ['avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs', 'latency_ms', 'latencyMs', 'avg_duration_ms', 'avgDurationMs']) || firstNumber(realtime, ['avg_latency_ms', 'avgLatencyMs', 'average_latency_ms', 'averageLatencyMs']);
+  const p95Latency = firstNumber(overview, ['p95_latency_ms', 'p95LatencyMs', 'p95', 'latency_p95_ms', 'latencyP95Ms']);
+  const activeAccounts = firstNumber(overview, ['active_accounts', 'activeAccounts', 'normal_accounts', 'normalAccounts', 'healthy_accounts', 'healthyAccounts']) || firstNumber(accountAvailability, ['available_accounts', 'availableAccounts', 'active_accounts', 'activeAccounts']);
+  const alertCount = firstNumber(overview, ['alert_count', 'alertCount', 'alerts', 'open_alerts', 'openAlerts']);
+  const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
+  const queueSize = firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
+  const tokenPerSecond = firstNumber(realtime, ['tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
+  const activeUsers = firstNumber(userConcurrency, ['active_users', 'activeUsers', 'users', 'total']);
+  const availableAccounts = firstNumber(accountAvailability, ['available_accounts', 'availableAccounts', 'normal_accounts', 'normalAccounts', 'healthy_accounts', 'healthyAccounts']);
+  const unavailableAccounts = firstNumber(accountAvailability, ['unavailable_accounts', 'unavailableAccounts', 'error_accounts', 'errorAccounts', 'failed_accounts', 'failedAccounts']);
 
   const throughputSource = firstNonEmptyTrend(
     throughputQuery.data,
@@ -294,21 +321,21 @@ export default function OpsScreen() {
 
   const throughputPoints = throughputSource.map((point, index) => ({
     label: pointLabel(point, index),
-    value: pointValue(point, ['requests', 'count', 'value']),
+    value: pointValue(point, ['requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'count', 'value']),
   }));
   const errorPoints = errorSource.map((point, index) => ({
     label: pointLabel(point, index),
-    value: pointValue(point, ['errors', 'count', 'value']),
+    value: pointValue(point, ['errors', 'error_count', 'errorCount', 'total_errors', 'totalErrors', 'count', 'value']),
   }));
   const latencyItems = latencySource.map((point, index) => ({
     label: pointLabel(point, index),
-    value: pointValue(point, ['count', 'requests', 'value']),
+    value: pointValue(point, ['count', 'requests', 'request_count', 'requestCount', 'value']),
     color: '#0f766e',
-    meta: `${pointValue(point, ['latency_ms', 'duration_ms']) || point.label || ''}`,
+    meta: `${pointValue(point, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs']) || point.label || ''}`,
   }));
   const distributionItems = distributionSource.map((point, index) => ({
     label: pointLabel(point, index),
-    value: pointValue(point, ['count', 'errors', 'value']),
+    value: pointValue(point, ['count', 'errors', 'error_count', 'errorCount', 'value']),
     color: '#f97316',
   }));
 
@@ -319,10 +346,15 @@ export default function OpsScreen() {
     overviewQuery.refetch();
     snapshotQuery.refetch();
     realtimeQuery.refetch();
+    concurrencyQuery.refetch();
+    userConcurrencyQuery.refetch();
+    accountAvailabilityQuery.refetch();
+    tokenStatsQuery.refetch();
     throughputQuery.refetch();
     errorTrendQuery.refetch();
     latencyQuery.refetch();
     errorDistributionQuery.refetch();
+    requestsQuery.refetch();
     requestErrorsQuery.refetch();
     genericErrorsQuery.refetch();
     upstreamErrorsQuery.refetch();
@@ -332,7 +364,7 @@ export default function OpsScreen() {
     versionQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || requestErrorsQuery.isRefetching || systemLogsQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching || systemLogsQuery.isRefetching;
 
   return (
     <>
@@ -372,6 +404,9 @@ export default function OpsScreen() {
             <InfoTile label="Token/s" value={formatCompactNumber(tokenPerSecond)} />
             <InfoTile label="平均延迟" value={formatLatency(avgLatency)} />
             <InfoTile label="P95 延迟" value={formatLatency(p95Latency)} />
+            <InfoTile label="活跃用户" value={formatCompactNumber(activeUsers)} />
+            <InfoTile label="可用账号" value={formatCompactNumber(availableAccounts || activeAccounts)} tone={(availableAccounts || activeAccounts) > 0 ? 'success' : 'default'} />
+            <InfoTile label="不可用账号" value={formatCompactNumber(unavailableAccounts)} tone={unavailableAccounts > 0 ? 'danger' : 'default'} />
             <InfoTile label="日志状态" value={firstText(logsHealthQuery.data, ['status', 'state', 'health'])} />
           </View>
         </View>
@@ -391,6 +426,37 @@ export default function OpsScreen() {
         {distributionItems.length > 0 ? (
           <BarChartCard title="错误分布" subtitle="错误类型或来源分布" items={distributionItems} icon={AlertTriangle} formatValue={formatCompactNumber} />
         ) : null}
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="最近请求" icon={Activity} />
+          <View style={{ gap: 10, marginTop: 12 }}>
+            {requestsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载最近请求...</Text> : null}
+            {recentRequests.map((item, index) => {
+              const id = item.id ?? index;
+              const method = item.method || firstText(item, ['request_method', 'requestMethod', 'http_method', 'httpMethod']);
+              const path = item.path || firstText(item, ['url', 'endpoint', 'route']);
+              const status = item.status || firstText(item, ['status_code', 'statusCode', 'code']);
+              const createdAt = item.created_at || firstText(item, ['createdAt', 'timestamp', 'time']);
+              const latency = firstNumber(item, ['latency_ms', 'latencyMs', 'duration_ms', 'durationMs', 'elapsed_ms', 'elapsedMs']);
+
+              return (
+                <View key={`${id}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{method} {path}</Text>
+                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
+                    {firstText(item, ['model', 'model_name', 'modelName'])} · {formatDisplayTime(createdAt)} · {formatLatency(latency)}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                    <InfoTile label="请求 ID" value={`${item.id ?? '--'}`} />
+                    <InfoTile label="状态" value={status} />
+                    <InfoTile label="用户" value={item.user_email || firstText(item, ['userEmail', 'email', 'user_id', 'userId'])} />
+                    <InfoTile label="账号" value={item.account_name || firstText(item, ['accountName', 'account_id', 'accountId'])} />
+                  </View>
+                </View>
+              );
+            })}
+            {!requestsQuery.isLoading && recentRequests.length === 0 ? <Text style={{ color: colors.subtext }}>暂无最近请求。</Text> : null}
+          </View>
+        </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="请求错误" icon={AlertTriangle} />

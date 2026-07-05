@@ -42,7 +42,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function firstNumberField(source: unknown, keys: string[]) {
+function firstNumberField(source: unknown, keys: string[]): number | undefined {
   if (!isRecord(source)) return undefined;
 
   for (const key of keys) {
@@ -51,7 +51,47 @@ function firstNumberField(source: unknown, keys: string[]) {
     if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
   }
 
-  return firstNumberField(source.data, keys);
+  for (const key of ['data', 'payload', 'result', 'response']) {
+    const nested: number | undefined = firstNumberField(source[key], keys);
+    if (nested !== undefined) return nested;
+  }
+
+  return undefined;
+}
+
+function firstStringField(source: unknown, keys: string[]): string | undefined {
+  if (!isRecord(source)) return undefined;
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (typeof value === 'boolean') return value ? 'true' : 'false';
+  }
+
+  for (const key of ['data', 'payload', 'result', 'response']) {
+    const nested: string | undefined = firstStringField(source[key], keys);
+    if (nested) return nested;
+  }
+
+  return undefined;
+}
+
+function firstBooleanField(source: unknown, keys: string[]) {
+  if (!isRecord(source)) return undefined;
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string' && value.trim()) {
+      const normalized = value.toLowerCase();
+      if (['true', '1', 'yes', 'active', 'enabled'].includes(normalized)) return true;
+      if (['false', '0', 'no', 'disabled', 'inactive', 'revoked'].includes(normalized)) return false;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) return value !== 0;
+  }
+
+  return undefined;
 }
 
 function extractItems<T>(payload: unknown, preferredKeys: string[] = []): T[] {
@@ -66,6 +106,15 @@ function extractItems<T>(payload: unknown, preferredKeys: string[] = []): T[] {
     'records',
     'results',
     'rows',
+    'content',
+    'options',
+    'suggestions',
+    'values',
+    'entries',
+    'children',
+    'payload',
+    'result',
+    'response',
     'api_keys',
     'apiKeys',
     'keys',
@@ -77,6 +126,14 @@ function extractItems<T>(payload: unknown, preferredKeys: string[] = []): T[] {
 
   for (const key of keys) {
     const value = payload[key];
+    if (Array.isArray(value)) return value as T[];
+    if (isRecord(value)) {
+      const nested = extractItems<T>(value, preferredKeys);
+      if (nested.length > 0) return nested;
+    }
+  }
+
+  for (const value of Object.values(payload)) {
     if (Array.isArray(value)) return value as T[];
     if (isRecord(value)) {
       const nested = extractItems<T>(value, preferredKeys);
@@ -138,31 +195,60 @@ function keyMatchesSearch(item: AdminApiKey, search: string) {
   return haystack.includes(normalized);
 }
 
+function normalizeAdminApiKey(raw: AdminApiKey | Record<string, unknown>, owner?: AdminUser): AdminApiKey {
+  const source = raw as Record<string, unknown>;
+  const id = firstNumberField(source, ['id', 'api_key_id', 'apiKeyId', 'key_id', 'keyId']) ?? 0;
+  const userId = firstNumberField(source, ['user_id', 'userId', 'owner_id', 'ownerId']) ?? owner?.id ?? 0;
+  const groupId = firstNumberField(source, ['group_id', 'groupId']);
+  const key = firstStringField(source, ['key', 'api_key', 'apiKey', 'key_value', 'keyValue', 'token', 'value']) ?? '';
+  const name = firstStringField(source, ['name', 'label', 'title', 'remark', 'description']) || (key ? `Key ${key.slice(0, 8)}` : `Key #${id || '--'}`);
+  const enabled = firstBooleanField(source, ['enabled', 'is_active', 'isActive', 'active']);
+  const status = firstStringField(source, ['status', 'state']) || (enabled === false ? 'disabled' : 'active');
+  const quota = firstNumberField(source, ['quota', 'quota_limit', 'quotaLimit', 'limit', 'total_quota']) ?? 0;
+  const quotaUsed = firstNumberField(source, ['quota_used', 'quotaUsed', 'used_quota', 'usedQuota', 'usage', 'used']) ?? 0;
+  const rawUser = isRecord(source.user) ? source.user : undefined;
+  const rawGroup = isRecord(source.group) ? source.group : undefined;
+
+  return {
+    ...(raw as AdminApiKey),
+    id,
+    user_id: userId,
+    key,
+    name,
+    group_id: groupId ?? ((raw as AdminApiKey).group_id ?? null),
+    status,
+    quota,
+    quota_used: quotaUsed,
+    last_used_at: firstStringField(source, ['last_used_at', 'lastUsedAt', 'last_used', 'lastUsed']) ?? (raw as AdminApiKey).last_used_at,
+    expires_at: firstStringField(source, ['expires_at', 'expiresAt', 'expired_at', 'expiredAt']) ?? (raw as AdminApiKey).expires_at,
+    created_at: firstStringField(source, ['created_at', 'createdAt', 'created']) ?? (raw as AdminApiKey).created_at,
+    updated_at: firstStringField(source, ['updated_at', 'updatedAt', 'modified_at', 'modifiedAt']) ?? (raw as AdminApiKey).updated_at,
+    usage_5h: firstNumberField(source, ['usage_5h', 'usage5h', 'usage_5_hours']),
+    usage_1d: firstNumberField(source, ['usage_1d', 'usage1d', 'usage_today', 'today_usage']),
+    usage_7d: firstNumberField(source, ['usage_7d', 'usage7d', 'usage_week', 'weekly_usage']),
+    group: (raw as AdminApiKey).group ?? (rawGroup as AdminGroup | undefined),
+    user: (raw as AdminApiKey).user ?? {
+      id: userId,
+      email: firstStringField(rawUser, ['email']) ?? owner?.email,
+      username: firstStringField(rawUser, ['username', 'name']) ?? owner?.username,
+    },
+  };
+}
+
 async function listApiKeysFromUsers(search: string): Promise<PaginatedData<AdminApiKey>> {
-  const usersPayload = await adminFetchWithOptionalQuery<unknown>(
-    '/api/v1/admin/users',
-    { page: 1, page_size: 50, search }
-  );
+  const usersPayload = await adminFetch<unknown>('/api/v1/admin/users');
   const users = toPaginatedData<AdminUser>(usersPayload, ['users']).items;
   const keyGroups = await Promise.all(
     users.map(async (user) => {
       try {
         const payload = await adminFetch<unknown>(`/api/v1/admin/users/${user.id}/api-keys`);
-        return toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']).items.map((item) => ({
-          ...item,
-          user_id: item.user_id ?? user.id,
-          user: item.user ?? {
-            id: user.id,
-            email: user.email,
-            username: user.username,
-          },
-        }));
+        return toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']).items.map((item) => normalizeAdminApiKey(item, user));
       } catch {
         return [] as AdminApiKey[];
       }
     })
   );
-  const items = keyGroups.flat().filter((item) => keyMatchesSearch(item, search));
+  const items = keyGroups.flat().filter((item) => item.id || item.key).filter((item) => keyMatchesSearch(item, search));
 
   return {
     items,
@@ -258,14 +344,19 @@ export async function searchAdminApiKeys(search = '') {
   let directError: unknown;
 
   try {
-    const payload = await adminFetchWithOptionalQuery<unknown>(
-      '/api/v1/admin/usage/search-api-keys',
-      { search: keyword, keyword, q: keyword }
-    );
+    const payload = await adminFetch<unknown>('/api/v1/admin/usage/search-api-keys');
     const direct = toPaginatedData<AdminApiKey>(payload, ['api_keys', 'apiKeys', 'keys']);
+    const items = direct.items.map((item) => normalizeAdminApiKey(item)).filter((item) => item.id || item.key).filter((item) => keyMatchesSearch(item, keyword));
 
-    if (direct.items.length > 0 || keyword) {
-      return direct;
+    if (items.length > 0) {
+      return {
+        ...direct,
+        items,
+        total: items.length,
+        page: 1,
+        page_size: Math.max(items.length, 1),
+        pages: 1,
+      };
     }
   } catch (error) {
     directError = error;
@@ -440,6 +531,22 @@ export function getOpsDashboardSnapshot() {
 
 export function getOpsRealtimeTraffic() {
   return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/realtime-traffic');
+}
+
+export function getOpsConcurrency() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/concurrency');
+}
+
+export function getOpsUserConcurrency() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/user-concurrency');
+}
+
+export function getOpsAccountAvailability() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/account-availability');
+}
+
+export function getOpsOpenAiTokenStats() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/dashboard/openai-token-stats');
 }
 
 export function getOpsRequests(params: { page?: number; page_size?: number; search?: string } = {}) {
