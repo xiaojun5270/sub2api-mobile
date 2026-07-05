@@ -43,6 +43,13 @@ function getErrorMessage(error: unknown) {
   return '加载失败，请稍后重试。';
 }
 
+function hasReturnedData(value: unknown) {
+  if (!value) return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'object') return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
@@ -341,6 +348,20 @@ export default function OpsScreen() {
 
   const hasOverviewFallback = Boolean(snapshot);
   const firstError = hasOverviewFallback ? null : overviewQuery.error || realtimeQuery.error || snapshotQuery.error;
+  const dataSources = [
+    { label: 'overview', ok: hasReturnedData(overviewQuery.data), error: overviewQuery.error },
+    { label: 'snapshot-v2', ok: hasReturnedData(snapshotQuery.data), error: snapshotQuery.error },
+    { label: 'realtime', ok: hasReturnedData(realtimeQuery.data), error: realtimeQuery.error },
+    { label: 'requests', ok: recentRequests.length > 0, error: requestsQuery.error },
+    { label: 'request-errors', ok: requestErrorItems.length > 0, error: requestErrorsQuery.error },
+    { label: 'concurrency', ok: hasReturnedData(concurrencyQuery.data), error: concurrencyQuery.error },
+    { label: 'account-availability', ok: hasReturnedData(accountAvailabilityQuery.data), error: accountAvailabilityQuery.error },
+    { label: 'system-logs', ok: systemLogs.length > 0, error: systemLogsQuery.error },
+    { label: 'alert-events', ok: alertEvents.length > 0, error: alertEventsQuery.error },
+  ];
+  const hasSourceError = dataSources.some((source) => Boolean(source.error));
+  const hasVisibleOpsData = totalRequests > 0 || qps > 0 || rpm > 0 || currentConcurrency > 0 || recentRequests.length > 0 || requestErrors.length > 0 || systemLogs.length > 0 || alertEvents.length > 0;
+  const showDataSourceStatus = hasSourceError || (!overviewQuery.isLoading && !snapshotQuery.isLoading && !realtimeQuery.isLoading && !hasVisibleOpsData);
 
   function refetchAll() {
     overviewQuery.refetch();
@@ -376,12 +397,37 @@ export default function OpsScreen() {
         variant="minimal"
         refreshing={refreshing}
         onRefresh={refetchAll}
+        safeAreaEdges={['bottom']}
         bottomInsetClassName="pb-8"
+        contentGapClassName="mt-3 gap-3"
       >
         {firstError ? (
           <View style={{ backgroundColor: colors.errorBg, borderRadius: 14, padding: 14 }}>
             <Text style={{ color: colors.errorText, fontWeight: '800' }}>运维概览加载失败</Text>
             <Text style={{ color: colors.errorText, fontSize: 13, lineHeight: 20, marginTop: 6 }}>{getErrorMessage(firstError)}</Text>
+          </View>
+        ) : null}
+
+        {showDataSourceStatus ? (
+          <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+            <SectionTitle title="数据源状态" icon={AlertTriangle} />
+            <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 8 }}>
+              当前接口已连接，但主要运维指标没有可展示数据；下面可以定位是接口空返回、字段不匹配，还是接口报错。
+            </Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              {dataSources.map((source) => {
+                const failed = Boolean(source.error);
+                const status = failed ? getErrorMessage(source.error) : source.ok ? '已返回' : '空';
+                return (
+                  <InfoTile
+                    key={source.label}
+                    label={source.label}
+                    value={status}
+                    tone={failed ? 'danger' : source.ok ? 'success' : 'default'}
+                  />
+                );
+              })}
+            </View>
           </View>
         ) : null}
 

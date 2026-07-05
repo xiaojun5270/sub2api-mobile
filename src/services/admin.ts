@@ -11,6 +11,7 @@ import type {
   DashboardSnapshot,
   DashboardStats,
   DashboardTrend,
+  CreateApiKeyRequest,
   CreateAccountRequest,
   CreateUserRequest,
   OpsDashboardOverview,
@@ -373,10 +374,34 @@ export async function searchAdminApiKeys(search = '') {
   }
 }
 
+export async function createAdminApiKey(body: CreateApiKeyRequest) {
+  try {
+    return await adminFetch<AdminApiKey>('/api/v1/admin/api-keys', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    if (!body.user_id) {
+      throw error;
+    }
+
+    return adminFetch<AdminApiKey>(`/api/v1/admin/users/${body.user_id}/api-keys`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+}
+
 export function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
   return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
+  });
+}
+
+export function deleteAdminApiKey(apiKeyId: number) {
+  return adminFetch(`/api/v1/admin/api-keys/${apiKeyId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -435,6 +460,12 @@ export function updateAccount(accountId: number, body: UpdateAccountRequest) {
   return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
+  });
+}
+
+export function deleteAccount(accountId: number) {
+  return adminFetch(`/api/v1/admin/accounts/${accountId}`, {
+    method: 'DELETE',
   });
 }
 

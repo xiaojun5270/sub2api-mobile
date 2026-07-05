@@ -151,8 +151,23 @@ export type AdminApiKey = {
   };
 };
 
-export type UpdateApiKeyRequest = {
+export type CreateApiKeyRequest = {
+  user_id?: number;
+  name?: string;
+  key?: string;
   group_id?: number | null;
+  quota?: number | null;
+  expires_at?: string | null;
+  status?: string;
+};
+
+export type UpdateApiKeyRequest = {
+  name?: string;
+  key?: string;
+  group_id?: number | null;
+  quota?: number | null;
+  expires_at?: string | null;
+  status?: string;
 };
 
 export type BalanceOperation = 'set' | 'add' | 'subtract';

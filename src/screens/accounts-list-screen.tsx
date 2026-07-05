@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { KeyRound, Search, ShieldCheck, ShieldOff } from 'lucide-react-native';
+import { KeyRound, Pencil, Power, Search, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import type { Edge } from 'react-native-safe-area-context';
@@ -10,7 +10,7 @@ import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
-import { batchClearAccountErrors, batchRefreshAccounts, getAccountTodayStats, listAccounts, setAccountSchedulable, testAccount } from '@/src/services/admin';
+import { batchClearAccountErrors, batchRefreshAccounts, deleteAccount, getAccountTodayStats, listAccounts, setAccountSchedulable, testAccount, updateAccount } from '@/src/services/admin';
 import type { AdminAccount } from '@/src/types/admin';
 
 type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error';
@@ -32,6 +32,50 @@ function formatTime(value?: string | null) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
   return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function toOptionalNumber(raw: string) {
+  if (!raw.trim()) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder?: string;
+  keyboardType?: 'default' | 'number-pad' | 'decimal-pad';
+}) {
+  const colors = useAppTheme();
+
+  return (
+    <View style={{ flex: 1, minWidth: 128 }}>
+      <Text style={{ color: colors.subtext, fontSize: 11, marginBottom: 6 }}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.placeholder}
+        keyboardType={keyboardType}
+        style={{
+          backgroundColor: colors.muted,
+          borderColor: colors.border,
+          borderRadius: 12,
+          borderWidth: 1,
+          color: colors.text,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        }}
+      />
+    </View>
+  );
 }
 
 function getAccountError(account: AdminAccount) {
@@ -63,6 +107,12 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null);
   const [testFeedbackByAccountId, setTestFeedbackByAccountId] = useState<Record<number, string>>({});
   const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null);
+  const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPriority, setEditPriority] = useState('');
+  const [editConcurrency, setEditConcurrency] = useState('');
+  const [editRateMultiplier, setEditRateMultiplier] = useState('');
+  const [editNotes, setEditNotes] = useState('');
   const keyword = useDebouncedValue(searchText.trim(), 300);
   const queryClient = useQueryClient();
 
@@ -79,6 +129,35 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
   const testMutation = useMutation({
     mutationFn: (accountId: number) => testAccount(accountId),
+  });
+
+  const accountEditMutation = useMutation({
+    mutationFn: ({ accountId }: { accountId: number }) =>
+      updateAccount(accountId, {
+        name: editName.trim() || undefined,
+        priority: toOptionalNumber(editPriority),
+        concurrency: toOptionalNumber(editConcurrency),
+        rate_multiplier: toOptionalNumber(editRateMultiplier),
+        notes: editNotes.trim(),
+      }),
+    onSuccess: () => {
+      setEditingAccountId(null);
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+
+  const accountStatusMutation = useMutation({
+    mutationFn: ({ account, enabled }: { account: AdminAccount; enabled: boolean }) =>
+      updateAccount(account.id, {
+        status: enabled ? 'active' : 'disabled',
+        schedulable: enabled,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  const accountDeleteMutation = useMutation({
+    mutationFn: (accountId: number) => deleteAccount(accountId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
   });
 
   const batchRefreshMutation = useMutation({
@@ -174,6 +253,26 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             batchClearErrorMutation.mutate(accountIds);
           }
         },
+      },
+    ]);
+  }
+
+  function startEditAccount(account: AdminAccount) {
+    setEditingAccountId(account.id);
+    setEditName(account.name || '');
+    setEditPriority(account.priority !== undefined ? String(account.priority) : '');
+    setEditConcurrency(account.concurrency !== undefined ? String(account.concurrency) : '');
+    setEditRateMultiplier(account.rate_multiplier !== undefined ? String(account.rate_multiplier) : '');
+    setEditNotes(account.notes || '');
+  }
+
+  function confirmDeleteAccount(account: AdminAccount) {
+    Alert.alert('删除账号', `确认删除 ${account.name || `账号 #${account.id}`} 吗？`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: () => accountDeleteMutation.mutate(account.id),
       },
     ]);
   }
@@ -274,9 +373,12 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       const todayStats = todayByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0 };
       const nextSchedulable = visualStatus.filterKey === 'paused';
       const toggleLabel = nextSchedulable ? '恢复' : '暂停';
+      const statusDisabled = ['disabled', 'inactive', 'paused'].includes(`${account.status || ''}`.toLowerCase());
+      const nextEnabled = statusDisabled;
       const testFeedback = testFeedbackByAccountId[account.id];
       const isTogglingCurrent = togglingAccountId === account.id && toggleMutation.isPending;
       const isTestingCurrent = testingAccountId === account.id && testMutation.isPending;
+      const isEditing = editingAccountId === account.id;
 
       return (
         <Pressable onPress={() => router.push(`/accounts/${account.id}`)}>
@@ -323,7 +425,40 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               {account.created_at ? <Text style={{ color: colors.subtext, fontSize: 12 }}>创建时间 {formatTime(account.created_at)}</Text> : null}
               {account.error_message ? <Text style={{ color: colors.danger, fontSize: 12 }}>异常信息：{account.error_message}</Text> : null}
 
-              <View className="flex-row gap-2">
+              {isEditing ? (
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                    <Field label="名称" value={editName} onChangeText={setEditName} placeholder="账号名称" />
+                    <Field label="优先级" value={editPriority} onChangeText={setEditPriority} placeholder="0" keyboardType="number-pad" />
+                    <Field label="并发" value={editConcurrency} onChangeText={setEditConcurrency} placeholder="留空不改" keyboardType="number-pad" />
+                    <Field label="倍率" value={editRateMultiplier} onChangeText={setEditRateMultiplier} placeholder="1" keyboardType="decimal-pad" />
+                    <Field label="备注" value={editNotes} onChangeText={setEditNotes} placeholder="备注" />
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                    <Pressable
+                      disabled={accountEditMutation.isPending}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        accountEditMutation.mutate({ accountId: account.id });
+                      }}
+                      style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 12, flex: 1, paddingVertical: 11 }}
+                    >
+                      <Text style={{ color: colors.primaryText, fontWeight: '800' }}>{accountEditMutation.isPending ? '保存中...' : '保存'}</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        setEditingAccountId(null);
+                      }}
+                      style={{ alignItems: 'center', backgroundColor: colors.muted, borderRadius: 12, flex: 1, paddingVertical: 11 }}
+                    >
+                      <Text style={{ color: colors.badgeDefaultText, fontWeight: '800' }}>取消</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              ) : null}
+
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <Pressable
                   style={{ backgroundColor: colors.dark, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTestingCurrent}
@@ -347,6 +482,27 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
                 </Pressable>
                 <Pressable
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    startEditAccount(account);
+                  }}
+                >
+                  <Pencil color={colors.badgeDefaultText} size={13} />
+                  <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
+                </Pressable>
+                <Pressable
+                  disabled={accountStatusMutation.isPending}
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    accountStatusMutation.mutate({ account, enabled: nextEnabled });
+                  }}
+                >
+                  <Power color={nextEnabled ? colors.success : colors.badgeDefaultText} size={13} />
+                  <Text style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
+                </Pressable>
+                <Pressable
                   style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTogglingCurrent}
                   onPress={(event) => {
@@ -364,6 +520,17 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 >
                   <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
                 </Pressable>
+                <Pressable
+                  disabled={accountDeleteMutation.isPending}
+                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    confirmDeleteAccount(account);
+                  }}
+                >
+                  <Trash2 color={colors.errorText} size={13} />
+                  <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>删除</Text>
+                </Pressable>
               </View>
 
               {testFeedback ? <Text style={{ color: colors.success, fontSize: 12 }}>测试结果：{testFeedback}</Text> : null}
@@ -372,7 +539,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </Pressable>
       );
     },
-    [colors, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId]
+    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, editConcurrency, editName, editNotes, editPriority, editRateMultiplier, editingAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId]
   );
 
   const emptyState = useMemo(
