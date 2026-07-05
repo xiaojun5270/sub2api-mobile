@@ -67,8 +67,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const queryClient = useQueryClient();
 
   const accountsQuery = useQuery({
-    queryKey: ['accounts', keyword],
-    queryFn: () => listAccounts(keyword),
+    queryKey: ['accounts'],
+    queryFn: () => listAccounts(),
   });
 
   const toggleMutation = useMutation({
@@ -115,7 +115,23 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   }, [accountCostQueries, items]);
 
   const filteredItems = useMemo(() => {
-    const statusMatched = items.filter((account) => {
+    const normalizedKeyword = keyword.toLowerCase();
+    const keywordMatched = normalizedKeyword
+      ? items.filter((account) => {
+          const haystack = [
+            account.id,
+            account.name,
+            account.platform,
+            account.type,
+            account.status,
+            account.groups?.map((group) => group.name).join(' '),
+          ].filter(Boolean).join(' ').toLowerCase();
+
+          return haystack.includes(normalizedKeyword);
+        })
+      : items;
+
+    const statusMatched = keywordMatched.filter((account) => {
       const visualStatus = getAccountVisualStatus(account);
       if (filter === 'all') return true;
       if (filter === 'active') return visualStatus.filterKey === 'active';
@@ -137,7 +153,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     });
 
     return sorted;
-  }, [filter, items, todayByAccountId, usageSort]);
+  }, [filter, items, keyword, todayByAccountId, usageSort]);
   const errorMessage = accountsQuery.error instanceof Error ? accountsQuery.error.message : '';
 
   function confirmBatch(action: 'refresh' | 'clear-error') {
@@ -266,7 +282,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         <Pressable onPress={() => router.push(`/accounts/${account.id}`)}>
           <ListCard
             title={account.name}
-            meta={`${account.platform} · ${account.type}`}
+            meta={`#${account.id} · ${account.platform} · ${account.type}`}
             badge={statusText}
             badgeTone={visualStatus.badgeTone}
             icon={KeyRound}
@@ -295,9 +311,16 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </View>
               </View>
 
-              <Text style={{ color: colors.subtext, fontSize: 12 }}>优先级 {account.priority ?? 0} · 倍率 {(account.rate_multiplier ?? 1).toFixed(2)}x</Text>
+              <Text style={{ color: colors.subtext, fontSize: 12 }}>
+                优先级 {account.priority ?? 0} · 倍率 {(account.rate_multiplier ?? 1).toFixed(2)}x · 并发 {account.current_concurrency ?? 0}/{account.concurrency ?? '--'}
+              </Text>
+              <Text style={{ color: colors.subtext, fontSize: 12 }}>
+                调度 {(account.schedulable ?? true) ? '可调度' : '暂停'} · 代理 {account.proxy_id ? `#${account.proxy_id}` : '--'} · 更新 {formatTime(account.updated_at)}
+              </Text>
 
               {groupsText ? <Text style={{ color: colors.subtext, fontSize: 12 }}>分组 {groupsText}</Text> : null}
+              {account.rate_limit_reset_at ? <Text style={{ color: colors.subtext, fontSize: 12 }}>限流重置 {formatTime(account.rate_limit_reset_at)}</Text> : null}
+              {account.created_at ? <Text style={{ color: colors.subtext, fontSize: 12 }}>创建时间 {formatTime(account.created_at)}</Text> : null}
               {account.error_message ? <Text style={{ color: colors.danger, fontSize: 12 }}>异常信息：{account.error_message}</Text> : null}
 
               <View className="flex-row gap-2">

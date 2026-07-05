@@ -12,7 +12,6 @@ import {
   RotateCcw,
   Save,
   ShieldCheck,
-  TimerReset,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useEffect, useMemo, useState } from 'react';
@@ -37,7 +36,6 @@ import {
   refreshAccount,
   resetAccountQuota,
   setAccountSchedulable,
-  setAccountTempUnschedulable,
   syncAccountModels,
   testAccount,
   updateAccount,
@@ -45,7 +43,7 @@ import {
 import type { AdminAccount } from '@/src/types/admin';
 
 type RangeKey = '24h' | '7d' | '30d';
-type AccountAction = 'test' | 'refresh' | 'clear-error' | 'clear-rate-limit' | 'recover' | 'reset-quota' | 'sync-models' | 'temp-pause' | 'toggle-schedulable';
+type AccountAction = 'test' | 'refresh' | 'clear-error' | 'clear-rate-limit' | 'recover' | 'reset-quota' | 'sync-models' | 'toggle-schedulable';
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
   { key: '24h', label: '24H' },
@@ -75,6 +73,12 @@ function getDateRange(rangeKey: RangeKey) {
   };
 }
 
+function getStatsDays(rangeKey: RangeKey) {
+  if (rangeKey === '30d') return 30;
+  if (rangeKey === '7d') return 7;
+  return 1;
+}
+
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return '操作失败，请稍后重试。';
@@ -82,6 +86,12 @@ function getErrorMessage(error: unknown) {
 
 function formatMoney(value?: number | null) {
   return `$${Number(value ?? 0).toFixed(4)}`;
+}
+
+function formatDuration(value?: number | null) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number) || number <= 0) return '--';
+  return `${number.toFixed(0)}ms`;
 }
 
 function toNumber(raw: string) {
@@ -109,6 +119,30 @@ function getAccountStatus(account?: AdminAccount) {
 function modelName(value: string | { model?: string; name?: string; enabled?: boolean }) {
   if (typeof value === 'string') return value;
   return value.model || value.name || '--';
+}
+
+function formatExtraValue(value: string | number | boolean | null) {
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return String(value);
+}
+
+function recordNumber(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return 0;
+}
+
+function recordText(source: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return '--';
 }
 
 function Section({ title, icon, children }: { title: string; icon: LucideIcon; children: React.ReactNode }) {
@@ -238,8 +272,8 @@ export default function AccountDetailScreen() {
     enabled: Number.isFinite(accountId),
   });
   const statsQuery = useQuery({
-    queryKey: ['account-stats', accountId, rangeKey, range.start_date, range.end_date],
-    queryFn: () => getAccountStats(accountId, range),
+    queryKey: ['account-stats', accountId, rangeKey, getStatsDays(rangeKey)],
+    queryFn: () => getAccountStats(accountId, { days: getStatsDays(rangeKey) }),
     enabled: Number.isFinite(accountId),
   });
   const snapshotQuery = useQuery({
@@ -262,8 +296,8 @@ export default function AccountDetailScreen() {
     enabled: Number.isFinite(accountId),
   });
   const usageQuery = useQuery({
-    queryKey: ['account-usage', accountId, range.start_date, range.end_date],
-    queryFn: () => getAccountUsage(accountId, range),
+    queryKey: ['account-usage', accountId],
+    queryFn: () => getAccountUsage(accountId),
     enabled: Number.isFinite(accountId),
   });
 
@@ -312,7 +346,6 @@ export default function AccountDetailScreen() {
       if (action === 'recover') return recoverAccountState(accountId);
       if (action === 'reset-quota') return resetAccountQuota(accountId);
       if (action === 'sync-models') return syncAccountModels(accountId);
-      if (action === 'temp-pause') return setAccountTempUnschedulable(accountId, 600);
       return setAccountSchedulable(accountId, !(account?.schedulable ?? true));
     },
     onSuccess: (_, action) => {
@@ -324,7 +357,6 @@ export default function AccountDetailScreen() {
         recover: '状态已恢复',
         'reset-quota': '额度已重置',
         'sync-models': '模型同步已提交',
-        'temp-pause': '已临时暂停调度 10 分钟',
         'toggle-schedulable': '调度状态已更新',
       };
       setActionMessage(labels[action]);
@@ -342,6 +374,10 @@ export default function AccountDetailScreen() {
   }));
   const usageItems = usageQuery.data?.items ?? usageQuery.data?.usage ?? [];
   const models = modelsQuery.data?.models ?? [];
+  const extraEntries = useMemo(
+    () => Object.entries(account?.extra ?? {}).filter(([, value]) => value !== undefined).slice(0, 12),
+    [account?.extra]
+  );
   const modelChartItems = models.slice(0, 8).map((item) => ({
     label: modelName(item),
     value: typeof item === 'object' && item.enabled === false ? 0 : 1,
@@ -385,14 +421,31 @@ export default function AccountDetailScreen() {
             <>
               <Section title="基础状态" icon={ShieldCheck}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <MetricTile label="账号 ID" value={`#${account.id}`} />
                   <MetricTile label="状态" value={getAccountStatus(account)} />
+                  <MetricTile label="调度" value={(account.schedulable ?? true) ? '可调度' : '已暂停'} />
                   <MetricTile label="平台" value={account.platform || '--'} />
                   <MetricTile label="类型" value={account.type || '--'} />
                   <MetricTile label="并发" value={`${account.current_concurrency ?? 0}/${account.concurrency ?? '--'}`} />
+                  <MetricTile label="优先级" value={`${account.priority ?? 0}`} />
+                  <MetricTile label="倍率" value={`${(account.rate_multiplier ?? 1).toFixed(2)}x`} />
+                  <MetricTile label="代理" value={account.proxy_id ? `#${account.proxy_id}` : '--'} />
+                  <MetricTile label="隐私" value={account.privacy ? '开启' : '关闭'} />
+                  <MetricTile label="Shadow" value={account.shadow ? '开启' : '关闭'} />
                 </View>
                 <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
-                  优先级 {account.priority ?? 0} · 倍率 {(account.rate_multiplier ?? 1).toFixed(2)}x · 最近使用 {formatDisplayTime(account.last_used_at || account.updated_at)}
+                  最近使用 {formatDisplayTime(account.last_used_at)} · 更新 {formatDisplayTime(account.updated_at)} · 创建 {formatDisplayTime(account.created_at)}
                 </Text>
+                {account.rate_limit_reset_at ? (
+                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+                    限流重置 {formatDisplayTime(account.rate_limit_reset_at)}
+                  </Text>
+                ) : null}
+                {account.temp_unschedulable_until ? (
+                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
+                    临时不可调度至 {formatDisplayTime(account.temp_unschedulable_until)}
+                  </Text>
+                ) : null}
                 {account.groups?.length ? (
                   <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
                     分组 {account.groups.map((group) => group.name).join(' · ')}
@@ -405,11 +458,24 @@ export default function AccountDetailScreen() {
                 ) : null}
               </Section>
 
+              {(account.notes || extraEntries.length > 0) ? (
+                <Section title="高级信息" icon={DatabaseZap}>
+                  {account.notes ? <Text style={{ color: colors.subtext, fontSize: 13, lineHeight: 20, marginBottom: 10 }}>{account.notes}</Text> : null}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {extraEntries.map(([key, value]) => (
+                      <MetricTile key={key} label={key} value={formatExtraValue(value)} />
+                    ))}
+                  </View>
+                </Section>
+              ) : null}
+
               <Section title="今日用量" icon={Activity}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   <MetricTile label="请求" value={formatCompactNumber(todayQuery.data?.requests ?? 0)} />
                   <MetricTile label="Token" value={formatTokenValue(todayQuery.data?.tokens ?? 0)} />
                   <MetricTile label="成本" value={formatMoney(todayQuery.data?.cost)} />
+                  <MetricTile label="标准成本" value={formatMoney(todayQuery.data?.standard_cost)} />
+                  <MetricTile label="用户成本" value={formatMoney(todayQuery.data?.user_cost)} />
                 </View>
               </Section>
 
@@ -418,7 +484,6 @@ export default function AccountDetailScreen() {
                   <ActionButton label="测试" icon={CheckCircle2} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('test')} />
                   <ActionButton label="刷新" icon={RefreshCw} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('refresh')} />
                   <ActionButton label={(account.schedulable ?? true) ? '暂停调度' : '恢复调度'} icon={PauseCircle} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('toggle-schedulable')} />
-                  <ActionButton label="临停10分钟" icon={TimerReset} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('temp-pause')} />
                   <ActionButton label="清除错误" icon={AlertTriangle} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('clear-error')} />
                   <ActionButton label="清除限流" icon={RotateCcw} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('clear-rate-limit')} />
                   <ActionButton label="恢复状态" icon={ShieldCheck} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('recover')} />
@@ -483,6 +548,9 @@ export default function AccountDetailScreen() {
                   <MetricTile label="请求" value={formatCompactNumber(statsQuery.data?.total_requests ?? 0)} />
                   <MetricTile label="Token" value={formatTokenValue(statsQuery.data?.total_tokens ?? 0)} />
                   <MetricTile label="成本" value={formatMoney(statsQuery.data?.total_account_cost ?? statsQuery.data?.total_actual_cost ?? statsQuery.data?.total_cost)} />
+                  <MetricTile label="输入" value={formatTokenValue(statsQuery.data?.total_input_tokens ?? 0)} />
+                  <MetricTile label="输出" value={formatTokenValue(statsQuery.data?.total_output_tokens ?? 0)} />
+                  <MetricTile label="平均耗时" value={formatDuration(statsQuery.data?.average_duration_ms)} />
                 </View>
                 {trendPoints.length > 1 ? (
                   <View style={{ marginTop: 14 }}>
@@ -500,10 +568,16 @@ export default function AccountDetailScreen() {
                   {usageQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载最近用量...</Text> : null}
                   {usageItems.slice(0, 8).map((item, index) => (
                     <View key={`${item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }}>{item.model || item.path || item.status || 'usage'}</Text>
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }}>{recordText(item as Record<string, unknown>, ['model', 'path', 'status', 'request_type'])}</Text>
                       <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
                         {item.method || '--'} · {formatDisplayTime(item.created_at || item.updated_at)}
                       </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                        <MetricTile label="请求" value={formatCompactNumber(recordNumber(item as Record<string, unknown>, ['requests', 'request_count']))} />
+                        <MetricTile label="Token" value={formatTokenValue(recordNumber(item as Record<string, unknown>, ['total_tokens', 'tokens']))} />
+                        <MetricTile label="成本" value={formatMoney(recordNumber(item as Record<string, unknown>, ['total_cost', 'cost', 'actual_cost']))} />
+                        <MetricTile label="耗时" value={formatDuration(recordNumber(item as Record<string, unknown>, ['duration_ms', 'latency_ms', 'average_duration_ms']))} />
+                      </View>
                     </View>
                   ))}
                   {!usageQuery.isLoading && usageItems.length === 0 ? <Text style={{ color: colors.subtext }}>当前范围暂无账号用量明细。</Text> : null}

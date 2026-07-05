@@ -84,6 +84,11 @@ function formatMoney(value: number) {
   return `$${value.toFixed(2)}`;
 }
 
+function formatLatency(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '--';
+  return `${value.toFixed(0)}ms`;
+}
+
 function MetricCard({ title, value, detail, icon }: { title: string; value: string; detail?: string; icon: LucideIcon }) {
   const colors = useAppTheme();
 
@@ -95,6 +100,19 @@ function MetricCard({ title, value, detail, icon }: { title: string; value: stri
       </View>
       <Text numberOfLines={1} style={{ color: colors.text, fontSize: 22, fontWeight: '800', marginTop: 8 }}>{value}</Text>
       {detail ? <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, marginTop: 6 }}>{detail}</Text> : null}
+    </View>
+  );
+}
+
+function InfoTile({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'success' }) {
+  const colors = useAppTheme();
+  const backgroundColor = tone === 'danger' ? colors.errorBg : tone === 'success' ? colors.successBg : colors.mutedCard;
+  const valueColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.text;
+
+  return (
+    <View style={{ backgroundColor, borderRadius: 12, flex: 1, minWidth: 104, paddingHorizontal: 10, paddingVertical: 10 }}>
+      <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
+      <Text numberOfLines={1} style={{ color: valueColor, fontSize: 13, fontWeight: '800', marginTop: 5 }}>{value}</Text>
     </View>
   );
 }
@@ -149,6 +167,11 @@ export default function OpsScreen() {
   const rpm = firstNumber(overview, ['rpm']) || firstNumber(realtime, ['rpm']);
   const avgLatency = firstNumber(overview, ['avg_latency_ms', 'average_latency_ms', 'latency_ms']) || firstNumber(realtime, ['avg_latency_ms']);
   const p95Latency = firstNumber(overview, ['p95_latency_ms', 'p95', 'latency_p95_ms']);
+  const activeAccounts = firstNumber(overview, ['active_accounts', 'normal_accounts', 'healthy_accounts']);
+  const alertCount = firstNumber(overview, ['alert_count', 'alerts', 'open_alerts']);
+  const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'active_requests', 'inflight_requests', 'concurrency']);
+  const queueSize = firstNumber(realtime, ['queue_size', 'queued_requests', 'pending_requests']);
+  const tokenPerSecond = firstNumber(realtime, ['tps', 'tokens_per_second', 'token_per_second']);
 
   const throughputPoints = getTrendItems(throughputQuery.data).map((point, index) => ({
     label: pointLabel(point, index),
@@ -212,6 +235,22 @@ export default function OpsScreen() {
           <MetricCard title="请求总量" value={formatCompactNumber(totalRequests)} detail="当前运维窗口" icon={Activity} />
           <MetricCard title="错误数量" value={formatCompactNumber(errors)} detail={`错误率 ${(errorRate * 100).toFixed(2)}%`} icon={AlertTriangle} />
           <MetricCard title="平均延迟" value={`${avgLatency.toFixed(0)}ms`} detail={p95Latency ? `P95 ${p95Latency.toFixed(0)}ms` : 'P95 --'} icon={TimerReset} />
+          <MetricCard title="活跃账号" value={formatCompactNumber(activeAccounts)} detail={`告警 ${formatCompactNumber(alertCount)}`} icon={ServerCog} />
+          <MetricCard title="实时并发" value={formatCompactNumber(currentConcurrency)} detail={`排队 ${formatCompactNumber(queueSize)}`} icon={Gauge} />
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="实时状态" icon={Gauge} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <InfoTile label="QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} tone={qps > 0 ? 'success' : 'default'} />
+            <InfoTile label="RPM" value={formatCompactNumber(rpm)} />
+            <InfoTile label="并发中" value={formatCompactNumber(currentConcurrency)} />
+            <InfoTile label="队列" value={formatCompactNumber(queueSize)} tone={queueSize > 0 ? 'danger' : 'default'} />
+            <InfoTile label="Token/s" value={formatCompactNumber(tokenPerSecond)} />
+            <InfoTile label="平均延迟" value={formatLatency(avgLatency)} />
+            <InfoTile label="P95 延迟" value={formatLatency(p95Latency)} />
+            <InfoTile label="日志状态" value={firstText(logsHealthQuery.data, ['status', 'state', 'health'])} />
+          </View>
         </View>
 
         {throughputPoints.length > 1 ? (
@@ -246,6 +285,14 @@ export default function OpsScreen() {
                       <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
                         {item.method || '--'} {item.path || item.model || '--'} · {formatDisplayTime(item.created_at || item.updated_at)}
                       </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                        <InfoTile label="错误 ID" value={`${item.id ?? '--'}`} />
+                        <InfoTile label="状态" value={item.status || '--'} />
+                        <InfoTile label="账号" value={item.account_name || '--'} />
+                        <InfoTile label="用户" value={item.user_email || '--'} />
+                        <InfoTile label="模型" value={item.model || '--'} />
+                        <InfoTile label="延迟" value={formatLatency(firstNumber(item as Record<string, unknown>, ['latency_ms', 'duration_ms']))} />
+                      </View>
                     </View>
                     {item.id ? (
                       <Pressable
@@ -274,7 +321,12 @@ export default function OpsScreen() {
               <View key={`${item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
                 <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }}>{item.level || item.status || 'log'}</Text>
                 <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{item.message || item.error_message || '--'}</Text>
-                <Text style={{ color: colors.subtext, fontSize: 11, marginTop: 6 }}>{formatDisplayTime(item.created_at || item.updated_at)}</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                  <InfoTile label="日志 ID" value={`${item.id ?? '--'}`} />
+                  <InfoTile label="级别" value={item.level || '--'} />
+                  <InfoTile label="状态" value={item.status || '--'} />
+                  <InfoTile label="时间" value={formatDisplayTime(item.created_at || item.updated_at)} />
+                </View>
               </View>
             ))}
             {!systemLogsQuery.isLoading && systemLogs.length === 0 ? <Text style={{ color: colors.subtext }}>暂无系统日志。</Text> : null}
@@ -293,6 +345,12 @@ export default function OpsScreen() {
                     <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
                       {item.level || 'alert'} · {formatDisplayTime(item.created_at || item.updated_at)}
                     </Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                      <InfoTile label="告警 ID" value={`${item.id ?? '--'}`} />
+                      <InfoTile label="级别" value={item.level || '--'} tone={`${item.level || ''}`.toLowerCase().includes('error') ? 'danger' : 'default'} />
+                      <InfoTile label="状态" value={item.status || '--'} />
+                      <InfoTile label="更新时间" value={formatDisplayTime(item.updated_at || item.created_at)} />
+                    </View>
                   </View>
                   {item.id ? (
                     <Pressable
@@ -313,6 +371,12 @@ export default function OpsScreen() {
           <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 20 }}>
             更新、回滚、重启接口已存在，但属于高风险操作，当前先展示版本信息，避免误触生产服务。
           </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <InfoTile label="版本" value={firstText(versionQuery.data, ['version', 'tag', 'build'])} />
+            <InfoTile label="提交" value={firstText(versionQuery.data, ['commit', 'git_commit', 'sha'])} />
+            <InfoTile label="构建时间" value={firstText(versionQuery.data, ['build_time', 'built_at', 'created_at'])} />
+            <InfoTile label="镜像" value={firstText(versionQuery.data, ['image', 'container'])} />
+          </View>
         </ListCard>
       </ScreenShell>
     </>

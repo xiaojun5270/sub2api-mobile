@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
 import {
   Activity,
@@ -14,8 +15,8 @@ import {
   Zap,
 } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Platform, Pressable, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BarChartCard } from '@/src/components/bar-chart-card';
@@ -31,6 +32,10 @@ const { useSnapshot } = require('valtio/react');
 
 type RangeKey = 'today' | '24h' | '7d' | '30d';
 
+const MONITOR_RANGE_STORAGE_KEY = 'sub2api_monitor_range_key';
+const DEFAULT_RANGE_KEY: RangeKey = '7d';
+let cachedMonitorRangeKey: RangeKey = DEFAULT_RANGE_KEY;
+
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
   { key: 'today', label: '今日' },
   { key: '24h', label: '24H' },
@@ -44,6 +49,40 @@ const RANGE_TITLE_MAP: Record<RangeKey, string> = {
   '7d': '7D',
   '30d': '30D',
 };
+
+function isRangeKey(value?: string | null): value is RangeKey {
+  return value === 'today' || value === '24h' || value === '7d' || value === '30d';
+}
+
+async function readStoredMonitorRangeKey() {
+  try {
+    const value = Platform.OS === 'web'
+      ? typeof localStorage === 'undefined'
+        ? null
+        : localStorage.getItem(MONITOR_RANGE_STORAGE_KEY)
+      : await SecureStore.getItemAsync(MONITOR_RANGE_STORAGE_KEY);
+
+    return isRangeKey(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeStoredMonitorRangeKey(value: RangeKey) {
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(MONITOR_RANGE_STORAGE_KEY, value);
+      }
+
+      return;
+    }
+
+    await SecureStore.setItemAsync(MONITOR_RANGE_STORAGE_KEY, value);
+  } catch {
+    return;
+  }
+}
 
 function hasAccountError(account: { status?: string; error_message?: string | null }) {
   return Boolean(account.status === 'error' || account.error_message);
@@ -199,8 +238,46 @@ export default function MonitorScreen() {
   const colors = useAppTheme();
   const config = useSnapshot(adminConfigState);
   const hasAccount = hasAuthenticatedAdminSession(config);
-  const [rangeKey, setRangeKey] = useState<RangeKey>('7d');
+  const [rangeKey, setRangeKey] = useState<RangeKey>(cachedMonitorRangeKey);
+  const [rangeKeyReady, setRangeKeyReady] = useState(false);
+  const rangeKeyTouchedRef = useRef(false);
   const range = useMemo(() => getDateRange(rangeKey), [rangeKey]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    readStoredMonitorRangeKey().then((storedRangeKey) => {
+      if (!mounted) return;
+
+      if (storedRangeKey && !rangeKeyTouchedRef.current) {
+        cachedMonitorRangeKey = storedRangeKey;
+        setRangeKey(storedRangeKey);
+      }
+
+      setRangeKeyReady(true);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!rangeKeyReady) return;
+
+    cachedMonitorRangeKey = rangeKey;
+    void writeStoredMonitorRangeKey(rangeKey);
+  }, [rangeKey, rangeKeyReady]);
+
+  function selectRangeKey(nextRangeKey: RangeKey) {
+    rangeKeyTouchedRef.current = true;
+    cachedMonitorRangeKey = nextRangeKey;
+    setRangeKey(nextRangeKey);
+
+    if (!rangeKeyReady) {
+      void writeStoredMonitorRangeKey(nextRangeKey);
+    }
+  }
 
   const statsQuery = useQuery({
     queryKey: ['monitor-stats'],
@@ -223,14 +300,14 @@ export default function MonitorScreen() {
   const trendQuery = useQuery({
     queryKey: ['monitor-trend', rangeKey, range.start_date, range.end_date, range.granularity],
     queryFn: () => getDashboardTrend(range),
-    enabled: hasAccount,
+    enabled: hasAccount && rangeKeyReady,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
   });
   const modelsQuery = useQuery({
     queryKey: ['monitor-models', rangeKey, range.start_date, range.end_date],
     queryFn: () => getDashboardModels(range),
-    enabled: hasAccount,
+    enabled: hasAccount && rangeKeyReady,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
   });
@@ -309,7 +386,7 @@ export default function MonitorScreen() {
                   <Pressable
                     key={option.key}
                     style={{ backgroundColor: active ? colors.primary : colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
-                    onPress={() => setRangeKey(option.key)}
+                    onPress={() => selectRangeKey(option.key)}
                   >
                     <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{option.label}</Text>
                   </Pressable>

@@ -14,9 +14,6 @@ export type PaginatedData<T> = {
   pages: number;
 };
 
-export type JsonPrimitive = string | number | boolean | null;
-export type JsonRecord = Record<string, JsonPrimitive | JsonPrimitive[] | undefined>;
-
 export type DashboardStats = {
   total_users: number;
   today_new_users: number;
@@ -154,16 +151,9 @@ export type AdminApiKey = {
   };
 };
 
-export type CreateApiKeyRequest = {
-  name: string;
-  quota?: number;
+export type UpdateApiKeyRequest = {
   group_id?: number | null;
-  expires_at?: string | null;
-  status?: 'active' | 'disabled' | string;
-  [key: string]: JsonPrimitive | undefined;
 };
-
-export type UpdateApiKeyRequest = Partial<CreateApiKeyRequest>;
 
 export type BalanceOperation = 'set' | 'add' | 'subtract';
 
@@ -205,8 +195,14 @@ export type AdminAccount = {
   current_concurrency?: number;
   rate_multiplier?: number;
   error_message?: string;
+  rate_limit_reset_at?: string | null;
+  proxy_id?: number | null;
+  privacy?: boolean;
+  shadow?: boolean;
+  temp_unschedulable_until?: string | null;
   updated_at?: string;
   last_used_at?: string | null;
+  created_at?: string;
   group_ids?: number[];
   groups?: AdminGroup[];
   extra?: Record<string, string | number | boolean | null>;

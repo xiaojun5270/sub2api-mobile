@@ -1,16 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Stack } from 'expo-router';
-import { KeyRound, Pencil, Plus, Search, Trash2 } from 'lucide-react-native';
+import { KeyRound, Pencil, Search } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Pressable, Text, TextInput, View } from 'react-native';
 
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatDisplayTime } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
-import { createUserApiKey, deleteAdminApiKey, searchAdminApiKeys, updateAdminApiKey } from '@/src/services/admin';
+import { searchAdminApiKeys, updateAdminApiKey } from '@/src/services/admin';
 import type { AdminApiKey, PaginatedData } from '@/src/types/admin';
 
 type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?: AdminApiKey[]; api_keys?: AdminApiKey[] };
@@ -18,12 +18,6 @@ type ApiKeySearchResult = PaginatedData<AdminApiKey> | AdminApiKey[] | { items?:
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return '操作失败，请稍后重试。';
-}
-
-function toNumber(raw: string) {
-  if (!raw.trim()) return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
 }
 
 function toNullableNumber(raw: string) {
@@ -47,6 +41,36 @@ function maskKey(value?: string) {
   return `${value.slice(0, 10)}...${value.slice(-6)}`;
 }
 
+function formatNumber(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--';
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function formatQuota(item: AdminApiKey) {
+  const used = Number(item.quota_used ?? 0);
+  const quota = Number(item.quota ?? 0);
+
+  if (!Number.isFinite(quota) || quota <= 0) {
+    return `${formatNumber(used)} / 不限`;
+  }
+
+  return `${formatNumber(used)} / ${formatNumber(quota)}`;
+}
+
+function formatQuotaRemaining(item: AdminApiKey) {
+  const used = Number(item.quota_used ?? 0);
+  const quota = Number(item.quota ?? 0);
+
+  if (!Number.isFinite(quota) || quota <= 0) return '不限';
+  return formatNumber(Math.max(quota - used, 0));
+}
+
+function isExpired(value?: string | null) {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return !Number.isNaN(time) && time < Date.now();
+}
+
 function StatusPill({ status }: { status?: string }) {
   const colors = useAppTheme();
   const normalized = `${status || 'active'}`.toLowerCase();
@@ -57,6 +81,19 @@ function StatusPill({ status }: { status?: string }) {
   return (
     <View style={{ alignSelf: 'flex-start', backgroundColor, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
       <Text style={{ color: textColor, fontSize: 11, fontWeight: '800' }}>{status || 'active'}</Text>
+    </View>
+  );
+}
+
+function InfoTile({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'success' }) {
+  const colors = useAppTheme();
+  const backgroundColor = tone === 'danger' ? colors.errorBg : tone === 'success' ? colors.successBg : colors.mutedCard;
+  const valueColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.text;
+
+  return (
+    <View style={{ backgroundColor, borderRadius: 12, flex: 1, minWidth: 104, paddingHorizontal: 10, paddingVertical: 10 }}>
+      <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
+      <Text numberOfLines={1} style={{ color: valueColor, fontSize: 13, fontWeight: '800', marginTop: 5 }}>{value}</Text>
     </View>
   );
 }
@@ -104,79 +141,61 @@ export default function ApiKeysScreen() {
   const queryClient = useQueryClient();
   const [searchText, setSearchText] = useState('');
   const keyword = useDebouncedValue(searchText, 300);
-  const [userId, setUserId] = useState('');
-  const [name, setName] = useState('');
-  const [quota, setQuota] = useState('');
-  const [groupId, setGroupId] = useState('');
-  const [expiresAt, setExpiresAt] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editQuota, setEditQuota] = useState('');
   const [editGroupId, setEditGroupId] = useState('');
-  const [editExpiresAt, setEditExpiresAt] = useState('');
 
   const apiKeysQuery = useQuery({
-    queryKey: ['admin-api-keys', keyword],
-    queryFn: () => searchAdminApiKeys(keyword),
+    queryKey: ['admin-api-keys'],
+    queryFn: searchAdminApiKeys,
   });
 
-  const apiKeys = useMemo(
+  const allApiKeys = useMemo(
     () => getApiKeyItems(apiKeysQuery.data as ApiKeySearchResult | undefined),
     [apiKeysQuery.data]
   );
+  const apiKeys = useMemo(() => {
+    const normalized = keyword.trim().toLowerCase();
+    if (!normalized) return allApiKeys;
 
-  const createMutation = useMutation({
-    mutationFn: () => {
-      const numericUserId = Number(userId);
-      if (!Number.isFinite(numericUserId) || numericUserId <= 0) {
-        throw new Error('请填写正确的用户 ID。');
-      }
-      if (!name.trim()) {
-        throw new Error('请填写密钥名称。');
-      }
+    return allApiKeys.filter((item) => {
+      const haystack = [
+        item.name,
+        item.key,
+        item.status,
+        item.group?.name,
+        item.group_id,
+        item.user?.email,
+        item.user?.username,
+        item.user_id,
+      ].filter(Boolean).join(' ').toLowerCase();
 
-      return createUserApiKey(numericUserId, {
-        name: name.trim(),
-        quota: toNumber(quota),
-        group_id: toNullableNumber(groupId),
-        expires_at: expiresAt.trim() || null,
-        status: 'active',
-      });
-    },
-    onSuccess: () => {
-      setFormError(null);
-      setName('');
-      setQuota('');
-      setGroupId('');
-      setExpiresAt('');
-      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
-    },
-    onError: (error) => setFormError(getErrorMessage(error)),
-  });
+      return haystack.includes(normalized);
+    });
+  }, [allApiKeys, keyword]);
+  const summary = useMemo(() => {
+    const disabled = apiKeys.filter((item) => ['disabled', 'inactive', 'revoked'].includes(`${item.status || ''}`.toLowerCase())).length;
+    const expired = apiKeys.filter((item) => isExpired(item.expires_at)).length;
+    const quotaUsed = apiKeys.reduce((sum, item) => sum + Number(item.quota_used ?? 0), 0);
+
+    return {
+      total: apiKeys.length,
+      active: Math.max(apiKeys.length - disabled - expired, 0),
+      disabled,
+      expired,
+      quotaUsed,
+    };
+  }, [apiKeys]);
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, status }: { id: number; status?: string }) =>
+    mutationFn: ({ id }: { id: number }) =>
       updateAdminApiKey(id, {
-        name: editName.trim() || undefined,
-        quota: toNumber(editQuota),
         group_id: toNullableNumber(editGroupId),
-        expires_at: editExpiresAt.trim() || null,
-        status,
       }),
     onSuccess: () => {
+      setFormError(null);
       setEditingId(null);
-      queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
-      queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
-    },
-    onError: (error) => setFormError(getErrorMessage(error)),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: number) => deleteAdminApiKey(id),
-    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin-api-keys'] });
       queryClient.invalidateQueries({ queryKey: ['user-api-keys'] });
     },
@@ -191,17 +210,8 @@ export default function ApiKeysScreen() {
 
   function startEdit(item: AdminApiKey) {
     setEditingId(item.id);
-    setEditName(item.name || '');
-    setEditQuota(item.quota ? String(item.quota) : '');
     setEditGroupId(item.group_id ? String(item.group_id) : '');
-    setEditExpiresAt(item.expires_at || '');
-  }
-
-  function confirmDelete(item: AdminApiKey) {
-    Alert.alert('删除 API 密钥', `确认删除 ${item.name || `Key #${item.id}`} 吗？`, [
-      { text: '取消', style: 'cancel' },
-      { text: '删除', style: 'destructive', onPress: () => deleteMutation.mutate(item.id) },
-    ]);
+    setFormError(null);
   }
 
   return (
@@ -209,7 +219,7 @@ export default function ApiKeysScreen() {
       <Stack.Screen options={{ title: 'API 密钥管理' }} />
       <ScreenShell
         title="API 密钥"
-        subtitle="搜索、创建、编辑、启停和删除用户 API Key。"
+        subtitle="按接口文档支持搜索查看和调整 API Key 分组。"
         icon={KeyRound}
         variant="minimal"
         refreshing={apiKeysQuery.isRefetching}
@@ -229,41 +239,25 @@ export default function ApiKeysScreen() {
               style={{ color: colors.text, flex: 1, fontSize: 15, paddingHorizontal: 10, paddingVertical: 12 }}
             />
           </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <InfoTile label="密钥总数" value={formatNumber(summary.total)} />
+            <InfoTile label="正常可用" value={formatNumber(summary.active)} tone="success" />
+            <InfoTile label="禁用/撤销" value={formatNumber(summary.disabled)} />
+            <InfoTile label="已过期" value={formatNumber(summary.expired)} tone={summary.expired > 0 ? 'danger' : 'default'} />
+            <InfoTile label="已用额度" value={formatNumber(summary.quotaUsed)} />
+          </View>
         </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-          <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
-            <Plus color={colors.primary} size={18} />
-            <Text style={{ color: colors.text, fontSize: 17, fontWeight: '800' }}>新建 API Key</Text>
-          </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
-            <Field label="用户 ID" value={userId} onChangeText={setUserId} placeholder="例如 1001" keyboardType="number-pad" />
-            <Field label="名称" value={name} onChangeText={setName} placeholder="例如 mobile-key" />
-            <Field label="额度" value={quota} onChangeText={setQuota} placeholder="留空为默认" keyboardType="decimal-pad" />
-            <Field label="分组 ID" value={groupId} onChangeText={setGroupId} placeholder="留空不绑定" keyboardType="number-pad" />
-            <Field label="过期时间" value={expiresAt} onChangeText={setExpiresAt} placeholder="YYYY-MM-DD 或 ISO 时间" />
-          </View>
+          <Text style={{ color: colors.text, fontSize: 16, fontWeight: '800' }}>接口能力</Text>
+          <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 20, marginTop: 8 }}>
+            按当前接口文档，管理端 API Key 支持搜索查看，并可通过 /admin/api-keys/:id 修改 group_id。创建、删除、启停、额度和过期时间暂不在文档方法内。
+          </Text>
           {formError ? (
             <View style={{ backgroundColor: colors.errorBg, borderRadius: 12, marginTop: 12, padding: 12 }}>
               <Text style={{ color: colors.errorText, fontSize: 13 }}>{formError}</Text>
             </View>
           ) : null}
-          <Pressable
-            disabled={createMutation.isPending}
-            onPress={() => {
-              setFormError(null);
-              createMutation.mutate();
-            }}
-            style={{
-              alignItems: 'center',
-              backgroundColor: createMutation.isPending ? colors.disabled : colors.primary,
-              borderRadius: 14,
-              marginTop: 14,
-              paddingVertical: 13,
-            }}
-          >
-            <Text style={{ color: colors.primaryText, fontSize: 14, fontWeight: '800' }}>{createMutation.isPending ? '创建中...' : '创建密钥'}</Text>
-          </Pressable>
         </View>
 
         {apiKeysQuery.isLoading ? <ListCard title="正在加载 API Keys" meta="请稍等..." icon={KeyRound} /> : null}
@@ -276,13 +270,11 @@ export default function ApiKeysScreen() {
         ) : null}
 
         {!apiKeysQuery.isLoading && !apiKeysQuery.error && apiKeys.length === 0 ? (
-          <ListCard title="暂无 API Key" meta="换个关键词搜索，或先创建一个新的用户密钥。" icon={KeyRound} />
+          <ListCard title="暂无 API Key" meta="换个关键词搜索，或确认后端已有密钥数据。" icon={KeyRound} />
         ) : null}
 
         {apiKeys.map((item: AdminApiKey) => {
           const editing = editingId === item.id;
-          const disabled = ['disabled', 'inactive', 'revoked'].includes(`${item.status || ''}`.toLowerCase());
-          const nextStatus = disabled ? 'active' : 'disabled';
 
           return (
             <ListCard
@@ -296,19 +288,29 @@ export default function ApiKeysScreen() {
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: colors.text, fontSize: 13, lineHeight: 20 }}>{maskKey(item.key)}</Text>
                     <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>
-                      已用 {item.quota_used ?? 0} / {item.quota && item.quota > 0 ? item.quota : '不限'} · 最后使用 {formatDisplayTime(item.last_used_at || item.updated_at || item.created_at)}
+                      最后使用 {formatDisplayTime(item.last_used_at)} · 更新 {formatDisplayTime(item.updated_at)}
                     </Text>
                   </View>
                   <StatusPill status={item.status} />
                 </View>
 
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <InfoTile label="Key ID" value={`#${item.id}`} />
+                  <InfoTile label="用户" value={item.user?.email || item.user?.username || `${item.user_id || '--'}`} />
+                  <InfoTile label="分组" value={item.group?.name || (item.group_id ? `#${item.group_id}` : '未分组')} />
+                  <InfoTile label="额度" value={formatQuota(item)} />
+                  <InfoTile label="剩余额度" value={formatQuotaRemaining(item)} />
+                  <InfoTile label="5H 用量" value={formatNumber(item.usage_5h)} />
+                  <InfoTile label="1D 用量" value={formatNumber(item.usage_1d)} />
+                  <InfoTile label="7D 用量" value={formatNumber(item.usage_7d)} />
+                  <InfoTile label="过期时间" value={formatDisplayTime(item.expires_at)} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
+                  <InfoTile label="创建时间" value={formatDisplayTime(item.created_at)} />
+                </View>
+
                 {editing ? (
                   <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                      <Field label="名称" value={editName} onChangeText={setEditName} />
-                      <Field label="额度" value={editQuota} onChangeText={setEditQuota} keyboardType="decimal-pad" />
-                      <Field label="分组 ID" value={editGroupId} onChangeText={setEditGroupId} keyboardType="number-pad" />
-                      <Field label="过期时间" value={editExpiresAt} onChangeText={setEditExpiresAt} />
+                      <Field label="分组 ID" value={editGroupId} onChangeText={setEditGroupId} placeholder="留空表示不绑定分组" keyboardType="number-pad" />
                     </View>
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
                       <Pressable
@@ -341,22 +343,7 @@ export default function ApiKeysScreen() {
                     onPress={() => startEdit(item)}
                   >
                     <Pencil color={colors.badgeDefaultText} size={13} />
-                    <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
-                  </Pressable>
-                  <Pressable
-                    style={{ backgroundColor: disabled ? colors.successBg : colors.accentBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9 }}
-                    onPress={() => updateMutation.mutate({ id: item.id, status: nextStatus })}
-                  >
-                    <Text style={{ color: disabled ? colors.success : colors.accentText, fontSize: 12, fontWeight: '800' }}>
-                      {disabled ? '启用' : '禁用'}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={{ backgroundColor: colors.dangerBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
-                    onPress={() => confirmDelete(item)}
-                  >
-                    <Trash2 color={colors.danger} size={13} />
-                    <Text style={{ color: colors.danger, fontSize: 12, fontWeight: '800' }}>删除</Text>
+                    <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>调整分组</Text>
                   </Pressable>
                 </View>
               </View>

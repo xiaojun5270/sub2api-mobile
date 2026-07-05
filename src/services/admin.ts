@@ -7,7 +7,6 @@ import type {
   AdminSettings,
   AdminUser,
   BalanceOperation,
-  CreateApiKeyRequest,
   DashboardModelStats,
   DashboardSnapshot,
   DashboardStats,
@@ -116,33 +115,17 @@ export function getUserUsage(userId: number, period: 'day' | 'week' | 'month' = 
 }
 
 export function listUserApiKeys(userId: number) {
-  return adminFetch<PaginatedData<AdminApiKey>>(`/api/v1/admin/users/${userId}/api-keys${buildQuery({ page: 1, page_size: 100 })}`);
+  return adminFetch<PaginatedData<AdminApiKey>>(`/api/v1/admin/users/${userId}/api-keys`);
 }
 
-export function searchAdminApiKeys(search = '') {
-  const keyword = search.trim();
-  return adminFetch<PaginatedData<AdminApiKey>>(
-    `/api/v1/admin/usage/search-api-keys${buildQuery({ page: 1, page_size: 100, search: keyword, keyword })}`
-  );
-}
-
-export function createUserApiKey(userId: number, body: CreateApiKeyRequest) {
-  return adminFetch<AdminApiKey>(`/api/v1/admin/users/${userId}/api-keys`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+export function searchAdminApiKeys() {
+  return adminFetch<PaginatedData<AdminApiKey>>('/api/v1/admin/usage/search-api-keys');
 }
 
 export function updateAdminApiKey(apiKeyId: number, body: UpdateApiKeyRequest) {
   return adminFetch<AdminApiKey>(`/api/v1/admin/api-keys/${apiKeyId}`, {
     method: 'PUT',
     body: JSON.stringify(body),
-  });
-}
-
-export function deleteAdminApiKey(apiKeyId: number) {
-  return adminFetch(`/api/v1/admin/api-keys/${apiKeyId}`, {
-    method: 'DELETE',
   });
 }
 
@@ -180,8 +163,9 @@ export function getGroup(groupId: number) {
 }
 
 export function listAccounts(search = '') {
+  void search;
   return adminFetch<PaginatedData<AdminAccount>>(
-    `/api/v1/admin/accounts${buildQuery({ page: 1, page_size: 20, search: search.trim() })}`
+    `/api/v1/admin/accounts${buildQuery({ page: 1, page_size: 20 })}`
   );
 }
 
@@ -207,13 +191,13 @@ export function getAccountTodayStats(accountId: number) {
   return adminFetch<AccountTodayStats>(`/api/v1/admin/accounts/${accountId}/today-stats`);
 }
 
-export function getAccountStats(accountId: number, params?: { start_date?: string; end_date?: string; granularity?: 'day' | 'hour' }) {
+export function getAccountStats(accountId: number, params?: { days?: number }) {
   return adminFetch<UsageStats>(`/api/v1/admin/accounts/${accountId}/stats${buildQuery(params ?? {})}`);
 }
 
-export function getAccountUsage(accountId: number, params?: { start_date?: string; end_date?: string; granularity?: 'day' | 'hour' }) {
+export function getAccountUsage(accountId: number) {
   return adminFetch<{ items?: OpsRecord[]; usage?: OpsRecord[]; total?: number }>(
-    `/api/v1/admin/accounts/${accountId}/usage${buildQuery(params ?? {})}`
+    `/api/v1/admin/accounts/${accountId}/usage`
   );
 }
 
@@ -265,13 +249,6 @@ export function syncAccountModels(accountId: number) {
   });
 }
 
-export function setAccountTempUnschedulable(accountId: number, seconds?: number) {
-  return adminFetch(`/api/v1/admin/accounts/${accountId}/temp-unschedulable`, {
-    method: 'POST',
-    body: JSON.stringify({ seconds }),
-  });
-}
-
 export function setAccountSchedulable(accountId: number, schedulable: boolean) {
   return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}/schedulable`, {
     method: 'POST',
@@ -282,14 +259,14 @@ export function setAccountSchedulable(accountId: number, schedulable: boolean) {
 export function batchRefreshAccounts(accountIds: number[]) {
   return adminFetch('/api/v1/admin/accounts/batch-refresh', {
     method: 'POST',
-    body: JSON.stringify({ account_ids: accountIds, ids: accountIds }),
+    body: JSON.stringify({ account_ids: accountIds }),
   });
 }
 
 export function batchClearAccountErrors(accountIds: number[]) {
   return adminFetch('/api/v1/admin/accounts/batch-clear-error', {
     method: 'POST',
-    body: JSON.stringify({ account_ids: accountIds, ids: accountIds }),
+    body: JSON.stringify({ account_ids: accountIds }),
   });
 }
 
@@ -306,54 +283,37 @@ export function getOpsRealtimeTraffic() {
 }
 
 export function getOpsRequests(params: { page?: number; page_size?: number; search?: string } = {}) {
-  return adminFetch<PaginatedData<OpsRecord>>(
-    `/api/v1/admin/ops/requests${buildQuery({ page: params.page ?? 1, page_size: params.page_size ?? 20, search: params.search?.trim() })}`
-  );
+  void params;
+  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/requests');
 }
 
 export function getOpsRequestErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
-  return adminFetch<PaginatedData<OpsRecord>>(
-    `/api/v1/admin/ops/request-errors${buildQuery({
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 20,
-      status: params.status,
-      search: params.search?.trim(),
-    })}`
-  );
+  void params;
+  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/request-errors');
 }
 
 export function resolveOpsRequestError(errorId: number | string) {
   return adminFetch(`/api/v1/admin/ops/request-errors/${errorId}/resolve`, {
-    method: 'POST',
+    method: 'PUT',
+    body: JSON.stringify({ resolved: true }),
   });
 }
 
 export function getOpsUpstreamErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
-  return adminFetch<PaginatedData<OpsRecord>>(
-    `/api/v1/admin/ops/upstream-errors${buildQuery({
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 20,
-      status: params.status,
-      search: params.search?.trim(),
-    })}`
-  );
+  void params;
+  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/upstream-errors');
 }
 
 export function resolveOpsUpstreamError(errorId: number | string) {
   return adminFetch(`/api/v1/admin/ops/upstream-errors/${errorId}/resolve`, {
-    method: 'POST',
+    method: 'PUT',
+    body: JSON.stringify({ resolved: true }),
   });
 }
 
 export function getOpsSystemLogs(params: { page?: number; page_size?: number; level?: string; search?: string } = {}) {
-  return adminFetch<PaginatedData<OpsRecord>>(
-    `/api/v1/admin/ops/system-logs${buildQuery({
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 20,
-      level: params.level,
-      search: params.search?.trim(),
-    })}`
-  );
+  void params;
+  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/system-logs');
 }
 
 export function getOpsSystemLogsHealth() {
@@ -367,18 +327,13 @@ export function cleanupOpsSystemLogs() {
 }
 
 export function getOpsAlertEvents(params: { page?: number; page_size?: number; status?: string } = {}) {
-  return adminFetch<PaginatedData<OpsRecord>>(
-    `/api/v1/admin/ops/alert-events${buildQuery({
-      page: params.page ?? 1,
-      page_size: params.page_size ?? 20,
-      status: params.status,
-    })}`
-  );
+  void params;
+  return adminFetch<PaginatedData<OpsRecord>>('/api/v1/admin/ops/alert-events');
 }
 
 export function updateOpsAlertEventStatus(eventId: number | string, status: string) {
   return adminFetch(`/api/v1/admin/ops/alert-events/${eventId}/status`, {
-    method: 'POST',
+    method: 'PUT',
     body: JSON.stringify({ status }),
   });
 }
