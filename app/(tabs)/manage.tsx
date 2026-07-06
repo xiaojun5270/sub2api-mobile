@@ -26,7 +26,7 @@ const MODULES: ManageModule[] = [
     detail: '查看账号清单、限流、错误和调度状态',
     icon: ShieldCheck,
     href: '/accounts/overview',
-    accent: '#0f766e',
+    accent: '#047857',
   },
   {
     title: 'API 密钥管理',
@@ -34,7 +34,7 @@ const MODULES: ManageModule[] = [
     detail: '查看用户密钥、使用额度和关联分组',
     icon: KeyRound,
     href: '/api-keys',
-    accent: '#0284c7',
+    accent: '#2563eb',
   },
   {
     title: '运维监控',

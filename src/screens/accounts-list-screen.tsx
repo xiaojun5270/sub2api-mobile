@@ -326,20 +326,20 @@ function getAccountStatPalette(colors: AppTheme, tone: AccountStatTone) {
   const dark = colors.mode === 'dark';
   const palettes: Record<AccountStatTone, { background: string; border: string; iconBg: string; icon: string; glow: string }> = {
     requests: dark
-      ? { background: '#062235', border: '#164863', iconBg: '#0b3348', icon: '#38bdf8', glow: '#38bdf8' }
-      : { background: '#edf8ff', border: '#c7eaff', iconBg: '#dcf3ff', icon: '#0284c7', glow: '#7dd3fc' },
+      ? { background: '#101d34', border: '#25456f', iconBg: '#172b52', icon: '#93c5fd', glow: '#60a5fa' }
+      : { background: '#eef5ff', border: '#d6e5ff', iconBg: '#dfeaff', icon: '#2563eb', glow: '#93c5fd' },
     tokens: dark
-      ? { background: '#102033', border: '#263a5f', iconBg: '#172b47', icon: '#93c5fd', glow: '#60a5fa' }
-      : { background: '#f1f6ff', border: '#d8e7ff', iconBg: '#e4efff', icon: '#2563eb', glow: '#93c5fd' },
+      ? { background: '#0f2634', border: '#25556c', iconBg: '#123849', icon: '#67e8f9', glow: '#22d3ee' }
+      : { background: '#edfaff', border: '#cceff8', iconBg: '#dff8ff', icon: '#0891b2', glow: '#67e8f9' },
     accountCost: dark
-      ? { background: '#2d230b', border: '#5a4215', iconBg: '#3a2d0e', icon: '#fbbf24', glow: '#fbbf24' }
-      : { background: '#fff8e8', border: '#f8e2aa', iconBg: '#fff0c2', icon: '#b7791f', glow: '#facc15' },
+      ? { background: '#2a210b', border: '#604613', iconBg: '#3a2d0e', icon: '#fbbf24', glow: '#f59e0b' }
+      : { background: '#fff8e7', border: '#f3dda5', iconBg: '#fff0c2', icon: '#b45309', glow: '#fbbf24' },
     userCost: dark
-      ? { background: '#211a3a', border: '#403366', iconBg: '#2b2249', icon: '#c4b5fd', glow: '#a78bfa' }
-      : { background: '#f7f3ff', border: '#e4d8ff', iconBg: '#eee7ff', icon: '#7c3aed', glow: '#c4b5fd' },
+      ? { background: '#211a38', border: '#44346b', iconBg: '#2d234b', icon: '#c4b5fd', glow: '#a78bfa' }
+      : { background: '#f7f3ff', border: '#e5d9ff', iconBg: '#eee7ff', icon: '#7c3aed', glow: '#c4b5fd' },
     totalCost: dark
-      ? { background: '#082a24', border: '#155347', iconBg: '#0d3a32', icon: '#5eead4', glow: '#2dd4bf' }
-      : { background: '#edfbf7', border: '#c6f1e5', iconBg: '#d8f8ef', icon: '#0f766e', glow: '#5eead4' },
+      ? { background: '#072b27', border: '#14564e', iconBg: '#0d3b35', icon: '#5eead4', glow: '#2dd4bf' }
+      : { background: '#effbf7', border: '#c9f0e5', iconBg: '#ddf8ef', icon: '#047857', glow: '#5eead4' },
   };
 
   return palettes[tone];
@@ -368,19 +368,19 @@ function AccountStatTile({
         borderRadius: 16,
         borderWidth: 1,
         flex: 1,
-        minHeight: 86,
+        minHeight: 74,
         minWidth: 132,
-        paddingHorizontal: 12,
-        paddingVertical: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
         shadowColor: palette.glow,
-        shadowOffset: { height: 6, width: 0 },
-        shadowOpacity: colors.mode === 'dark' ? 0.12 : 0.16,
-        shadowRadius: 12,
+        shadowOffset: { height: 4, width: 0 },
+        shadowOpacity: colors.mode === 'dark' ? 0.08 : 0.11,
+        shadowRadius: 9,
       }}
     >
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-        <View style={{ alignItems: 'center', backgroundColor: palette.iconBg, borderRadius: 999, height: 28, justifyContent: 'center', width: 28 }}>
-          <Icon color={palette.icon} size={15} />
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
+        <View style={{ alignItems: 'center', backgroundColor: palette.iconBg, borderRadius: 999, height: 24, justifyContent: 'center', width: 24 }}>
+          <Icon color={palette.icon} size={13} />
         </View>
         <Text numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 11, fontWeight: '700' }}>
           {label}
@@ -389,7 +389,7 @@ function AccountStatTile({
       <Text
         adjustsFontSizeToFit
         numberOfLines={1}
-        style={{ color: colors.text, fontSize: 19, fontWeight: '800', marginTop: 10 }}
+        style={{ color: colors.text, fontSize: 17, fontWeight: '800', marginTop: 7 }}
       >
         {value}
       </Text>
@@ -507,11 +507,11 @@ function AccountQuotaPanel({
     gap: 6,
     justifyContent: 'center' as const,
     paddingHorizontal: 12,
-    paddingVertical: 9,
+    paddingVertical: 7,
   };
 
   return (
-    <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 16, borderWidth: 1, gap: 10, padding: 12 }}>
+    <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 16, borderWidth: 1, gap: 8, padding: 10 }}>
       <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
           <Gauge color={colors.primary} size={15} />
@@ -522,18 +522,18 @@ function AccountQuotaPanel({
         </Text>
       </View>
 
-      <View style={{ gap: 9 }}>
+      <View style={{ gap: 7 }}>
         {windows.map((item) => {
           const barWidth = `${item.percent ?? 0}%` as `${number}%`;
           const isHigh = (item.percent ?? 0) >= 80;
           return (
-            <View key={item.label} style={{ gap: 6 }}>
+            <View key={item.label} style={{ gap: 5 }}>
               <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' }}>{item.label}</Text>
                 <Text style={{ color: colors.subtext, fontSize: 11 }}>{formatPercent(item.percent)} · {item.resetLabel}</Text>
               </View>
-              <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 7, overflow: 'hidden' }}>
-                <View style={{ backgroundColor: isHigh ? colors.danger : colors.primary, borderRadius: 999, height: 7, width: barWidth }} />
+              <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 6, overflow: 'hidden' }}>
+                <View style={{ backgroundColor: isHigh ? colors.danger : colors.primary, borderRadius: 999, height: 6, width: barWidth }} />
               </View>
             </View>
           );
@@ -980,7 +980,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
           <View
             style={{
               alignItems: 'center',
-              backgroundColor: colors.mode === 'dark' ? '#0b1b2d' : '#f4f9fb',
+              backgroundColor: colors.mode === 'dark' ? '#141f31' : '#f4f7fb',
               borderColor: colors.border,
               borderRadius: 18,
               borderWidth: 1,
@@ -1115,18 +1115,19 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             meta={`#${account.id} · ${account.platform} · ${account.type}`}
             badge={statusText}
             badgeTone={visualStatus.badgeTone}
+            compact
             icon={KeyRound}
           >
-            <View className="gap-3">
+            <View style={{ gap: 9 }}>
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center gap-2">
                   {account.schedulable && !isError ? <ShieldCheck color={colors.subtext} size={14} /> : <ShieldOff color={colors.subtext} size={14} />}
-                  <Text style={{ color: colors.subtext, fontSize: 14 }}>状态：{statusText}</Text>
+                  <Text style={{ color: colors.subtext, fontSize: 13 }}>状态：{statusText}</Text>
                 </View>
-                <Text style={{ color: colors.subtext, fontSize: 12 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
+                <Text style={{ color: colors.subtext, fontSize: 11 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
               </View>
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
                 <AccountStatTile colors={colors} icon={Activity} label="请求次数" tone="requests" value={formatReqValue(todayStats.requests)} />
                 <AccountStatTile colors={colors} icon={Cpu} label="Token 消耗" tone="tokens" value={formatTokenValue(todayStats.tokens)} />
                 <AccountStatTile colors={colors} icon={DollarSign} label="账号成本" tone="accountCost" value={formatPrefixedMoney('A', todayStats.cost)} />
@@ -1149,7 +1150,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               />
 
               {isEditing ? (
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 10 }}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                     <Field label="名称" value={editName} onChangeText={setEditName} placeholder="账号名称" />
                     <Field label="优先级" value={editPriority} onChangeText={setEditPriority} placeholder="0" keyboardType="number-pad" />
@@ -1157,7 +1158,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     <Field label="倍率" value={editRateMultiplier} onChangeText={setEditRateMultiplier} placeholder="1" keyboardType="decimal-pad" />
                     <Field label="备注" value={editNotes} onChangeText={setEditNotes} placeholder="备注" />
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
                     <Pressable
                       disabled={accountEditMutation.isPending}
                       onPress={(event) => {
@@ -1181,9 +1182,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </View>
               ) : null}
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
                 <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 7 }}
                   disabled={isTestingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -1206,7 +1207,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
                 </Pressable>
                 <Pressable
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     startEditAccount(account);
@@ -1217,7 +1218,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </Pressable>
                 <Pressable
                   disabled={accountStatusMutation.isPending}
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     accountStatusMutation.mutate({ account, enabled: nextEnabled });
@@ -1227,7 +1228,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
                 </Pressable>
                 <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 7 }}
                   disabled={isTogglingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -1247,7 +1248,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </Pressable>
                 <Pressable
                   disabled={accountDeleteMutation.isPending}
-                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
+                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     confirmDeleteAccount(account);
@@ -1288,7 +1289,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     >
       <FlatList
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 12, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: 8, flexGrow: 1 }}
         data={filteredItems}
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
@@ -1300,7 +1301,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         }} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
-        ItemSeparatorComponent={() => <View className="h-4" />}
+        ItemSeparatorComponent={() => <View className="h-3" />}
         keyboardShouldPersistTaps="handled"
         initialNumToRender={8}
         maxToRenderPerBatch={8}

@@ -9,8 +9,8 @@ const { useSnapshot } = require('valtio/react');
 
 function NativeIosTabs() {
   const activeColor = DynamicColorIOS({
-    dark: '#64d2ff',
-    light: '#007aff',
+    dark: '#93c5fd',
+    light: '#2563eb',
   });
   const inactiveColor = DynamicColorIOS({
     dark: 'rgba(235,235,245,0.58)',
@@ -67,8 +67,8 @@ function FallbackBottomTabs({ isDark }: { isDark: boolean }) {
       initialRouteName="monitor"
       screenOptions={{
         headerShown: false,
-        tabBarActiveBackgroundColor: isDark ? 'rgba(14,165,233,0.14)' : 'rgba(14,165,233,0.11)',
-        tabBarActiveTintColor: isDark ? '#67e8f9' : '#0284c7',
+        tabBarActiveBackgroundColor: isDark ? 'rgba(59,130,246,0.18)' : 'rgba(37,99,235,0.1)',
+        tabBarActiveTintColor: isDark ? '#93c5fd' : '#2563eb',
         tabBarInactiveTintColor: isDark ? '#94a3b8' : '#64748b',
         tabBarItemStyle: {
           borderRadius: 22,
@@ -86,9 +86,9 @@ function FallbackBottomTabs({ isDark }: { isDark: boolean }) {
           borderRadius: 32,
           borderTopWidth: StyleSheet.hairlineWidth,
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: isDark ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.92)',
-          backgroundColor: isDark ? 'rgba(15,23,42,0.72)' : 'rgba(255,255,255,0.86)',
-          shadowColor: isDark ? '#000' : '#60a5fa',
+          borderColor: isDark ? 'rgba(148,163,184,0.2)' : 'rgba(255,255,255,0.94)',
+          backgroundColor: isDark ? 'rgba(17,24,39,0.76)' : 'rgba(255,255,255,0.88)',
+          shadowColor: isDark ? '#000' : '#93c5fd',
           shadowOpacity: isDark ? 0.22 : 0.14,
           shadowRadius: 24,
           shadowOffset: { width: 0, height: 14 },

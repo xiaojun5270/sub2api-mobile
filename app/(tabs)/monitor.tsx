@@ -477,7 +477,7 @@ export default function MonitorScreen() {
             ) : null}
 
             {requestPoints.length > 1 ? (
-              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color="#0f766e" icon={Activity} formatValue={formatCompactNumber} />
+              <LineTrendChart title="请求趋势" subtitle="当前时间范围内的请求变化趋势" points={requestPoints} color={colors.primary} icon={Activity} formatValue={formatCompactNumber} />
             ) : null}
 
             {costPoints.length > 1 ? (
@@ -489,7 +489,7 @@ export default function MonitorScreen() {
               subtitle="输入、输出、缓存读取占比"
               icon={BarChart3}
               items={[
-                { label: '输入 Token', value: totalInputTokens, color: '#0f766e', hint: '请求进入模型前消耗的 token。' },
+                { label: '输入 Token', value: totalInputTokens, color: colors.primary, hint: '请求进入模型前消耗的 token。' },
                 { label: '输出 Token', value: totalOutputTokens, color: '#f59e0b', hint: '模型返回内容消耗的 token。' },
                 { label: '缓存读取 Token', value: totalCacheReadTokens, color: '#64748b', hint: '命中缓存后复用的 token。' },
               ]}
@@ -503,7 +503,7 @@ export default function MonitorScreen() {
               centerValue={formatNumber(totalAccounts)}
               icon={PieChart}
               segments={[
-                { label: '健康', value: healthyAccounts, color: '#0f766e' },
+                { label: '健康', value: healthyAccounts, color: colors.success },
                 { label: '繁忙', value: currentPageBusyAccounts, color: '#f59e0b' },
                 { label: '限流', value: currentPageLimitedAccounts, color: '#64748b' },
                 { label: '异常', value: errorAccounts, color: '#f97316' },

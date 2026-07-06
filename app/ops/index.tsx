@@ -1042,7 +1042,7 @@ export default function OpsScreen() {
         ) : null}
 
         {throughputPoints.length > 1 ? (
-          <LineTrendChart title="吞吐趋势" subtitle="请求量随时间变化" points={throughputPoints} color="#0f766e" icon={Activity} formatValue={formatCompactNumber} />
+          <LineTrendChart title="吞吐趋势" subtitle="请求量随时间变化" points={throughputPoints} color={colors.primary} icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
 
         {errorTrendPoints.length > 1 ? (

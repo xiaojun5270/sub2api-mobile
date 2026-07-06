@@ -84,7 +84,7 @@ export function BarChartCard({
                     borderRadius: 999,
                     height: '100%',
                     width: barWidth,
-                    backgroundColor: item.color || '#0f766e',
+                    backgroundColor: item.color || colors.primary,
                   }}
                 />
               </View>

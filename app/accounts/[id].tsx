@@ -170,6 +170,55 @@ function MetricTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+function ExtraInfoTile({ label, value }: { label: string; value: string }) {
+  const colors = useAppTheme();
+
+  return (
+    <View
+      style={{
+        backgroundColor: colors.chartPanel,
+        borderColor: colors.border,
+        borderRadius: 14,
+        borderWidth: 1,
+        flexGrow: 1,
+        flexShrink: 1,
+        flexBasis: '47%',
+        minHeight: 88,
+        minWidth: 148,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+      }}
+    >
+      <Text
+        numberOfLines={2}
+        style={{
+          color: colors.subtext,
+          fontSize: 10,
+          fontWeight: '500',
+          lineHeight: 14,
+        }}
+      >
+        {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.78}
+        numberOfLines={2}
+        selectable
+        style={{
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '600',
+          lineHeight: 18,
+          marginTop: 7,
+        }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function FormField({
   label,
   value,
@@ -381,7 +430,7 @@ export default function AccountDetailScreen() {
   const modelChartItems = models.slice(0, 8).map((item) => ({
     label: modelName(item),
     value: typeof item === 'object' && item.enabled === false ? 0 : 1,
-    color: typeof item === 'object' && item.enabled === false ? '#64748b' : '#0f766e',
+    color: typeof item === 'object' && item.enabled === false ? colors.disabled : colors.success,
     meta: typeof item === 'object' && item.enabled === false ? 'disabled' : 'enabled',
   }));
 
@@ -461,9 +510,9 @@ export default function AccountDetailScreen() {
               {(account.notes || extraEntries.length > 0) ? (
                 <Section title="高级信息" icon={DatabaseZap}>
                   {account.notes ? <Text style={{ color: colors.subtext, fontSize: 13, lineHeight: 20, marginBottom: 10 }}>{account.notes}</Text> : null}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                     {extraEntries.map(([key, value]) => (
-                      <MetricTile key={key} label={key} value={formatExtraValue(value)} />
+                      <ExtraInfoTile key={key} label={key} value={formatExtraValue(value)} />
                     ))}
                   </View>
                 </Section>
