@@ -75,13 +75,150 @@ export type DashboardModelStats = {
 
 export type UsageStats = {
   total_requests?: number;
+  request_count?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_tokens?: number;
+  cache_read_tokens?: number;
   total_tokens?: number;
   total_input_tokens?: number;
   total_output_tokens?: number;
   total_cost?: number;
   total_actual_cost?: number;
   total_account_cost?: number;
+  actual_cost?: number;
+  account_cost?: number;
+  duration_ms?: number;
+  avg_duration_ms?: number;
+  first_token_ms?: number;
+  avg_first_token_ms?: number;
+  models?: Array<Record<string, unknown>>;
+  endpoints?: unknown[];
+  upstream_endpoints?: unknown[];
+  endpoint_paths?: unknown[];
   average_duration_ms?: number;
+};
+
+export type AdminUsageListParams = {
+  page?: number;
+  page_size?: number;
+  exact_total?: boolean;
+  start_date?: string;
+  end_date?: string;
+  user_id?: number;
+  api_key_id?: number;
+  account_id?: number;
+  group_id?: number;
+  model?: string;
+  request_type?: string | number;
+  stream?: boolean;
+  billing_type?: string | number;
+  billing_mode?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  timezone?: string;
+  nocache?: number;
+};
+
+export type AdminUsageRecord = {
+  id: number | string;
+  user_id?: number;
+  api_key_id?: number;
+  account_id?: number;
+  group_id?: number | null;
+  subscription_id?: number | null;
+  request_id?: string | null;
+  model?: string;
+  requested_model?: string | null;
+  upstream_model?: string | null;
+  model_mapping_chain?: string | null;
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_tokens?: number;
+  cache_read_tokens?: number;
+  cache_creation_5m_tokens?: number;
+  cache_creation_1h_tokens?: number;
+  image_output_tokens?: number;
+  input_cost?: number;
+  output_cost?: number;
+  cache_creation_cost?: number;
+  cache_read_cost?: number;
+  image_output_cost?: number;
+  total_cost?: number;
+  actual_cost?: number;
+  account_stats_cost?: number | null;
+  rate_multiplier?: number;
+  account_rate_multiplier?: number | null;
+  stream?: boolean;
+  request_type?: string | number;
+  billing_type?: string | number;
+  billing_mode?: string | null;
+  billing_tier?: string | null;
+  duration_ms?: number | null;
+  first_token_ms?: number | null;
+  created_at?: string;
+  user_agent?: string | null;
+  ip_address?: string | null;
+  reasoning_effort?: string | null;
+  service_tier?: string | null;
+  inbound_endpoint?: string | null;
+  upstream_endpoint?: string | null;
+  channel_id?: number | null;
+  user?: {
+    id?: number;
+    email?: string;
+    username?: string | null;
+    deleted?: boolean;
+    status?: string;
+    role?: string;
+  };
+  api_key?: {
+    id?: number;
+    name?: string;
+    key?: string;
+    status?: string;
+  };
+  account?: {
+    id?: number;
+    name?: string;
+    platform?: string;
+    type?: string;
+  };
+  group?: {
+    id?: number;
+    name?: string;
+    group_name?: string;
+  };
+  [key: string]: unknown;
+};
+
+export type UsageCleanupTask = {
+  id: number | string;
+  status?: string;
+  filters?: Record<string, unknown>;
+  created_by?: number;
+  deleted_rows?: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  canceled_by?: number | null;
+  canceled_at?: string | null;
+};
+
+export type CreateUsageCleanupTaskRequest = {
+  start_date: string;
+  end_date: string;
+  timezone: string;
+  user_id?: number;
+  api_key_id?: number;
+  account_id?: number;
+  group_id?: number;
+  model?: string;
+  request_type?: string | number;
+  stream?: boolean;
+  billing_type?: string | number;
 };
 
 export type DashboardSnapshot = {

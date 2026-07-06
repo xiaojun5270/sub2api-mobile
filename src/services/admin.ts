@@ -6,8 +6,11 @@ import type {
   AdminApiKey,
   AdminGroup,
   AdminSettings,
+  AdminUsageListParams,
+  AdminUsageRecord,
   AdminUser,
   BalanceOperation,
+  CreateUsageCleanupTaskRequest,
   DashboardModelStats,
   DashboardSnapshot,
   DashboardStats,
@@ -27,6 +30,7 @@ import type {
   UpdateAccountRequest,
   UpdateApiKeyRequest,
   UsageStats,
+  UsageCleanupTask,
   UserUsageSummary,
 } from '@/src/types/admin';
 
@@ -608,6 +612,83 @@ export function getUsageStats(params: {
   billing_type?: string | null;
 }) {
   return adminFetch<UsageStats>(`/api/v1/admin/usage/stats${buildQuery(params)}`);
+}
+
+export function listAdminUsage(params: AdminUsageListParams = {}) {
+  return adminFetch<PaginatedData<AdminUsageRecord>>(
+    `/api/v1/admin/usage${buildQuery({
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 20,
+      exact_total: params.exact_total,
+      start_date: params.start_date,
+      end_date: params.end_date,
+      user_id: params.user_id,
+      api_key_id: params.api_key_id,
+      account_id: params.account_id,
+      group_id: params.group_id,
+      model: params.model,
+      request_type: params.request_type,
+      stream: params.stream,
+      billing_type: params.billing_type,
+      billing_mode: params.billing_mode,
+      sort_by: params.sort_by ?? 'created_at',
+      sort_order: params.sort_order ?? 'desc',
+      timezone: params.timezone,
+    })}`
+  );
+}
+
+export function getAdminUsageStats(params: AdminUsageListParams = {}) {
+  return adminFetch<UsageStats>(
+    `/api/v1/admin/usage/stats${buildQuery({
+      start_date: params.start_date,
+      end_date: params.end_date,
+      user_id: params.user_id,
+      api_key_id: params.api_key_id,
+      account_id: params.account_id,
+      group_id: params.group_id,
+      model: params.model,
+      request_type: params.request_type,
+      stream: params.stream,
+      billing_type: params.billing_type,
+      billing_mode: params.billing_mode,
+      nocache: params.nocache,
+      timezone: params.timezone,
+    })}`
+  );
+}
+
+export function searchUsageUsers(q = '') {
+  return adminFetch<AdminUser[]>(`/api/v1/admin/usage/search-users${buildQuery({ q: q.trim() })}`);
+}
+
+export function searchUsageApiKeys(params: { user_id?: number; q?: string } = {}) {
+  return adminFetch<AdminApiKey[]>(
+    `/api/v1/admin/usage/search-api-keys${buildQuery({ user_id: params.user_id, q: params.q?.trim() })}`
+  );
+}
+
+export function listUsageCleanupTasks(params: { page?: number; page_size?: number; timezone?: string } = {}) {
+  return adminFetch<PaginatedData<UsageCleanupTask>>(
+    `/api/v1/admin/usage/cleanup-tasks${buildQuery({
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 5,
+      timezone: params.timezone,
+    })}`
+  );
+}
+
+export function createUsageCleanupTask(body: CreateUsageCleanupTaskRequest) {
+  return adminFetch<UsageCleanupTask>('/api/v1/admin/usage/cleanup-tasks', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function cancelUsageCleanupTask(taskId: number | string) {
+  return adminFetch<UsageCleanupTask>(`/api/v1/admin/usage/cleanup-tasks/${taskId}/cancel`, {
+    method: 'POST',
+  });
 }
 
 export function listUsers(search = '') {
