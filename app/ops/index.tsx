@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { Activity, BellRing, ChevronDown, Gauge, ServerCog, TerminalSquare } from 'lucide-react-native';
+import { Activity, AlertTriangle, BarChart3, BellRing, ChevronDown, Clock, Gauge, ListChecks, ServerCog, ShieldCheck, ShieldOff, TerminalSquare, Users } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import { LineTrendChart } from '@/src/components/line-trend-chart';
@@ -10,16 +10,25 @@ import { ScreenShell } from '@/src/components/screen-shell';
 import { formatCompactNumber, formatDisplayTime } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
+  getOpsAccountAvailability,
   getOpsAlertEvents,
   getOpsConcurrency,
   getOpsDashboardOverview,
   getOpsDashboardSnapshot,
+  getOpsErrorDistribution,
+  getOpsErrors,
+  getOpsErrorTrend,
+  getOpsLatencyHistogram,
   getOpsOpenAiTokenStats,
   getOpsRealtimeTraffic,
+  getOpsRequests,
+  getOpsRequestErrors,
   getOpsRuntimeAlert,
   getOpsSystemLogs,
   getOpsSystemLogsHealth,
   getOpsThroughputTrend,
+  getOpsUpstreamErrors,
+  getOpsUserConcurrency,
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
 import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
@@ -180,6 +189,8 @@ function getItems(data?: unknown) {
     'events',
     'alert_events',
     'alertEvents',
+    'accounts',
+    'users',
   ]);
 }
 
@@ -430,6 +441,53 @@ function SectionTitle({ title, icon: Icon }: { title: string; icon: LucideIcon }
   );
 }
 
+function MiniBar({ value, tone = 'default' }: { value: number; tone?: 'default' | 'danger' | 'success' }) {
+  const colors = useAppTheme();
+  const percent = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+  const color = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.primary;
+
+  return (
+    <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 7, marginTop: 8, overflow: 'hidden' }}>
+      <View style={{ backgroundColor: color, borderRadius: 999, height: 7, width: `${percent}%` as `${number}%` }} />
+    </View>
+  );
+}
+
+function RecordCard({
+  item,
+  title,
+  subtitle,
+  tone = 'default',
+  children,
+}: {
+  item: OpsRecord;
+  title: string;
+  subtitle: string;
+  tone?: 'default' | 'danger' | 'success';
+  children?: ReactNode;
+}) {
+  const colors = useAppTheme();
+  const markerColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.primary;
+
+  return (
+    <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ backgroundColor: markerColor, borderRadius: 999, marginTop: 3, width: 4 }} />
+        <View style={{ flex: 1 }}>
+          <Text numberOfLines={2} style={{ color: colors.text, fontSize: 13, fontWeight: '800', lineHeight: 18 }}>{title}</Text>
+          <Text numberOfLines={2} style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{subtitle}</Text>
+          {children ? <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>{children}</View> : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function EmptyText({ loading, empty }: { loading?: boolean; empty: string }) {
+  const colors = useAppTheme();
+  return <Text style={{ color: colors.subtext }}>{loading ? '正在加载...' : empty}</Text>;
+}
+
 export default function OpsScreen() {
   const colors = useAppTheme();
   const queryClient = useQueryClient();
@@ -462,12 +520,31 @@ export default function OpsScreen() {
     time_range: getTokenStatsTimeRange(timeRange),
   }), [platformFilter, selectedGroupId, timeRange]);
 
+  const opsListParams = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+    page: 1,
+    page_size: 10,
+    time_range: timeRange,
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  }), [platformFilter, selectedGroupId, timeRange]);
+
   const overviewQuery = useQuery({ queryKey: ['ops-overview', opsQueryParams], queryFn: () => getOpsDashboardOverview(opsQueryParams), staleTime: 30_000 });
   const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot', opsQueryParams], queryFn: () => getOpsDashboardSnapshot(opsQueryParams), staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime', opsRealtimeParams], queryFn: () => getOpsRealtimeTraffic(opsRealtimeParams), staleTime: 15_000 });
   const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency', opsDimensionParams], queryFn: () => getOpsConcurrency(opsDimensionParams), staleTime: 15_000 });
+  const userConcurrencyQuery = useQuery({ queryKey: ['ops-user-concurrency', opsDimensionParams], queryFn: () => getOpsUserConcurrency(opsDimensionParams), staleTime: 15_000 });
+  const accountAvailabilityQuery = useQuery({ queryKey: ['ops-account-availability', opsDimensionParams], queryFn: () => getOpsAccountAvailability(opsDimensionParams), staleTime: 15_000 });
   const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats', opsTokenStatsParams], queryFn: () => getOpsOpenAiTokenStats(opsTokenStatsParams), staleTime: 30_000 });
   const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend', opsQueryParams], queryFn: () => getOpsThroughputTrend(opsQueryParams), staleTime: 60_000 });
+  const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend', opsQueryParams], queryFn: () => getOpsErrorTrend(opsQueryParams), staleTime: 60_000 });
+  const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution', opsQueryParams], queryFn: () => getOpsErrorDistribution(opsQueryParams), staleTime: 60_000 });
+  const latencyHistogramQuery = useQuery({ queryKey: ['ops-latency-histogram', opsQueryParams], queryFn: () => getOpsLatencyHistogram(opsQueryParams), staleTime: 60_000 });
+  const requestsQuery = useQuery({ queryKey: ['ops-requests', opsListParams], queryFn: () => getOpsRequests(opsListParams), staleTime: 30_000 });
+  const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors', opsListParams], queryFn: () => getOpsRequestErrors({ ...opsListParams, view: 'errors' }), staleTime: 30_000 });
+  const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors', opsListParams], queryFn: () => getOpsUpstreamErrors(opsListParams), staleTime: 30_000 });
+  const errorsQuery = useQuery({ queryKey: ['ops-errors', opsListParams], queryFn: () => getOpsErrors(opsListParams), staleTime: 30_000 });
   const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs', opsQueryParams], queryFn: () => getOpsSystemLogs({ ...opsQueryParams, page: 1, page_size: 20 }), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
@@ -487,10 +564,29 @@ export default function OpsScreen() {
   const logsHealth = logsHealthQuery.data;
   const rawSystemLogs = getItems(systemLogsQuery.data);
   const rawAlertEvents = getItems(alertEventsQuery.data);
+  const rawAccountAvailability = getItems(accountAvailabilityQuery.data);
+  const rawUserConcurrency = getItems(userConcurrencyQuery.data);
+  const rawRequests = getItems(requestsQuery.data);
+  const rawRequestErrors = getItems(requestErrorsQuery.data);
+  const rawUpstreamErrors = getItems(upstreamErrorsQuery.data);
+  const rawErrors = getItems(errorsQuery.data);
   const throughputSource = firstNonEmptyTrend(
     throughputQuery.data,
     snapshotArray(snapshot, ['throughput_trend', 'throughputTrend']),
     snapshot
+  );
+  const errorTrendSource = firstNonEmptyTrend(
+    errorTrendQuery.data,
+    snapshotArray(snapshot, ['error_trend', 'errorTrend']),
+    snapshot
+  );
+  const errorDistributionSource = firstNonEmptyTrend(
+    errorDistributionQuery.data,
+    snapshotArray(snapshot, ['error_distribution', 'errorDistribution'])
+  );
+  const latencyHistogramSource = firstNonEmptyTrend(
+    latencyHistogramQuery.data,
+    snapshotArray(snapshot, ['latency_histogram', 'latencyHistogram'])
   );
   const rawConcurrencyItems = getItems(concurrency);
   const filteredSystemLogs = useMemo(
@@ -505,21 +601,64 @@ export default function OpsScreen() {
     () => filterByDimension(throughputSource, platformFilter, groupFilter),
     [groupFilter, platformFilter, throughputSource]
   );
+  const filteredErrorTrendSource = useMemo(
+    () => filterByDimension(errorTrendSource, platformFilter, groupFilter),
+    [errorTrendSource, groupFilter, platformFilter]
+  );
+  const filteredErrorDistribution = useMemo(
+    () => filterByDimension(errorDistributionSource, platformFilter, groupFilter),
+    [errorDistributionSource, groupFilter, platformFilter]
+  );
+  const filteredLatencyHistogram = useMemo(
+    () => filterByDimension(latencyHistogramSource, platformFilter, groupFilter),
+    [groupFilter, latencyHistogramSource, platformFilter]
+  );
   const filteredConcurrencyItems = useMemo(
     () => filterByDimension(rawConcurrencyItems, platformFilter, groupFilter),
     [groupFilter, platformFilter, rawConcurrencyItems]
   );
+  const filteredAccountAvailability = useMemo(
+    () => filterByDimension(rawAccountAvailability, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawAccountAvailability]
+  );
+  const filteredUserConcurrency = useMemo(
+    () => filterByDimension(rawUserConcurrency, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawUserConcurrency]
+  );
+  const filteredRequests = useMemo(
+    () => filterByDimension(rawRequests, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawRequests]
+  );
+  const filteredRequestErrors = useMemo(
+    () => filterByDimension(rawRequestErrors, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawRequestErrors]
+  );
+  const filteredUpstreamErrors = useMemo(
+    () => filterByDimension(rawUpstreamErrors, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawUpstreamErrors]
+  );
+  const filteredErrors = useMemo(
+    () => filterByDimension(rawErrors, platformFilter, groupFilter),
+    [groupFilter, platformFilter, rawErrors]
+  );
   const dimensionSources = useMemo(
     () => [
       ...throughputSource,
+      ...errorTrendSource,
+      ...rawAccountAvailability,
       ...rawConcurrencyItems,
+      ...rawUserConcurrency,
+      ...rawRequests,
+      ...rawRequestErrors,
+      ...rawUpstreamErrors,
+      ...rawErrors,
       ...rawSystemLogs,
       ...rawAlertEvents,
       overview,
       realtime,
       concurrency,
     ],
-    [concurrency, overview, rawAlertEvents, rawConcurrencyItems, rawSystemLogs, realtime, throughputSource]
+    [concurrency, errorTrendSource, overview, rawAccountAvailability, rawAlertEvents, rawConcurrencyItems, rawErrors, rawRequestErrors, rawRequests, rawSystemLogs, rawUpstreamErrors, rawUserConcurrency, realtime, throughputSource]
   );
   const platformOptions = useMemo(
     () => [
@@ -538,6 +677,12 @@ export default function OpsScreen() {
   const timeOptions = OPS_TIME_RANGE_OPTIONS.map(({ label, value }) => ({ label, value }));
   const systemLogs = filteredSystemLogs.slice(0, 8);
   const alertEvents = filteredAlertEvents.slice(0, 8);
+  const accountAvailabilityRows = filteredAccountAvailability.slice(0, 8);
+  const userConcurrencyRows = filteredUserConcurrency.slice(0, 8);
+  const requestRows = filteredRequests.slice(0, 8);
+  const requestErrorRows = filteredRequestErrors.slice(0, 6);
+  const upstreamErrorRows = filteredUpstreamErrors.slice(0, 6);
+  const genericErrorRows = filteredErrors.slice(0, 6);
   const overviewRecord = isRecord(overview) ? overview : undefined;
   const qpsMetrics = nestedRecord(overview, 'qps') ?? nestedRecord(realtime, 'qps');
   const tpsMetrics = nestedRecord(overview, 'tps') ?? nestedRecord(realtime, 'tps');
@@ -572,7 +717,6 @@ export default function OpsScreen() {
   const ttftMax = firstNumber(ttftMetrics, ['max_ms', 'maxMs', 'max']) || firstNumber(overview, ['ttft_max_ms', 'ttftMaxMs']);
   const alertCount = firstNumberValue(runtimeAlert, ['events_open', 'eventsOpen', 'open_alerts', 'openAlerts']) ?? firstNumber(overview, ['alert_count', 'alertCount', 'alerts', 'open_alerts', 'openAlerts']);
   const totalAlertEvents = firstNumberValue(runtimeAlert, ['events_total', 'eventsTotal', 'total']) ?? firstNumber(alertEventsQuery.data, ['total']);
-  const enabledAlertRules = firstNumber(runtimeAlert, ['rules_enabled', 'rulesEnabled']);
   const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
   const queueSize = firstNumber(systemMetrics, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
   const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
@@ -598,9 +742,27 @@ export default function OpsScreen() {
   const logsHealthStatus = logsTotal > 0 ? '正常' : firstText(logsHealth, ['status', 'state', 'health']);
 
   const throughputOverallSource = pickTrendDimension(filteredThroughputSource, platformFilter, groupFilter);
+  const errorTrendOverallSource = pickTrendDimension(filteredErrorTrendSource, platformFilter, groupFilter);
 
   const throughputPoints = summarizeTrendByBucket(throughputOverallSource, ['success_count', 'successCount', 'requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'count', 'value']);
   const accountSwitchPoints = summarizeTrendByBucket(throughputOverallSource, ['account_switch_count', 'accountSwitchCount', 'avg_account_switch_count', 'avgAccountSwitchCount', 'switch_count', 'switchCount'], 'average');
+  const errorTrendPoints = summarizeTrendByBucket(errorTrendOverallSource, ['error_count_total', 'errorCountTotal', 'errors', 'error_count', 'errorCount', 'count', 'value']);
+  const latencyHistogramPoints = filteredLatencyHistogram.map((item, index) => ({
+    label: firstText(item, ['range', 'bucket', 'label']) !== '--' ? firstText(item, ['range', 'bucket', 'label']) : `${index + 1}`,
+    value: pointValue(item, ['count', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'value']),
+  }));
+  const errorDistributionRows = [...filteredErrorDistribution]
+    .sort((left, right) => pointValue(right, ['count', 'value', 'sla']) - pointValue(left, ['count', 'value', 'sla']))
+    .slice(0, 8);
+  const availableAccounts = filteredAccountAvailability.filter((item) => {
+    const explicit = isRecord(item) ? item.is_available ?? item.isAvailable : undefined;
+    if (explicit !== undefined) return isTruthyValue(explicit);
+    return !isTruthyValue((item as Record<string, unknown>).has_error) && !isTruthyValue((item as Record<string, unknown>).is_rate_limited);
+  }).length;
+  const unavailableAccounts = Math.max(filteredAccountAvailability.length - availableAccounts, 0);
+  const rateLimitedAccounts = filteredAccountAvailability.filter((item) => isTruthyValue((item as Record<string, unknown>).is_rate_limited ?? (item as Record<string, unknown>).isRateLimited)).length;
+  const overloadedAccounts = filteredAccountAvailability.filter((item) => isTruthyValue((item as Record<string, unknown>).is_overloaded ?? (item as Record<string, unknown>).isOverloaded)).length;
+  const accountAvailabilityPercent = filteredAccountAvailability.length > 0 ? (availableAccounts / filteredAccountAvailability.length) * 100 : 0;
   const concurrencyRows = filteredConcurrencyItems.length > 0 ? filteredConcurrencyItems : (!platformFilter && !groupFilter && (currentConcurrency || queueSize)) ? [{
     platform: firstText(concurrency, ['platform', 'provider']) !== '--' ? firstText(concurrency, ['platform', 'provider']) : 'overall',
     current_concurrency: currentConcurrency,
@@ -616,15 +778,24 @@ export default function OpsScreen() {
     snapshotQuery.refetch();
     realtimeQuery.refetch();
     concurrencyQuery.refetch();
+    userConcurrencyQuery.refetch();
+    accountAvailabilityQuery.refetch();
     tokenStatsQuery.refetch();
     throughputQuery.refetch();
+    errorTrendQuery.refetch();
+    errorDistributionQuery.refetch();
+    latencyHistogramQuery.refetch();
+    requestsQuery.refetch();
+    requestErrorsQuery.refetch();
+    upstreamErrorsQuery.refetch();
+    errorsQuery.refetch();
     systemLogsQuery.refetch();
     logsHealthQuery.refetch();
     runtimeAlertQuery.refetch();
     alertEventsQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching;
   const lastRefreshText = formatKnownTime(firstTextValue(overview, ['created_at', 'createdAt', 'updated_at', 'updatedAt']), firstTextValue(logsHealth, ['latest_log_at', 'latestLogAt']));
   const activeFilterOptions: FilterOption[] = activeFilterMenu === 'platform'
     ? platformOptions
@@ -773,8 +944,48 @@ export default function OpsScreen() {
             <InfoTile label="Redis 连接" value={`${formatCompactNumber(redisConnTotal)} / ${formatCompactNumber(redisConnIdle)}`} />
             <InfoTile label="锁键" value={formatCompactNumber(lockKeys)} />
             <InfoTile label="后台任务" value={formatCompactNumber(backgroundTasks)} />
-            <InfoTile label="告警规则" value={formatCompactNumber(enabledAlertRules)} />
             <InfoTile label="告警事件" value={formatCompactNumber(totalAlertEvents)} tone={alertCount > 0 ? 'danger' : 'default'} />
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="账号可用性" icon={ShieldCheck} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <InfoTile label="账号总数" value={formatCompactNumber(filteredAccountAvailability.length)} />
+            <InfoTile label="可用账号" value={formatCompactNumber(availableAccounts)} tone={availableAccounts > 0 ? 'success' : 'default'} />
+            <InfoTile label="不可用" value={formatCompactNumber(unavailableAccounts)} tone={unavailableAccounts > 0 ? 'danger' : 'default'} />
+            <InfoTile label="限流中" value={formatCompactNumber(rateLimitedAccounts)} tone={rateLimitedAccounts > 0 ? 'danger' : 'default'} />
+            <InfoTile label="过载中" value={formatCompactNumber(overloadedAccounts)} tone={overloadedAccounts > 0 ? 'danger' : 'default'} />
+            <InfoTile label="可用率" value={filteredAccountAvailability.length ? formatPercent(accountAvailabilityPercent) : '--'} tone={accountAvailabilityPercent >= 80 ? 'success' : filteredAccountAvailability.length ? 'danger' : 'default'} />
+          </View>
+          <MiniBar value={accountAvailabilityPercent} tone={accountAvailabilityPercent >= 80 ? 'success' : 'danger'} />
+          <View style={{ gap: 10, marginTop: 12 }}>
+            {accountAvailabilityRows.map((item, index) => {
+              const name = textOrDash(firstTextValue(item, ['account_name', 'accountName', 'name']), `账号 #${firstTextValue(item, ['account_id', 'accountId', 'id']) ?? index + 1}`);
+              const platform = textOrDash(firstTextValue(item, ['platform', 'provider']));
+              const isAvailable = isTruthyValue((item as Record<string, unknown>).is_available ?? (item as Record<string, unknown>).isAvailable);
+              const isRateLimited = isTruthyValue((item as Record<string, unknown>).is_rate_limited ?? (item as Record<string, unknown>).isRateLimited);
+              const hasError = isTruthyValue((item as Record<string, unknown>).has_error ?? (item as Record<string, unknown>).hasError) || Boolean(item.error_message);
+              const load = firstNumber(item, ['load_percentage', 'loadPercentage', 'concurrency_percentage', 'concurrencyPercentage']);
+              const currentUse = firstNumber(item, ['current_in_use', 'currentInUse', 'current_concurrency', 'currentConcurrency']);
+              const capacity = firstNumber(item, ['max_capacity', 'maxCapacity', 'total_concurrency', 'totalConcurrency']);
+
+              return (
+                <RecordCard
+                  key={`${item.id ?? firstTextValue(item, ['account_id', 'accountId']) ?? index}`}
+                  item={item}
+                  title={name}
+                  subtitle={`${platform} · 最近使用 ${formatKnownTime(item.last_used_at, item.updated_at)}`}
+                  tone={hasError || isRateLimited || !isAvailable ? 'danger' : 'success'}
+                >
+                  <InfoTile label="状态" value={hasError ? '异常' : isRateLimited ? '限流' : isAvailable ? '可用' : textOrDash(item.status)} tone={hasError || isRateLimited || !isAvailable ? 'danger' : 'success'} />
+                  <InfoTile label="占用" value={capacity > 0 ? `${formatCompactNumber(currentUse)} / ${formatCompactNumber(capacity)}` : formatCompactNumber(currentUse)} />
+                  <InfoTile label="负载" value={load ? formatPercent(load) : '--'} tone={load > 85 ? 'danger' : 'default'} />
+                  <InfoTile label="恢复" value={formatKnownTime(firstTextValue(item, ['rate_limit_reset_at', 'rateLimitResetAt', 'overload_until', 'overloadUntil']))} />
+                </RecordCard>
+              );
+            })}
+            {accountAvailabilityRows.length === 0 ? <EmptyText loading={accountAvailabilityQuery.isLoading} empty="暂无账号可用性数据。" /> : null}
           </View>
         </View>
 
@@ -804,6 +1015,28 @@ export default function OpsScreen() {
           </View>
         ) : null}
 
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="用户并发" icon={Users} />
+          <View style={{ gap: 10, marginTop: 12 }}>
+            {userConcurrencyRows.map((item, index) => {
+              const name = textOrDash(firstTextValue(item, ['username', 'user_name', 'userName', 'user_email', 'userEmail', 'email']), `用户 #${firstTextValue(item, ['user_id', 'userId', 'id']) ?? index + 1}`);
+              const current = firstNumber(item, ['current_in_use', 'currentInUse', 'current_concurrency', 'currentConcurrency']);
+              const max = firstNumber(item, ['max_capacity', 'maxCapacity', 'max_concurrency', 'maxConcurrency', 'limit']);
+              const load = firstNumber(item, ['load_percentage', 'loadPercentage', 'concurrency_percentage', 'concurrencyPercentage']);
+              const queued = firstNumber(item, ['waiting_in_queue', 'waitingInQueue', 'queue_size', 'queueSize']);
+
+              return (
+                <RecordCard key={`${item.id ?? firstTextValue(item, ['user_id', 'userId']) ?? index}`} item={item} title={name} subtitle={`并发 ${formatCompactNumber(current)} · 排队 ${formatCompactNumber(queued)}`} tone={queued > 0 || load > 85 ? 'danger' : current > 0 ? 'success' : 'default'}>
+                  <InfoTile label="并发" value={max > 0 ? `${formatCompactNumber(current)} / ${formatCompactNumber(max)}` : formatCompactNumber(current)} />
+                  <InfoTile label="负载" value={load ? formatPercent(load) : '--'} tone={load > 85 ? 'danger' : 'default'} />
+                  <InfoTile label="队列" value={formatCompactNumber(queued)} tone={queued > 0 ? 'danger' : 'default'} />
+                </RecordCard>
+              );
+            })}
+            {userConcurrencyRows.length === 0 ? <EmptyText loading={userConcurrencyQuery.isLoading} empty="暂无用户并发数据。" /> : null}
+          </View>
+        </View>
+
         {accountSwitchPoints.length > 1 ? (
           <LineTrendChart title="平均账号切换趋势" subtitle="账号路由切换随时间变化" points={accountSwitchPoints} color="#14b8a6" icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
@@ -811,6 +1044,108 @@ export default function OpsScreen() {
         {throughputPoints.length > 1 ? (
           <LineTrendChart title="吞吐趋势" subtitle="请求量随时间变化" points={throughputPoints} color="#0f766e" icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
+
+        {errorTrendPoints.length > 1 ? (
+          <LineTrendChart title="错误趋势" subtitle="错误量随时间变化" points={errorTrendPoints} color={colors.errorText} icon={AlertTriangle} formatValue={formatCompactNumber} />
+        ) : null}
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="错误分布 / 延迟桶" icon={BarChart3} />
+          <View style={{ gap: 12, marginTop: 12 }}>
+            <View style={{ gap: 8 }}>
+              <Text style={{ color: colors.subtext, fontSize: 12, fontWeight: '800' }}>错误分布</Text>
+              {errorDistributionRows.map((item, index) => {
+                const label = textOrDash(firstTextValue(item, ['error_type', 'errorType', 'error_phase', 'errorPhase', 'status_code', 'statusCode', 'severity']), `错误 #${index + 1}`);
+                const count = pointValue(item, ['count', 'value', 'sla']);
+                return (
+                  <View key={`${label}-${index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 12, padding: 10 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                      <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 12, fontWeight: '800' }}>{label}</Text>
+                      <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>{formatCompactNumber(count)}</Text>
+                    </View>
+                    <MiniBar value={errors > 0 ? (count / Math.max(errors, 1)) * 100 : 0} tone={count > 0 ? 'danger' : 'default'} />
+                  </View>
+                );
+              })}
+              {errorDistributionRows.length === 0 ? <EmptyText loading={errorDistributionQuery.isLoading} empty="暂无错误分布数据。" /> : null}
+            </View>
+            <View style={{ gap: 8 }}>
+              <Text style={{ color: colors.subtext, fontSize: 12, fontWeight: '800' }}>延迟直方图</Text>
+              {latencyHistogramPoints.slice(0, 8).map((point, index) => (
+                <View key={`${point.label}-${index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 12, padding: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    <Text numberOfLines={1} style={{ color: colors.text, flex: 1, fontSize: 12, fontWeight: '800' }}>{point.label}</Text>
+                    <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{formatCompactNumber(point.value)}</Text>
+                  </View>
+                  <MiniBar value={Math.min(point.value, 100)} />
+                </View>
+              ))}
+              {latencyHistogramPoints.length === 0 ? <EmptyText loading={latencyHistogramQuery.isLoading} empty="暂无延迟直方图数据。" /> : null}
+            </View>
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="请求明细" icon={ListChecks} />
+          <View style={{ gap: 10, marginTop: 12 }}>
+            {requestRows.map((item, index) => {
+              const title = textOrDash(firstTextValue(item, ['request_id', 'requestId', 'client_request_id', 'clientRequestId']), `请求 #${item.id ?? index + 1}`);
+              const status = textOrDash(item.status, firstTextValue(item, ['status_code', 'statusCode']));
+              const model = textOrDash(item.model, firstTextValue(item, ['requested_model', 'requestedModel', 'upstream_model', 'upstreamModel']));
+              const tokens = firstNumber(item, ['total_tokens', 'totalTokens', 'tokens']);
+              const cost = firstNumber(item, ['actual_cost', 'actualCost', 'total_cost', 'totalCost']);
+              const duration = firstNumber(item, ['duration_ms', 'durationMs', 'latency_ms', 'latencyMs']);
+              const isError = ['error', 'failed', 'failure'].includes(status.toLowerCase()) || firstNumber(item, ['status_code', 'statusCode']) >= 400;
+
+              return (
+                <RecordCard key={`${item.id ?? title}-${index}`} item={item} title={title} subtitle={`${model} · ${formatKnownTime(item.created_at, item.updated_at)}`} tone={isError ? 'danger' : 'success'}>
+                  <InfoTile label="状态" value={status} tone={isError ? 'danger' : 'success'} />
+                  <InfoTile label="Token" value={formatCompactNumber(tokens)} />
+                  <InfoTile label="成本" value={`$${cost.toFixed(4)}`} />
+                  <InfoTile label="耗时" value={formatLatency(duration)} />
+                </RecordCard>
+              );
+            })}
+            {requestRows.length === 0 ? <EmptyText loading={requestsQuery.isLoading} empty="暂无请求明细。" /> : null}
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+          <SectionTitle title="错误日志" icon={AlertTriangle} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+            <InfoTile label="请求错误" value={formatCompactNumber(firstNumber(requestErrorsQuery.data, ['total']) || requestErrorRows.length)} tone={requestErrorRows.length > 0 ? 'danger' : 'default'} />
+            <InfoTile label="上游错误" value={formatCompactNumber(firstNumber(upstreamErrorsQuery.data, ['total']) || upstreamErrorRows.length)} tone={upstreamErrorRows.length > 0 ? 'danger' : 'default'} />
+            <InfoTile label="通用错误" value={formatCompactNumber(firstNumber(errorsQuery.data, ['total']) || genericErrorRows.length)} tone={genericErrorRows.length > 0 ? 'danger' : 'default'} />
+          </View>
+          <View style={{ gap: 12, marginTop: 12 }}>
+            {([
+              ['请求错误', requestErrorRows, requestErrorsQuery.isLoading],
+              ['上游错误', upstreamErrorRows, upstreamErrorsQuery.isLoading],
+              ['通用错误', genericErrorRows, errorsQuery.isLoading],
+            ] as const).map(([groupTitle, rows, loading]) => (
+              <View key={groupTitle} style={{ gap: 8 }}>
+                <Text style={{ color: colors.subtext, fontSize: 12, fontWeight: '800' }}>{groupTitle}</Text>
+                {rows.map((item, index) => {
+                  const title = textOrDash(item.error_message, item.upstream_error, item.message, firstTextValue(item, ['error_type', 'errorType']), `${groupTitle} #${index + 1}`);
+                  const severity = textOrDash(firstTextValue(item, ['severity', 'level']));
+                  const phase = textOrDash(firstTextValue(item, ['error_phase', 'errorPhase', 'phase']));
+                  const statusCode = textOrDash(firstTextValue(item, ['status_code', 'statusCode', 'upstream_status_code', 'upstreamStatusCode']));
+                  const resolved = isTruthyValue((item as Record<string, unknown>).resolved) || Boolean(item.resolved_at);
+
+                  return (
+                    <RecordCard key={`${groupTitle}-${item.id ?? index}`} item={item} title={title} subtitle={`${phase} · ${formatKnownTime(item.created_at, item.updated_at)}`} tone={resolved ? 'success' : 'danger'}>
+                      <InfoTile label="状态码" value={statusCode} tone={statusCode !== '--' ? 'danger' : 'default'} />
+                      <InfoTile label="级别" value={severity} tone={['P0', 'P1'].includes(severity) ? 'danger' : 'default'} />
+                      <InfoTile label="模型" value={textOrDash(item.model, firstTextValue(item, ['requested_model', 'requestedModel']))} />
+                      <InfoTile label="解决" value={resolved ? '是' : '否'} tone={resolved ? 'success' : 'danger'} />
+                    </RecordCard>
+                  );
+                })}
+                {rows.length === 0 ? <EmptyText loading={loading} empty={`暂无${groupTitle}。`} /> : null}
+              </View>
+            ))}
+          </View>
+        </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="系统日志" icon={TerminalSquare} />

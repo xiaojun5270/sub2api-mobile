@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import { Stack } from 'expo-router';
-import { ChevronDown, Copy, FileCode2, KeyRound, Pencil, Plus, Power, RefreshCw, Search, Trash2 } from 'lucide-react-native';
+import { Calendar, ChevronDown, Clock, Copy, DollarSign, Gauge, KeyRound, Layers, Pencil, Plus, Power, RefreshCw, Search, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react-native';
+import type { LucideIcon } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
 import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 import { useSnapshot } from 'valtio';
@@ -383,24 +384,93 @@ function StatusPill({ status }: { status?: string }) {
   const disabled = ['disabled', 'inactive', 'revoked'].includes(normalized);
   const backgroundColor = disabled ? colors.badgeMutedBg : colors.successBg;
   const textColor = disabled ? colors.badgeMutedText : colors.success;
+  const Icon = disabled ? ShieldOff : ShieldCheck;
 
   return (
-    <View style={{ alignSelf: 'flex-start', backgroundColor, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 }}>
+    <View style={{ alignItems: 'center', alignSelf: 'flex-start', backgroundColor, borderRadius: 999, flexDirection: 'row', gap: 5, paddingHorizontal: 10, paddingVertical: 6 }}>
+      <Icon color={textColor} size={12} />
       <Text style={{ color: textColor, fontSize: 11, fontWeight: '800' }}>{status || 'active'}</Text>
     </View>
   );
 }
 
-function InfoTile({ label, value, tone = 'default' }: { label: string; value: string; tone?: 'default' | 'danger' | 'success' }) {
+function InfoTile({
+  label,
+  value,
+  icon: Icon,
+  tone = 'default',
+  compact = false,
+}: {
+  label: string;
+  value: string;
+  icon?: LucideIcon;
+  tone?: 'default' | 'danger' | 'success';
+  compact?: boolean;
+}) {
   const colors = useAppTheme();
   const backgroundColor = tone === 'danger' ? colors.errorBg : tone === 'success' ? colors.successBg : colors.mutedCard;
   const valueColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.text;
+  const iconColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.primary;
 
   return (
-    <View style={{ backgroundColor, borderRadius: 12, flex: 1, minWidth: 104, paddingHorizontal: 10, paddingVertical: 10 }}>
-      <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
-      <Text numberOfLines={1} style={{ color: valueColor, fontSize: 13, fontWeight: '800', marginTop: 5 }}>{value}</Text>
+    <View style={{ backgroundColor, borderColor: colors.border, borderRadius: 13, borderWidth: 1, flex: 1, minWidth: 104, paddingHorizontal: 10, paddingVertical: 10 }}>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 5 }}>
+        {Icon ? <Icon color={iconColor} size={12} /> : null}
+        <Text style={{ color: colors.subtext, flexShrink: 1, fontSize: 10 }}>{label}</Text>
+      </View>
+      <Text
+        numberOfLines={compact ? 2 : 1}
+        style={{
+          color: valueColor,
+          fontSize: compact ? 11 : 13,
+          fontWeight: compact ? '600' : '800',
+          lineHeight: compact ? 15 : undefined,
+          marginTop: 5,
+        }}
+      >
+        {value}
+      </Text>
     </View>
+  );
+}
+
+function ActionChip({
+  label,
+  icon: Icon,
+  tone = 'default',
+  disabled,
+  onPress,
+}: {
+  label: string;
+  icon: LucideIcon;
+  tone?: 'default' | 'success' | 'danger';
+  disabled?: boolean;
+  onPress: () => void;
+}) {
+  const colors = useAppTheme();
+  const backgroundColor = tone === 'danger' ? colors.errorBg : tone === 'success' ? colors.successBg : colors.mutedCard;
+  const foregroundColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.badgeDefaultText;
+
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={onPress}
+      style={{
+        alignItems: 'center',
+        backgroundColor,
+        borderColor: tone === 'default' ? colors.border : backgroundColor,
+        borderRadius: 999,
+        borderWidth: 1,
+        flexDirection: 'row',
+        gap: 6,
+        opacity: disabled ? 0.55 : 1,
+        paddingHorizontal: 13,
+        paddingVertical: 9,
+      }}
+    >
+      <Icon color={foregroundColor} size={13} />
+      <Text style={{ color: foregroundColor, fontSize: 12, fontWeight: '800' }}>{label}</Text>
+    </Pressable>
   );
 }
 
@@ -955,7 +1025,6 @@ export default function ApiKeysScreen() {
 
         {apiKeys.map((item: AdminApiKey) => {
           const copyId = String(item.id || item.key);
-          const ccsCopyId = `ccs-${item.id || item.key}`;
           const disabled = isDisabledStatus(item.status);
           const usage = usageByKey.get(item.id);
           const usageLastUsedAt = firstTextValue(usage, ['last_used_at', 'lastUsedAt']);
@@ -974,76 +1043,59 @@ export default function ApiKeysScreen() {
             <ListCard
               key={item.id || item.key}
               title={item.name || `Key #${item.id || '--'}`}
-              meta={`分组 ${getGroupLabel(item)} · 创建 ${formatDisplayTime(item.created_at)}`}
               icon={KeyRound}
             >
               <View style={{ gap: 12 }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 20 }}>{maskKey(item.key)}</Text>
-                    <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 4 }}>
-                      最后使用 {formatDisplayTime(lastUsedAt)} · 更新 {formatDisplayTime(item.updated_at)}
-                    </Text>
+                    <View style={{ alignItems: 'center', alignSelf: 'flex-start', backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 7, paddingHorizontal: 10, paddingVertical: 7 }}>
+                      <KeyRound color={colors.primary} size={13} />
+                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>{maskKey(item.key)}</Text>
+                    </View>
                   </View>
                   <StatusPill status={item.status} />
                 </View>
 
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  <InfoTile label="API 密钥" value={maskKey(item.key)} />
-                  <InfoTile label="分组" value={getGroupLabel(item)} />
-                  <InfoTile label="今日用量" value={formatMoney(todayCost)} />
-                  <InfoTile label="近30天用量" value={formatMoney(last30Cost)} />
-                  <InfoTile label="速率限制" value={formatRateLimit(item)} />
-                  <InfoTile label="过期时间" value={formatExpiry(item.expires_at)} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
-                  <InfoTile label="状态" value={formatStatusLabel(item.status)} tone={disabled ? 'danger' : 'success'} />
-                  <InfoTile label="上次使用时间" value={formatDisplayTime(lastUsedAt)} />
-                  <InfoTile label="创建时间" value={formatDisplayTime(item.created_at)} />
+                  <InfoTile label="API 密钥" value={maskKey(item.key)} icon={KeyRound} />
+                  <InfoTile label="分组" value={getGroupLabel(item)} icon={Layers} />
+                  <InfoTile label="今日用量" value={formatMoney(todayCost)} icon={DollarSign} />
+                  <InfoTile label="近30天用量" value={formatMoney(last30Cost)} icon={DollarSign} />
+                  <InfoTile label="速率限制" value={formatRateLimit(item)} icon={Gauge} />
+                  <InfoTile label="过期时间" value={formatExpiry(item.expires_at)} icon={Calendar} tone={isExpired(item.expires_at) ? 'danger' : 'default'} />
+                  <InfoTile label="状态" value={formatStatusLabel(item.status)} icon={disabled ? ShieldOff : ShieldCheck} tone={disabled ? 'danger' : 'success'} />
+                  <InfoTile label="上次使用时间" value={formatDisplayTime(lastUsedAt)} icon={Clock} compact />
+                  <InfoTile label="创建时间" value={formatDisplayTime(item.created_at)} icon={Calendar} compact />
                 </View>
 
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  <Pressable
-                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }}
+                  <ActionChip
+                    label={copiedKey === copyId ? '已复制' : '使用密钥'}
+                    icon={Copy}
+                    tone={copiedKey === copyId ? 'success' : 'default'}
                     onPress={() => copyKey(item)}
-                  >
-                    <Copy color={copiedKey === copyId ? colors.success : colors.badgeDefaultText} size={13} />
-                    <Text style={{ color: copiedKey === copyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
-                      {copiedKey === copyId ? '已复制' : '使用密钥'}
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 9 }}
-                    onPress={() => importCcsConfig(item)}
-                  >
-                    <FileCode2 color={copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText} size={13} />
-                    <Text style={{ color: copiedKey === ccsCopyId ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
-                      {copiedKey === ccsCopyId ? '已复制' : '导入 CCS'}
-                    </Text>
-                  </Pressable>
+                  />
                   {item.id ? (
                     <>
-                      <Pressable
+                      <ActionChip
+                        label={disabled ? '启用' : '禁用'}
+                        icon={Power}
+                        tone={disabled ? 'success' : 'default'}
                         disabled={toggleMutation.isPending}
-                        style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
                         onPress={() => toggleMutation.mutate(item)}
-                      >
-                        <Power color={disabled ? colors.success : colors.badgeDefaultText} size={13} />
-                        <Text style={{ color: disabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{disabled ? '启用' : '禁用'}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
+                      />
+                      <ActionChip
+                        label="编辑"
+                        icon={Pencil}
                         onPress={() => openEditForm(item)}
-                      >
-                        <Pencil color={colors.badgeDefaultText} size={13} />
-                        <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
-                      </Pressable>
-                      <Pressable
+                      />
+                      <ActionChip
+                        label="删除"
+                        icon={Trash2}
+                        tone="danger"
                         disabled={deleteMutation.isPending}
-                        style={{ backgroundColor: colors.errorBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', gap: 6 }}
                         onPress={() => confirmDelete(item)}
-                      >
-                        <Trash2 color={colors.errorText} size={13} />
-                        <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>删除</Text>
-                      </Pressable>
+                      />
                     </>
                   ) : null}
                 </View>

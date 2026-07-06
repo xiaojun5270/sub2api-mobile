@@ -237,6 +237,13 @@ type OpsQueryParams = {
   top_n?: number;
   search?: string;
   q?: string;
+  view?: string;
+  sort_by?: string;
+  sort_order?: string;
+  model?: string;
+  account_id?: number;
+  user_id?: number;
+  api_key_id?: number;
 };
 
 type ApiKeyRequestValue = string | number | boolean | null | string[] | undefined;
@@ -912,8 +919,52 @@ export function deleteAccount(accountId: number) {
   });
 }
 
-export function getAccountTodayStats(accountId: number) {
-  return adminFetch<AccountTodayStats>(`/api/v1/admin/accounts/${accountId}/today-stats`);
+function normalizeAccountTodayStats(source: unknown): AccountTodayStats {
+  return {
+    requests: firstNumberField(source, ['requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests']) ?? 0,
+    tokens: firstNumberField(source, ['tokens', 'token_consumed', 'tokenConsumed', 'total_tokens', 'totalTokens']) ?? 0,
+    cost: firstNumberField(source, ['cost', 'total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0,
+    standard_cost: firstNumberField(source, ['standard_cost', 'standardCost']),
+    user_cost: firstNumberField(source, ['user_cost', 'userCost']),
+  };
+}
+
+export async function getAccountTodayStats(accountId: number) {
+  const payload = await adminFetch<unknown>(`/api/v1/admin/accounts/${accountId}/today-stats`);
+  return normalizeAccountTodayStats(payload);
+}
+
+export async function getAccountTodayStatsBatch(accountIds: number[]) {
+  if (accountIds.length === 0) return {} as Record<number, AccountTodayStats>;
+
+  const payload = await adminFetch<unknown>('/api/v1/admin/accounts/today-stats/batch', {
+    method: 'POST',
+    body: JSON.stringify({ account_ids: accountIds }),
+  });
+  const source = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
+  const result: Record<number, AccountTodayStats> = {};
+
+  if (Array.isArray(source)) {
+    source.forEach((item) => {
+      const accountId = firstNumberField(item, ['account_id', 'accountId', 'id']);
+      if (accountId !== undefined) {
+        result[accountId] = normalizeAccountTodayStats(item);
+      }
+    });
+
+    return result;
+  }
+
+  if (isRecord(source)) {
+    Object.entries(source).forEach(([key, value]) => {
+      const accountId = Number(key);
+      if (Number.isFinite(accountId)) {
+        result[accountId] = normalizeAccountTodayStats(value);
+      }
+    });
+  }
+
+  return result;
 }
 
 export function getAccountStats(accountId: number, params?: { days?: number }) {
@@ -948,6 +999,20 @@ export function resetAccountQuota(accountId: number) {
   return adminFetch(`/api/v1/admin/accounts/${accountId}/reset-quota`, {
     method: 'POST',
   });
+}
+
+export function getOpenAiAccountQuota(accountId: number) {
+  return adminFetch<Record<string, unknown>>(`/api/v1/admin/openai/accounts/${accountId}/quota`);
+}
+
+export function resetOpenAiAccountQuota(accountId: number) {
+  return adminFetch<Record<string, unknown>>(`/api/v1/admin/openai/accounts/${accountId}/reset-quota`, {
+    method: 'POST',
+  });
+}
+
+export function getGrokAccountQuota(accountId: number) {
+  return adminFetch<Record<string, unknown>>(`/api/v1/admin/grok/accounts/${accountId}/quota`);
 }
 
 export function clearAccountError(accountId: number) {
@@ -1011,12 +1076,12 @@ export function getOpsConcurrency(params: Pick<OpsQueryParams, 'platform' | 'gro
   return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/concurrency', params);
 }
 
-export function getOpsUserConcurrency() {
-  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/user-concurrency');
+export function getOpsUserConcurrency(params: Pick<OpsQueryParams, 'platform' | 'group_id'> = {}) {
+  return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/user-concurrency', params);
 }
 
-export function getOpsAccountAvailability() {
-  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/account-availability');
+export function getOpsAccountAvailability(params: Pick<OpsQueryParams, 'platform' | 'group_id'> = {}) {
+  return adminFetchWithOptionalQuery<Record<string, unknown>>('/api/v1/admin/ops/account-availability', params);
 }
 
 export function getOpsOpenAiTokenStats(params: OpsQueryParams = {}) {
@@ -1027,11 +1092,11 @@ export function getOpsRuntimeAlert() {
   return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/runtime/alert');
 }
 
-export function getOpsRequests(params: { page?: number; page_size?: number; search?: string } = {}) {
+export function getOpsRequests(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/requests', params);
 }
 
-export function getOpsRequestErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
+export function getOpsRequestErrors(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/request-errors', params);
 }
 
@@ -1049,7 +1114,7 @@ export function resolveOpsError(errorId: number | string) {
   });
 }
 
-export function getOpsUpstreamErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
+export function getOpsUpstreamErrors(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/upstream-errors', params);
 }
 
@@ -1089,7 +1154,7 @@ export function getOpsErrorTrend(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<{ trend?: OpsMetricPoint[]; items?: OpsMetricPoint[] }>('/api/v1/admin/ops/dashboard/error-trend', params);
 }
 
-export function getOpsErrors(params: { page?: number; page_size?: number; status?: string; search?: string } = {}) {
+export function getOpsErrors(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/errors', params);
 }
 
