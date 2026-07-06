@@ -13,6 +13,7 @@ type ScreenShellProps = PropsWithChildren<{
   icon?: LucideIcon;
   titleAside?: ReactNode;
   right?: ReactNode;
+  subtitleLines?: number;
   variant?: 'card' | 'minimal';
   scroll?: boolean;
   bottomInsetClassName?: string;
@@ -29,8 +30,9 @@ function ScreenHeader({
   icon,
   titleAside,
   right,
+  subtitleLines = 1,
   variant,
-}: Pick<ScreenShellProps, 'title' | 'subtitle' | 'icon' | 'titleAside' | 'right' | 'variant'>) {
+}: Pick<ScreenShellProps, 'title' | 'subtitle' | 'icon' | 'titleAside' | 'right' | 'subtitleLines' | 'variant'>) {
   const colors = useAppTheme();
 
   if (variant === 'minimal') {
@@ -44,7 +46,7 @@ function ScreenHeader({
               {titleAside}
             </View>
             {subtitle ? (
-              <Text numberOfLines={1} style={{ marginTop: 4, color: colors.subtext, fontSize: 11, lineHeight: 16 }}>
+              <Text numberOfLines={subtitleLines} style={{ marginTop: 4, color: colors.subtext, fontSize: 11, lineHeight: 16 }}>
                 {subtitle}
               </Text>
             ) : null}
@@ -65,7 +67,7 @@ function ScreenHeader({
           {icon ? <IconBadge icon={icon} containerSize={40} size={19} /> : null}
           <View className="flex-1">
             <Text style={{ color: colors.text, fontSize: 24, fontWeight: '700' }}>{title}</Text>
-            <Text numberOfLines={1} style={{ marginTop: 4, color: colors.subtext, fontSize: 12, lineHeight: 16 }}>
+            <Text numberOfLines={subtitleLines} style={{ marginTop: 4, color: colors.subtext, fontSize: 12, lineHeight: 16 }}>
               {subtitle}
             </Text>
           </View>
@@ -82,6 +84,7 @@ export function ScreenShell({
   icon,
   titleAside,
   right,
+  subtitleLines = 1,
   children,
   variant = 'card',
   scroll = true,
@@ -98,7 +101,7 @@ export function ScreenShell({
     return (
       <SafeAreaView edges={safeAreaEdges} style={{ flex: 1, backgroundColor: colors.page }}>
         <View className={`flex-1 ${horizontalInsetClassName} ${bottomInsetClassName}`}>
-          <ScreenHeader title={title} subtitle={subtitle} icon={icon} titleAside={titleAside} right={right} variant={variant} />
+          <ScreenHeader title={title} subtitle={subtitle} icon={icon} titleAside={titleAside} right={right} subtitleLines={subtitleLines} variant={variant} />
           <View className={`flex-1 ${contentGapClassName}`}>{children}</View>
         </View>
       </SafeAreaView>
@@ -113,7 +116,7 @@ export function ScreenShell({
         refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} /> : undefined}
       >
         <View className={`${horizontalInsetClassName} ${bottomInsetClassName}`}>
-          <ScreenHeader title={title} subtitle={subtitle} icon={icon} titleAside={titleAside} right={right} variant={variant} />
+          <ScreenHeader title={title} subtitle={subtitle} icon={icon} titleAside={titleAside} right={right} subtitleLines={subtitleLines} variant={variant} />
           <View className={contentGapClassName}>{children}</View>
         </View>
       </ScrollView>

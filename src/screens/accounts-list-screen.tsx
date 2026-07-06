@@ -50,11 +50,11 @@ import {
 } from '@/src/services/admin';
 import type { AccountTodayStats, AdminAccount } from '@/src/types/admin';
 
-type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error';
+type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error' | 'limited';
 type UsageSort = 'usage-desc' | 'usage-asc';
 type AccountVisualStatus = {
   filterKey: AccountStatusFilter;
-  label: '正常' | '暂停' | '异常';
+  label: '正常' | '暂停' | '异常' | '限流';
   badgeTone: 'success' | 'muted' | 'danger';
 };
 
@@ -696,10 +696,36 @@ function getAccountError(account: AdminAccount) {
   return Boolean(account.status === 'error' || account.error_message);
 }
 
+function hasFutureTime(value?: string | null) {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  return !Number.isNaN(time) && time > Date.now();
+}
+
+function getAccountRateLimited(account: AdminAccount) {
+  const normalizedStatus = `${account.status ?? ''}`.toLowerCase();
+  const message = `${account.error_message ?? ''}`.toLowerCase();
+  const extraLimitedUntil = getExtraString(account, ['rate_limit_reset_at', 'rateLimitResetAt', 'temp_unschedulable_until', 'tempUnschedulableUntil']);
+
+  return (
+    ['rate_limited', 'rate-limited', 'rate_limit', 'limited', 'throttled', 'too_many_requests'].includes(normalizedStatus)
+    || hasFutureTime(account.rate_limit_reset_at)
+    || hasFutureTime(account.temp_unschedulable_until)
+    || hasFutureTime(extraLimitedUntil)
+    || message.includes('rate limit')
+    || message.includes('rate_limit')
+    || message.includes('429')
+    || message.includes('限流')
+  );
+}
+
 function getAccountVisualStatus(account: AdminAccount): AccountVisualStatus {
   const normalizedStatus = `${account.status ?? ''}`.toLowerCase();
   const isPausedStatus = ['inactive', 'disabled', 'paused', 'stop', 'stopped'].includes(normalizedStatus);
 
+  if (getAccountRateLimited(account)) {
+    return { filterKey: 'limited', label: '限流', badgeTone: 'muted' };
+  }
   if (getAccountError(account)) {
     return { filterKey: 'error', label: '异常', badgeTone: 'danger' };
   }
@@ -890,6 +916,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       if (filter === 'active') return visualStatus.filterKey === 'active';
       if (filter === 'paused') return visualStatus.filterKey === 'paused';
       if (filter === 'error') return visualStatus.filterKey === 'error';
+      if (filter === 'limited') return visualStatus.filterKey === 'limited';
       return true;
     });
 
@@ -1126,7 +1153,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     const errors = items.filter((item) => getAccountVisualStatus(item).filterKey === 'error').length;
     const paused = items.filter((item) => getAccountVisualStatus(item).filterKey === 'paused').length;
     const active = items.filter((item) => getAccountVisualStatus(item).filterKey === 'active').length;
-    return { total, active, paused, errors };
+    const limited = items.filter((item) => getAccountVisualStatus(item).filterKey === 'limited').length;
+    return { total, active, paused, errors, limited };
   }, [items]);
 
   const listHeader = useMemo(
@@ -1197,6 +1225,25 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </Pressable>
               );
             })}
+            <Pressable
+              onPress={() => setFilter('limited')}
+              style={{
+                alignItems: 'center',
+                backgroundColor: filter === 'limited' ? colors.primary : colors.mutedCard,
+                borderColor: filter === 'limited' ? colors.primary : colors.border,
+                borderRadius: 999,
+                borderWidth: 1,
+                flexDirection: 'row',
+                gap: 6,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+              }}
+            >
+              <Gauge color={filter === 'limited' ? colors.primaryText : colors.badgeDefaultText} size={13} />
+              <Text style={{ color: filter === 'limited' ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>
+                限流 {summary.limited}
+              </Text>
+            </Pressable>
           </View>
 
           <View className="mt-3 flex-row gap-2">
@@ -1253,7 +1300,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </View>
       </View>
     ),
-    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, filter, filteredItems, summary.active, summary.errors, summary.paused, summary.total, usageSort]
+    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, filter, filteredItems, summary.active, summary.errors, summary.limited, summary.paused, summary.total, usageSort]
   );
 
   const renderItem = useCallback(
@@ -1263,7 +1310,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       const statusText = visualStatus.label;
       const todayStats = todayByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0, standardCost: 0, userCost: 0 };
       const totalStats = totalByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0 };
-      const nextSchedulable = visualStatus.filterKey === 'paused';
+      const nextSchedulable = visualStatus.filterKey === 'paused' || (visualStatus.filterKey === 'limited' && account.schedulable === false);
       const toggleLabel = nextSchedulable ? '恢复' : '暂停';
       const statusDisabled = ['disabled', 'inactive', 'paused'].includes(`${account.status || ''}`.toLowerCase());
       const nextEnabled = statusDisabled;
@@ -1361,103 +1408,107 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </View>
               ) : null}
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 6 }}
-                  disabled={isTestingCurrent}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    setTestingAccountId(account.id);
-                    testMutation.mutate({ accountId: account.id, modelId: selectedModel }, {
-                      onSuccess: () => {
-                        setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: selectedModelLabel ? `测试成功：${selectedModelLabel}` : '测试成功' }));
-                      },
-                      onError: (error) => {
-                        const message = error instanceof Error && error.message ? error.message : '测试失败';
-                        setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: message }));
-                      },
-                      onSettled: () => {
-                        setTestingAccountId((current) => (current === account.id ? null : current));
-                      },
-                    });
-                  }}
-                >
-                  <Activity color={colors.primaryText} size={13} />
-                  <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
-                </Pressable>
-                <Pressable
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    startEditAccount(account);
-                  }}
-                >
-                  <Pencil color={colors.badgeDefaultText} size={13} />
-                  <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
-                </Pressable>
-                <Pressable
-                  disabled={accountStatusMutation.isPending}
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    accountStatusMutation.mutate({ account, enabled: nextEnabled });
-                  }}
-                >
-                  <Power color={nextEnabled ? colors.success : colors.badgeDefaultText} size={13} />
-                  <Text style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
-                </Pressable>
-                <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 6 }}
-                  disabled={isTogglingCurrent}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    setTogglingAccountId(account.id);
-                    toggleMutation.mutate({
-                      accountId: account.id,
-                      schedulable: nextSchedulable,
-                    }, {
-                      onSettled: () => {
-                        setTogglingAccountId((current) => (current === account.id ? null : current));
-                      },
-                    });
-                  }}
-                >
-                  {nextSchedulable ? <CircleCheck color={colors.success} size={13} /> : <Clock3 color={colors.badgeDefaultText} size={13} />}
-                  <Text style={{ color: nextSchedulable ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
-                </Pressable>
-                <Pressable
-                  disabled={accountDeleteMutation.isPending}
-                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    confirmDeleteAccount(account);
-                  }}
-                >
-                  <Trash2 color={colors.errorText} size={13} />
-                  <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>删除</Text>
-                </Pressable>
-                <Pressable
-                  style={{
-                    alignItems: 'center',
-                    backgroundColor: selectedModel ? colors.successBg : colors.mutedCard,
-                    borderRadius: 999,
-                    flex: 1,
-                    flexDirection: 'row',
-                    gap: 6,
-                    minWidth: 148,
-                    paddingHorizontal: 12,
-                    paddingVertical: 6,
-                  }}
-                  onPress={(event) => {
-                    event.stopPropagation();
-                    void toggleAccountModelPicker(account);
-                  }}
-                >
-                  <Cpu color={selectedModel ? colors.success : colors.badgeDefaultText} size={13} />
-                  <Text numberOfLines={1} style={{ color: selectedModel ? colors.success : colors.badgeDefaultText, flex: 1, fontSize: 12, fontWeight: '800' }}>
-                    {isModelLoading ? '模型加载中' : selectedModelLabel ? `模型 ${selectedModelLabel}` : '选择模型'}
-                  </Text>
-                </Pressable>
+              <View style={{ gap: 6 }}>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <Pressable
+                    style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 }}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      startEditAccount(account);
+                    }}
+                  >
+                    <Pencil color={colors.badgeDefaultText} size={13} />
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>编辑</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={accountStatusMutation.isPending}
+                    style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 }}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      accountStatusMutation.mutate({ account, enabled: nextEnabled });
+                    }}
+                  >
+                    <Power color={nextEnabled ? colors.success : colors.badgeDefaultText} size={13} />
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 }}
+                    disabled={isTogglingCurrent}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setTogglingAccountId(account.id);
+                      toggleMutation.mutate({
+                        accountId: account.id,
+                        schedulable: nextSchedulable,
+                      }, {
+                        onSettled: () => {
+                          setTogglingAccountId((current) => (current === account.id ? null : current));
+                        },
+                      });
+                    }}
+                  >
+                    {nextSchedulable ? <CircleCheck color={colors.success} size={13} /> : <Clock3 color={colors.badgeDefaultText} size={13} />}
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: nextSchedulable ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={accountDeleteMutation.isPending}
+                    style={{ alignItems: 'center', backgroundColor: colors.errorBg, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 }}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      confirmDeleteAccount(account);
+                    }}
+                  >
+                    <Trash2 color={colors.errorText} size={13} />
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>删除</Text>
+                  </Pressable>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <Pressable
+                    style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', minWidth: 0, paddingHorizontal: 8, paddingVertical: 6 }}
+                    disabled={isTestingCurrent}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setTestingAccountId(account.id);
+                      testMutation.mutate({ accountId: account.id, modelId: selectedModel }, {
+                        onSuccess: () => {
+                          setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: selectedModelLabel ? `测试成功：${selectedModelLabel}` : '测试成功' }));
+                        },
+                        onError: (error) => {
+                          const message = error instanceof Error && error.message ? error.message : '测试失败';
+                          setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: message }));
+                        },
+                        onSettled: () => {
+                          setTestingAccountId((current) => (current === account.id ? null : current));
+                        },
+                      });
+                    }}
+                  >
+                    <Activity color={colors.primaryText} size={13} />
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={{
+                      alignItems: 'center',
+                      backgroundColor: selectedModel ? colors.successBg : colors.mutedCard,
+                      borderRadius: 999,
+                      flex: 3,
+                      flexDirection: 'row',
+                      gap: 6,
+                      minWidth: 0,
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
+                    }}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      void toggleAccountModelPicker(account);
+                    }}
+                  >
+                    <Cpu color={selectedModel ? colors.success : colors.badgeDefaultText} size={13} />
+                    <Text numberOfLines={1} style={{ color: selectedModel ? colors.success : colors.badgeDefaultText, flex: 1, fontSize: 12, fontWeight: '800' }}>
+                      {isModelLoading ? '模型加载中' : selectedModelLabel ? `模型 ${selectedModelLabel}` : '选择模型'}
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
 
               {isModelPickerOpen ? (
@@ -1538,6 +1589,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       titleAside={(
         <Text style={{ color: colors.subtext, fontSize: 11 }}>更接近网页后台的账号视图。</Text>
       )}
+      subtitleLines={2}
       variant="minimal"
       scroll={false}
       safeAreaEdges={safeAreaEdges}
