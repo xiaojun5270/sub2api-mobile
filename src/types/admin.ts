@@ -221,8 +221,8 @@ export type AccountTodayStats = {
   requests: number;
   tokens: number;
   cost: number;
-  standard_cost?: number;
-  user_cost?: number;
+  standard_cost: number;
+  user_cost: number;
 };
 
 export type AdminAccount = {

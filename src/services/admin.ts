@@ -43,13 +43,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function parseNumberLike(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const normalized = trimmed.replace(/,/g, '').replace(/％$/, '%');
+  const direct = normalized.replace(/%$/, '');
+  if (Number.isFinite(Number(direct))) return Number(direct);
+
+  const match = normalized.match(/[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?\s*([kKmMbBtT万亿])?/);
+  if (!match) return undefined;
+
+  const number = Number(match[0].replace(/[^0-9.+\-eE]/g, ''));
+  if (!Number.isFinite(number)) return undefined;
+
+  const suffix = match[1]?.toLowerCase();
+  const multiplier =
+    suffix === 'k' ? 1_000
+    : suffix === 'm' ? 1_000_000
+    : suffix === 'b' ? 1_000_000_000
+    : suffix === 't' ? 1_000_000_000_000
+    : suffix === '万' ? 10_000
+    : suffix === '亿' ? 100_000_000
+    : 1;
+
+  return number * multiplier;
+}
+
 function firstNumberField(source: unknown, keys: string[]): number | undefined {
   if (!isRecord(source)) return undefined;
 
   for (const key of keys) {
     const value = source[key];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    if (typeof value === 'string') {
+      const parsed = parseNumberLike(value);
+      if (parsed !== undefined) return parsed;
+    }
   }
 
   for (const key of ['data', 'payload', 'result', 'response']) {
@@ -920,12 +950,106 @@ export function deleteAccount(accountId: number) {
 }
 
 function normalizeAccountTodayStats(source: unknown): AccountTodayStats {
+  const cost = firstNumberField(source, ['cost']) ?? 0;
+
   return {
-    requests: firstNumberField(source, ['requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests']) ?? 0,
-    tokens: firstNumberField(source, ['tokens', 'token_consumed', 'tokenConsumed', 'total_tokens', 'totalTokens']) ?? 0,
-    cost: firstNumberField(source, ['cost', 'total_cost', 'totalCost', 'actual_cost', 'actualCost']) ?? 0,
-    standard_cost: firstNumberField(source, ['standard_cost', 'standardCost']),
-    user_cost: firstNumberField(source, ['user_cost', 'userCost']),
+    requests: firstNumberField(source, ['requests']) ?? 0,
+    tokens: firstNumberField(source, ['tokens']) ?? 0,
+    cost,
+    standard_cost: firstNumberField(source, ['standard_cost']) ?? 0,
+    user_cost: firstNumberField(source, ['user_cost']) ?? 0,
+  };
+}
+
+function hasAccountTodayStatsShape(value: unknown) {
+  if (!isRecord(value)) return false;
+  return firstNumberField(value, [
+    'account_id',
+    'accountId',
+    'requests',
+    'tokens',
+    'cost',
+    'standard_cost',
+    'user_cost',
+  ]) !== undefined;
+}
+
+function extractAccountTodayStatsRows(payload: unknown): Record<string, unknown>[] {
+  const items = extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'accounts', 'records', 'rows']);
+  if (items.length > 0) return items;
+  if (!isRecord(payload)) return [];
+
+  for (const key of ['data', 'stats', 'items', 'accounts', 'records', 'rows', 'payload', 'result', 'response']) {
+    const nested = extractAccountTodayStatsRows(payload[key]);
+    if (nested.length > 0) return nested;
+  }
+
+  return Object.entries(payload)
+    .filter(([, value]) => hasAccountTodayStatsShape(value))
+    .map(([key, value]) => {
+      const row = value as Record<string, unknown>;
+      const accountId = firstNumberField(row, ['account_id', 'accountId', 'id']) ?? Number(key);
+      return Number.isFinite(accountId) && accountId > 0 && row.account_id === undefined
+        ? { ...row, account_id: accountId }
+        : row;
+    });
+}
+
+function normalizeUsageStats(payload: unknown): UsageStats {
+  const directRequests = firstNumberField(payload, ['total_requests', 'totalRequests']);
+  const directTokens = firstNumberField(payload, ['total_tokens', 'totalTokens']);
+  const directCost = firstNumberField(payload, ['total_account_cost', 'totalAccountCost', 'total_actual_cost', 'totalActualCost', 'total_cost', 'totalCost']);
+
+  if (directRequests !== undefined || directTokens !== undefined || directCost !== undefined) {
+    return {
+      total_requests: directRequests ?? firstNumberField(payload, ['requests', 'request_count', 'requestCount']) ?? 0,
+      total_tokens: directTokens ?? firstNumberField(payload, ['tokens', 'token_consumed', 'tokenConsumed']) ?? 0,
+      total_input_tokens: firstNumberField(payload, ['total_input_tokens', 'totalInputTokens', 'input_tokens', 'inputTokens']),
+      total_output_tokens: firstNumberField(payload, ['total_output_tokens', 'totalOutputTokens', 'output_tokens', 'outputTokens']),
+      total_cost: directCost ?? firstNumberField(payload, ['cost', 'actual_cost', 'actualCost']) ?? 0,
+      total_actual_cost: firstNumberField(payload, ['total_actual_cost', 'totalActualCost', 'actual_cost', 'actualCost']),
+      total_account_cost: firstNumberField(payload, ['total_account_cost', 'totalAccountCost']),
+      average_duration_ms: firstNumberField(payload, ['average_duration_ms', 'averageDurationMs', 'avg_duration_ms', 'avgDurationMs']),
+    };
+  }
+
+  const rows = extractItems<Record<string, unknown>>(payload, ['stats', 'items', 'data', 'usage', 'usage_logs', 'usageLogs', 'records', 'rows']);
+  const totals = rows.reduce<{
+    requests: number;
+    tokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    cost: number;
+    duration: number;
+    durationCount: number;
+  }>((current, row) => {
+    const inputTokens = firstNumberField(row, ['input_tokens', 'inputTokens']) ?? 0;
+    const outputTokens = firstNumberField(row, ['output_tokens', 'outputTokens']) ?? 0;
+    const cacheCreationTokens = firstNumberField(row, ['cache_creation_tokens', 'cacheCreationTokens']) ?? 0;
+    const cacheReadTokens = firstNumberField(row, ['cache_read_tokens', 'cacheReadTokens']) ?? 0;
+    const rowTokens = firstNumberField(row, ['total_tokens', 'totalTokens', 'tokens', 'token_consumed', 'tokenConsumed'])
+      ?? inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens;
+
+    return {
+      requests: current.requests + (firstNumberField(row, ['total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount', 'success_count', 'successCount']) ?? 0),
+      tokens: current.tokens + rowTokens,
+      inputTokens: current.inputTokens + inputTokens,
+      outputTokens: current.outputTokens + outputTokens,
+      cost: current.cost + (firstNumberField(row, ['total_account_cost', 'totalAccountCost', 'total_actual_cost', 'totalActualCost', 'total_cost', 'totalCost', 'actual_cost', 'actualCost', 'cost']) ?? 0),
+      duration: current.duration + (firstNumberField(row, ['duration_ms', 'durationMs', 'average_duration_ms', 'averageDurationMs', 'avg_duration_ms', 'avgDurationMs']) ?? 0),
+      durationCount: current.durationCount + (firstNumberField(row, ['duration_ms', 'durationMs', 'average_duration_ms', 'averageDurationMs', 'avg_duration_ms', 'avgDurationMs']) !== undefined ? 1 : 0),
+    };
+  }, { requests: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cost: 0, duration: 0, durationCount: 0 });
+
+  return {
+    total_requests: totals.requests,
+    total_tokens: totals.tokens,
+    total_input_tokens: totals.inputTokens,
+    total_output_tokens: totals.outputTokens,
+    total_cost: totals.cost,
+    total_actual_cost: totals.cost,
+    total_account_cost: totals.cost,
+    average_duration_ms: totals.durationCount > 0 ? totals.duration / totals.durationCount : undefined,
   };
 }
 
@@ -941,34 +1065,39 @@ export async function getAccountTodayStatsBatch(accountIds: number[]) {
     method: 'POST',
     body: JSON.stringify({ account_ids: accountIds }),
   });
-  const source = isRecord(payload) && isRecord(payload.data) ? payload.data : payload;
   const result: Record<number, AccountTodayStats> = {};
+  extractAccountTodayStatsRows(payload).forEach((item) => {
+    const accountId = firstNumberField(item, ['account_id', 'accountId', 'id']);
+    if (accountId !== undefined) {
+      result[accountId] = normalizeAccountTodayStats(item);
+    }
+  });
 
-  if (Array.isArray(source)) {
-    source.forEach((item) => {
-      const accountId = firstNumberField(item, ['account_id', 'accountId', 'id']);
-      if (accountId !== undefined) {
-        result[accountId] = normalizeAccountTodayStats(item);
-      }
-    });
-
-    return result;
-  }
-
-  if (isRecord(source)) {
-    Object.entries(source).forEach(([key, value]) => {
-      const accountId = Number(key);
-      if (Number.isFinite(accountId)) {
-        result[accountId] = normalizeAccountTodayStats(value);
-      }
+  const missingIds = accountIds.filter((accountId) => !result[accountId]);
+  if (missingIds.length > 0) {
+    const fallbackEntries = await Promise.all(
+      missingIds.map(async (accountId) => {
+        const stats = await getAccountTodayStats(accountId).catch(() => ({
+          requests: 0,
+          tokens: 0,
+          cost: 0,
+          standard_cost: 0,
+          user_cost: 0,
+        }));
+        return [accountId, stats] as const;
+      })
+    );
+    fallbackEntries.forEach(([accountId, stats]) => {
+      result[accountId] = stats;
     });
   }
 
   return result;
 }
 
-export function getAccountStats(accountId: number, params?: { days?: number }) {
-  return adminFetch<UsageStats>(`/api/v1/admin/accounts/${accountId}/stats${buildQuery(params ?? {})}`);
+export async function getAccountStats(accountId: number, params?: { days?: number }) {
+  const payload = await adminFetch<unknown>(`/api/v1/admin/accounts/${accountId}/stats${buildQuery(params ?? {})}`);
+  return normalizeUsageStats(payload);
 }
 
 export function getAccountUsage(accountId: number) {

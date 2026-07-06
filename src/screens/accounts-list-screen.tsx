@@ -1,6 +1,28 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { Gauge, Hash, KeyRound, Pencil, Power, RotateCcw, Search, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react-native';
+import {
+  Activity,
+  AlertCircle,
+  ArrowDownUp,
+  CircleCheck,
+  Clock3,
+  Cpu,
+  DollarSign,
+  Gauge,
+  Hash,
+  KeyRound,
+  Pencil,
+  Power,
+  RefreshCw,
+  RotateCcw,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+  UserRound,
+  Wallet,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import type { Edge } from 'react-native-safe-area-context';
@@ -26,7 +48,7 @@ import {
   testAccount,
   updateAccount,
 } from '@/src/services/admin';
-import type { AdminAccount } from '@/src/types/admin';
+import type { AccountTodayStats, AdminAccount } from '@/src/types/admin';
 
 type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error';
 type UsageSort = 'usage-desc' | 'usage-asc';
@@ -40,6 +62,8 @@ type AccountTodaySummary = {
   requests: number;
   tokens: number;
   cost: number;
+  standardCost: number;
+  userCost: number;
 };
 
 type AccountTotalSummary = {
@@ -59,6 +83,8 @@ type AccountQuotaPanelState = {
   queriedAt?: string;
   error?: string;
 };
+
+type AccountStatTone = 'requests' | 'tokens' | 'accountCost' | 'userCost' | 'totalCost';
 
 type CodexWindowUsage = {
   label: '5h' | '7d';
@@ -82,15 +108,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function parseNumberLike(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const normalized = trimmed.replace(/,/g, '').replace(/％$/, '%');
+  const direct = normalized.replace(/%$/, '');
+  if (Number.isFinite(Number(direct))) return Number(direct);
+
+  const match = normalized.match(/[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?\s*([kKmMbBtT万亿])?/);
+  if (!match) return undefined;
+
+  const number = Number(match[0].replace(/[^0-9.+\-eE]/g, ''));
+  if (!Number.isFinite(number)) return undefined;
+
+  const suffix = match[1]?.toLowerCase();
+  const multiplier =
+    suffix === 'k' ? 1_000
+    : suffix === 'm' ? 1_000_000
+    : suffix === 'b' ? 1_000_000_000
+    : suffix === 't' ? 1_000_000_000_000
+    : suffix === '万' ? 10_000
+    : suffix === '亿' ? 100_000_000
+    : 1;
+
+  return number * multiplier;
+}
+
 function firstNumberValue(source: unknown, keys: string[]) {
   if (!isRecord(source)) return undefined;
 
   for (const key of keys) {
     const value = source[key];
     if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim()) {
-      const normalized = value.trim().replace(/%$/, '');
-      if (Number.isFinite(Number(normalized))) return Number(normalized);
+    if (typeof value === 'string') {
+      const parsed = parseNumberLike(value);
+      if (parsed !== undefined) return parsed;
     }
   }
 
@@ -111,6 +164,10 @@ function firstStringValue(source: unknown, keys: string[]) {
 
 function getExtraNumber(account: AdminAccount, keys: string[]) {
   return firstNumberValue(account.extra, keys);
+}
+
+function getAccountNumber(account: AdminAccount, keys: string[]) {
+  return firstNumberValue(account as unknown, keys) ?? getExtraNumber(account, keys);
 }
 
 function getExtraString(account: AdminAccount, keys: string[]) {
@@ -257,8 +314,91 @@ function formatMoneyValue(value?: number) {
   return `$${Number.isFinite(number) ? number.toFixed(2) : '0.00'}`;
 }
 
+function formatReqValue(value?: number) {
+  return `${formatCompactNumber(Number(value ?? 0))} req`;
+}
+
+function formatPrefixedMoney(prefix: 'A' | 'U', value?: number) {
+  return `${prefix} ${formatMoneyValue(value)}`;
+}
+
+function getAccountStatPalette(colors: AppTheme, tone: AccountStatTone) {
+  const dark = colors.mode === 'dark';
+  const palettes: Record<AccountStatTone, { background: string; border: string; iconBg: string; icon: string; glow: string }> = {
+    requests: dark
+      ? { background: '#062235', border: '#164863', iconBg: '#0b3348', icon: '#38bdf8', glow: '#38bdf8' }
+      : { background: '#edf8ff', border: '#c7eaff', iconBg: '#dcf3ff', icon: '#0284c7', glow: '#7dd3fc' },
+    tokens: dark
+      ? { background: '#102033', border: '#263a5f', iconBg: '#172b47', icon: '#93c5fd', glow: '#60a5fa' }
+      : { background: '#f1f6ff', border: '#d8e7ff', iconBg: '#e4efff', icon: '#2563eb', glow: '#93c5fd' },
+    accountCost: dark
+      ? { background: '#2d230b', border: '#5a4215', iconBg: '#3a2d0e', icon: '#fbbf24', glow: '#fbbf24' }
+      : { background: '#fff8e8', border: '#f8e2aa', iconBg: '#fff0c2', icon: '#b7791f', glow: '#facc15' },
+    userCost: dark
+      ? { background: '#211a3a', border: '#403366', iconBg: '#2b2249', icon: '#c4b5fd', glow: '#a78bfa' }
+      : { background: '#f7f3ff', border: '#e4d8ff', iconBg: '#eee7ff', icon: '#7c3aed', glow: '#c4b5fd' },
+    totalCost: dark
+      ? { background: '#082a24', border: '#155347', iconBg: '#0d3a32', icon: '#5eead4', glow: '#2dd4bf' }
+      : { background: '#edfbf7', border: '#c6f1e5', iconBg: '#d8f8ef', icon: '#0f766e', glow: '#5eead4' },
+  };
+
+  return palettes[tone];
+}
+
+function AccountStatTile({
+  colors,
+  icon: Icon,
+  label,
+  tone,
+  value,
+}: {
+  colors: AppTheme;
+  icon: LucideIcon;
+  label: string;
+  tone: AccountStatTone;
+  value: string;
+}) {
+  const palette = getAccountStatPalette(colors, tone);
+
+  return (
+    <View
+      style={{
+        backgroundColor: palette.background,
+        borderColor: palette.border,
+        borderRadius: 16,
+        borderWidth: 1,
+        flex: 1,
+        minHeight: 86,
+        minWidth: 132,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        shadowColor: palette.glow,
+        shadowOffset: { height: 6, width: 0 },
+        shadowOpacity: colors.mode === 'dark' ? 0.12 : 0.16,
+        shadowRadius: 12,
+      }}
+    >
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
+        <View style={{ alignItems: 'center', backgroundColor: palette.iconBg, borderRadius: 999, height: 28, justifyContent: 'center', width: 28 }}>
+          <Icon color={palette.icon} size={15} />
+        </View>
+        <Text numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 11, fontWeight: '700' }}>
+          {label}
+        </Text>
+      </View>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={{ color: colors.text, fontSize: 19, fontWeight: '800', marginTop: 10 }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
 function getAccountInlineTotalStats(account: AdminAccount): AccountTotalSummary | undefined {
-  const cost = getExtraNumber(account, [
+  const cost = getAccountNumber(account, [
     'total_account_cost',
     'total_actual_cost',
     'total_cost',
@@ -268,8 +408,8 @@ function getAccountInlineTotalStats(account: AdminAccount): AccountTotalSummary 
     'usage_total',
     'lifetime_cost',
   ]);
-  const requests = getExtraNumber(account, ['total_requests', 'request_count_total', 'requests_total']);
-  const tokens = getExtraNumber(account, ['total_tokens', 'token_consumed_total', 'tokens_total']);
+  const requests = getAccountNumber(account, ['total_requests', 'request_count_total', 'requests_total']);
+  const tokens = getAccountNumber(account, ['total_tokens', 'token_consumed_total', 'tokens_total']);
 
   if (cost === undefined && requests === undefined && tokens === undefined) return undefined;
 
@@ -277,6 +417,16 @@ function getAccountInlineTotalStats(account: AdminAccount): AccountTotalSummary 
     cost: cost ?? 0,
     requests: requests ?? 0,
     tokens: tokens ?? 0,
+  };
+}
+
+function normalizeTodaySummary(value: unknown): AccountTodaySummary {
+  return {
+    requests: firstNumberValue(value, ['requests']) ?? 0,
+    tokens: firstNumberValue(value, ['tokens']) ?? 0,
+    cost: firstNumberValue(value, ['cost']) ?? 0,
+    standardCost: firstNumberValue(value, ['standard_cost']) ?? 0,
+    userCost: firstNumberValue(value, ['user_cost']) ?? 0,
   };
 }
 
@@ -529,7 +679,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const items = accountsQuery.data?.items ?? [];
   const accountIds = useMemo(() => items.map((account) => account.id), [items]);
   const accountIdsKey = accountIds.join(',');
-  const todayStatsQuery = useQuery({
+  const todayStatsQuery = useQuery<Record<number, AccountTodayStats>>({
     queryKey: ['account-today-stats-batch', accountIdsKey],
     enabled: accountIds.length > 0,
     staleTime: 60_000,
@@ -539,12 +689,18 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       } catch {
         const entries = await Promise.all(
           accountIds.map(async (accountId) => {
-            const stats = await getAccountTodayStats(accountId).catch(() => ({ requests: 0, tokens: 0, cost: 0 }));
+            const stats = await getAccountTodayStats(accountId).catch(() => ({
+              requests: 0,
+              tokens: 0,
+              cost: 0,
+              standard_cost: 0,
+              user_cost: 0,
+            }));
             return [accountId, stats] as const;
           })
         );
 
-        return Object.fromEntries(entries) as Record<number, AccountTodaySummary>;
+        return Object.fromEntries(entries) as Record<number, AccountTodayStats>;
       }
     },
   });
@@ -578,12 +734,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     const next = new Map<number, AccountTodaySummary>();
     items.forEach((account) => {
       const result = todayStatsQuery.data?.[account.id];
-      const fromStatsCost = typeof result?.cost === 'number' && Number.isFinite(result.cost) ? result.cost : undefined;
-      const fromExtra = typeof account.extra?.today_cost === 'number' ? account.extra.today_cost : undefined;
-      const cost = fromStatsCost ?? fromExtra ?? 0;
-      const requests = typeof result?.requests === 'number' && Number.isFinite(result.requests) ? result.requests : 0;
-      const tokens = typeof result?.tokens === 'number' && Number.isFinite(result.tokens) ? result.tokens : 0;
-      next.set(account.id, { requests, tokens, cost });
+      next.set(account.id, normalizeTodaySummary(result));
     });
     return next;
   }, [items, todayStatsQuery.data]);
@@ -813,9 +964,32 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const listHeader = useMemo(
     () => (
       <View className="pb-2">
-        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 10 }}>
-          <View style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 18, flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12 }}>
-            <Search color={colors.subtext} size={18} />
+        <View
+          style={{
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            borderRadius: 20,
+            borderWidth: 1,
+            padding: 10,
+            shadowColor: colors.primary,
+            shadowOffset: { height: 8, width: 0 },
+            shadowOpacity: colors.mode === 'dark' ? 0.1 : 0.08,
+            shadowRadius: 18,
+          }}
+        >
+          <View
+            style={{
+              alignItems: 'center',
+              backgroundColor: colors.mode === 'dark' ? '#0b1b2d' : '#f4f9fb',
+              borderColor: colors.border,
+              borderRadius: 18,
+              borderWidth: 1,
+              flexDirection: 'row',
+              paddingHorizontal: 16,
+              paddingVertical: 12,
+            }}
+          >
+            <Search color={colors.primary} size={18} />
             <TextInput
               defaultValue=""
               onChangeText={setSearchText}
@@ -827,19 +1001,31 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
           <View className="mt-3 flex-row gap-2">
             {([
-              ['all', `全部 ${summary.total}`],
-              ['active', `正常 ${summary.active}`],
-              ['paused', `暂停 ${summary.paused}`],
-              ['error', `异常 ${summary.errors}`],
-            ] as const).map(([key, label]) => {
-              const active = filter === key;
+              { key: 'all', label: `全部 ${summary.total}`, icon: Gauge },
+              { key: 'active', label: `正常 ${summary.active}`, icon: CircleCheck },
+              { key: 'paused', label: `暂停 ${summary.paused}`, icon: Clock3 },
+              { key: 'error', label: `异常 ${summary.errors}`, icon: AlertCircle },
+            ] as Array<{ key: AccountStatusFilter; label: string; icon: LucideIcon }>).map((item) => {
+              const active = filter === item.key;
+              const Icon = item.icon;
               return (
                 <Pressable
-                  key={key}
-                  onPress={() => setFilter(key)}
-                  style={{ backgroundColor: active ? colors.primary : colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 }}
+                  key={item.key}
+                  onPress={() => setFilter(item.key)}
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: active ? colors.primary : colors.mutedCard,
+                    borderColor: active ? colors.primary : colors.border,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: 5,
+                    paddingHorizontal: 11,
+                    paddingVertical: 8,
+                  }}
                 >
-                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '600' }}>{label}</Text>
+                  <Icon color={active ? colors.primaryText : colors.badgeDefaultText} size={12} />
+                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
                 </Pressable>
               );
             })}
@@ -847,17 +1033,28 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
           <View className="mt-3 flex-row gap-2">
             {([
-              ['usage-desc', '请求高→低'],
-              ['usage-asc', '请求低→高'],
-            ] as const).map(([key, label]) => {
-              const active = usageSort === key;
+              { key: 'usage-desc', label: '请求高→低' },
+              { key: 'usage-asc', label: '请求低→高' },
+            ] as Array<{ key: UsageSort; label: string }>).map((item) => {
+              const active = usageSort === item.key;
               return (
                 <Pressable
-                  key={key}
-                  onPress={() => setUsageSort(key)}
-                  style={{ backgroundColor: active ? colors.dark : colors.mutedCard, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 12 }}
+                  key={item.key}
+                  onPress={() => setUsageSort(item.key)}
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: active ? colors.dark : colors.mutedCard,
+                    borderColor: active ? colors.dark : colors.border,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    flexDirection: 'row',
+                    gap: 6,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                  }}
                 >
-                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '600' }}>{label}</Text>
+                  <ArrowDownUp color={active ? colors.primaryText : colors.badgeDefaultText} size={13} />
+                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
                 </Pressable>
               );
             })}
@@ -867,8 +1064,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             <Pressable
               disabled={filteredItems.length === 0 || batchRefreshMutation.isPending}
               onPress={() => confirmBatch('refresh')}
-              style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 999, flex: 1, opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
+              style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
             >
+              <RefreshCw color={colors.primaryText} size={13} />
               <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>
                 {batchRefreshMutation.isPending ? '刷新中...' : '批量刷新'}
               </Text>
@@ -876,9 +1074,10 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             <Pressable
               disabled={filteredItems.length === 0 || batchClearErrorMutation.isPending}
               onPress={() => confirmBatch('clear-error')}
-              style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flex: 1, opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
+              style={{ alignItems: 'center', backgroundColor: colors.errorBg, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
             >
-              <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
+              <ShieldOff color={colors.errorText} size={13} />
+              <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>
                 {batchClearErrorMutation.isPending ? '清理中...' : '批量清错'}
               </Text>
             </Pressable>
@@ -894,7 +1093,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       const isError = getAccountError(account);
       const visualStatus = getAccountVisualStatus(account);
       const statusText = visualStatus.label;
-      const todayStats = todayByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0 };
+      const todayStats = todayByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0, standardCost: 0, userCost: 0 };
       const totalStats = totalByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0 };
       const nextSchedulable = visualStatus.filterKey === 'paused';
       const toggleLabel = nextSchedulable ? '恢复' : '暂停';
@@ -928,22 +1127,11 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               </View>
 
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minWidth: 132, paddingHorizontal: 12, paddingVertical: 12 }}>
-                  <Text style={{ color: colors.subtext, fontSize: 11 }}>请求次数</Text>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{todayStats.requests}</Text>
-                </View>
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minWidth: 132, paddingHorizontal: 12, paddingVertical: 12 }}>
-                  <Text style={{ color: colors.subtext, fontSize: 11 }}>今日用量</Text>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{formatMoneyValue(todayStats.cost)}</Text>
-                </View>
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minWidth: 132, paddingHorizontal: 12, paddingVertical: 12 }}>
-                  <Text style={{ color: colors.subtext, fontSize: 11 }}>总使用额度</Text>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{formatMoneyValue(totalStats.cost)}</Text>
-                </View>
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minWidth: 132, paddingHorizontal: 12, paddingVertical: 12 }}>
-                  <Text style={{ color: colors.subtext, fontSize: 11 }}>token消耗</Text>
-                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 4 }}>{formatTokenValue(todayStats.tokens)}</Text>
-                </View>
+                <AccountStatTile colors={colors} icon={Activity} label="请求次数" tone="requests" value={formatReqValue(todayStats.requests)} />
+                <AccountStatTile colors={colors} icon={Cpu} label="Token 消耗" tone="tokens" value={formatTokenValue(todayStats.tokens)} />
+                <AccountStatTile colors={colors} icon={DollarSign} label="账号成本" tone="accountCost" value={formatPrefixedMoney('A', todayStats.cost)} />
+                <AccountStatTile colors={colors} icon={UserRound} label="用户成本" tone="userCost" value={formatPrefixedMoney('U', todayStats.userCost)} />
+                <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalCost" value={formatMoneyValue(totalStats.cost)} />
               </View>
 
               <AccountQuotaPanel
@@ -995,7 +1183,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 <Pressable
-                  style={{ backgroundColor: colors.dark, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTestingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -1014,7 +1202,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     });
                   }}
                 >
-                  <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
+                  <Activity color={colors.primaryText} size={13} />
+                  <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
                 </Pressable>
                 <Pressable
                   style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 8 }}
@@ -1038,7 +1227,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
                 </Pressable>
                 <Pressable
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 16, paddingVertical: 8 }}
                   disabled={isTogglingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -1053,7 +1242,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     });
                   }}
                 >
-                  <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
+                  {nextSchedulable ? <CircleCheck color={colors.success} size={13} /> : <Clock3 color={colors.badgeDefaultText} size={13} />}
+                  <Text style={{ color: nextSchedulable ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{isTogglingCurrent ? '处理中...' : toggleLabel}</Text>
                 </Pressable>
                 <Pressable
                   disabled={accountDeleteMutation.isPending}
