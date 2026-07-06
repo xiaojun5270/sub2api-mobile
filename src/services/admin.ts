@@ -2,6 +2,7 @@ import { adminFetch } from '@/src/lib/admin-fetch';
 import type {
   AccountTodayStats,
   AdminAccount,
+  AdminAccountModel,
   AdminApiKey,
   AdminGroup,
   AdminSettings,
@@ -1106,16 +1107,57 @@ export function getAccountUsage(accountId: number) {
   );
 }
 
-export function getAccountModels(accountId: number) {
-  return adminFetch<{ models?: Array<string | { model?: string; name?: string; enabled?: boolean; [key: string]: unknown }> }>(
-    `/api/v1/admin/accounts/${accountId}/models`
-  );
+export async function getAccountModels(accountId: number) {
+  const payload = await adminFetch<unknown>(`/api/v1/admin/accounts/${accountId}/models`);
+  return { models: extractItems<AdminAccountModel>(payload, ['models', 'data', 'items']) };
 }
 
-export function testAccount(accountId: number) {
-  return adminFetch(`/api/v1/admin/accounts/${accountId}/test`, {
+function parseAccountTestStream(payload: unknown) {
+  if (typeof payload !== 'string') return payload;
+
+  const events = payload
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, unknown>;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((event): event is Record<string, unknown> => Boolean(event));
+
+  if (events.length === 0) return payload;
+
+  const errorEvent = events.find((event) => event.type === 'error' || (event.type === 'test_complete' && (event.error || event.success === false)));
+  if (errorEvent) {
+    throw new Error(String(errorEvent.error || errorEvent.message || '测试失败'));
+  }
+
+  const completeEvent = events.find((event) => event.type === 'test_complete');
+  const startEvent = events.find((event) => event.type === 'test_start');
+  const content = events
+    .filter((event) => event.type === 'content' && typeof event.text === 'string')
+    .map((event) => event.text)
+    .join('');
+
+  return {
+    success: completeEvent?.success !== false,
+    model: firstStringField(startEvent, ['model']) ?? firstStringField(completeEvent, ['model']),
+    text: content || undefined,
+  };
+}
+
+export async function testAccount(accountId: number, params?: { modelId?: string; prompt?: string }) {
+  const modelId = params?.modelId?.trim();
+  const payload = await adminFetch<unknown>(`/api/v1/admin/accounts/${accountId}/test`, {
     method: 'POST',
+    body: modelId ? JSON.stringify({ model_id: modelId, prompt: params?.prompt ?? '' }) : undefined,
   });
+  return parseAccountTestStream(payload);
 }
 
 export function refreshAccount(accountId: number) {

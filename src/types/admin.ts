@@ -225,6 +225,20 @@ export type AccountTodayStats = {
   user_cost: number;
 };
 
+export type AdminAccountModel = {
+  id?: string;
+  display_name?: string;
+  model?: string;
+  name?: string;
+  owned_by?: string;
+  context_window?: number;
+  available?: boolean;
+  enabled?: boolean;
+  source?: string;
+  status?: string;
+  [key: string]: string | number | boolean | null | undefined;
+};
+
 export type AdminAccount = {
   id: number;
   name: string;

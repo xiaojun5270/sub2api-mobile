@@ -116,9 +116,9 @@ function getAccountStatus(account?: AdminAccount) {
   return account.status || '正常';
 }
 
-function modelName(value: string | { model?: string; name?: string; enabled?: boolean }) {
+function modelName(value: string | { id?: string; display_name?: string; model?: string; name?: string; enabled?: boolean }) {
   if (typeof value === 'string') return value;
-  return value.model || value.name || '--';
+  return value.display_name || value.id || value.model || value.name || '--';
 }
 
 function formatExtraValue(value: string | number | boolean | null) {

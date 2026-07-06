@@ -19,7 +19,6 @@ import {
   ShieldCheck,
   ShieldOff,
   Trash2,
-  UserRound,
   Wallet,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -40,6 +39,7 @@ import {
   getAccountTodayStatsBatch,
   getAccountStats,
   getGrokAccountQuota,
+  getAccountModels,
   getOpenAiAccountQuota,
   listAccounts,
   resetAccountQuota,
@@ -84,7 +84,13 @@ type AccountQuotaPanelState = {
   error?: string;
 };
 
-type AccountStatTone = 'requests' | 'tokens' | 'accountCost' | 'userCost' | 'totalCost';
+type AccountModelOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
+type AccountStatTone = 'todayRequests' | 'todayTokens' | 'todayQuota' | 'totalQuota' | 'totalRequests' | 'totalTokens';
 
 type CodexWindowUsage = {
   label: '5h' | '7d';
@@ -160,6 +166,111 @@ function firstStringValue(source: unknown, keys: string[]) {
   }
 
   return undefined;
+}
+
+function normalizeAccountModelOption(value: unknown, fallbackName?: string): AccountModelOption | undefined {
+  if (typeof value === 'string' && value.trim()) return { value: value.trim(), label: value.trim() };
+  if (typeof value === 'number' && Number.isFinite(value)) return { value: String(value), label: String(value) };
+  if (!isRecord(value)) {
+    return fallbackName?.trim() ? { value: fallbackName.trim(), label: fallbackName.trim() } : undefined;
+  }
+
+  const optionValue = firstStringValue(value, ['id', 'model', 'name', 'path', 'value']) ?? fallbackName;
+  if (!optionValue?.trim()) return undefined;
+
+  const label = firstStringValue(value, ['display_name', 'displayName', 'label', 'name', 'model', 'id']) ?? optionValue;
+
+  const enabled = value.enabled;
+  const available = value.available;
+  const status = typeof value.status === 'string' ? value.status.toLowerCase() : '';
+  const disabled = enabled === false || available === false || ['disabled', 'inactive', 'off'].includes(status);
+  return { value: optionValue.trim(), label: label.trim(), disabled };
+}
+
+function collectAccountModelOptions(source: unknown): AccountModelOption[] {
+  if (Array.isArray(source)) {
+    return source
+      .map((item) => normalizeAccountModelOption(item))
+      .filter((item): item is AccountModelOption => Boolean(item?.value));
+  }
+
+  if (typeof source === 'string' && source.trim()) {
+    const trimmed = source.trim();
+    if (trimmed.includes(',')) {
+      return trimmed
+        .split(',')
+        .map((item) => normalizeAccountModelOption(item))
+        .filter((item): item is AccountModelOption => Boolean(item?.value));
+    }
+    return [{ value: trimmed, label: trimmed }];
+  }
+
+  if (!isRecord(source)) return [];
+  const direct = normalizeAccountModelOption(source);
+  if (direct) return [direct];
+
+  return Object.entries(source)
+    .flatMap(([key, value]) => {
+      const keyOption = normalizeAccountModelOption(key);
+      const valueOption = normalizeAccountModelOption(value, key);
+      if (keyOption && valueOption && keyOption.value !== valueOption.value) return [keyOption, valueOption];
+      return [valueOption ?? keyOption].filter((item): item is AccountModelOption => Boolean(item?.value));
+    })
+    .filter((item): item is AccountModelOption => Boolean(item?.value));
+}
+
+function uniqueAccountModelOptions(options: AccountModelOption[]) {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = option.value.trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getAccountInlineModelOptions(account: AdminAccount) {
+  const source = account as unknown;
+  const extra = account.extra as unknown;
+  const sources = [
+    firstStringValue(source, ['model', 'default_model', 'defaultModel']),
+    isRecord(source) ? source.models : undefined,
+    isRecord(source) ? source.available_models : undefined,
+    isRecord(source) ? source.availableModels : undefined,
+    isRecord(source) ? source.enabled_models : undefined,
+    isRecord(source) ? source.enabledModels : undefined,
+    isRecord(extra) ? extra.models : undefined,
+    isRecord(extra) ? extra.available_models : undefined,
+    isRecord(extra) ? extra.availableModels : undefined,
+    isRecord(extra) ? extra.enabled_models : undefined,
+    isRecord(extra) ? extra.enabledModels : undefined,
+    isRecord(extra) ? extra.model_rate_limits : undefined,
+    isRecord(extra) ? extra.modelRateLimits : undefined,
+    isRecord(extra) ? extra.model_mapping : undefined,
+    isRecord(extra) ? extra.modelMapping : undefined,
+  ];
+
+  return uniqueAccountModelOptions(sources.flatMap((item) => collectAccountModelOptions(item))).slice(0, 12);
+}
+
+function getDefaultAccountTestModel(account: AdminAccount, options: AccountModelOption[]) {
+  const enabledOptions = options.filter((option) => !option.disabled);
+  if (enabledOptions.length === 0) return undefined;
+
+  const platform = `${account.platform || ''}`.toLowerCase();
+  if (platform === 'gemini') return enabledOptions[0].value;
+
+  if (platform === 'antigravity') {
+    const priority = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'];
+    const matched = [...enabledOptions].sort((left, right) => {
+      const leftIndex = priority.findIndex((item) => left.value.toLowerCase().includes(item));
+      const rightIndex = priority.findIndex((item) => right.value.toLowerCase().includes(item));
+      return (leftIndex === -1 ? priority.length : leftIndex) - (rightIndex === -1 ? priority.length : rightIndex);
+    })[0];
+    return matched.value;
+  }
+
+  return enabledOptions.find((option) => option.value.toLowerCase().includes('sonnet'))?.value ?? enabledOptions[0].value;
 }
 
 function getExtraNumber(account: AdminAccount, keys: string[]) {
@@ -318,28 +429,27 @@ function formatReqValue(value?: number) {
   return `${formatCompactNumber(Number(value ?? 0))} req`;
 }
 
-function formatPrefixedMoney(prefix: 'A' | 'U', value?: number) {
-  return `${prefix} ${formatMoneyValue(value)}`;
-}
-
 function getAccountStatPalette(colors: AppTheme, tone: AccountStatTone) {
   const dark = colors.mode === 'dark';
   const palettes: Record<AccountStatTone, { background: string; border: string; iconBg: string; icon: string; glow: string }> = {
-    requests: dark
+    todayRequests: dark
       ? { background: '#101d34', border: '#25456f', iconBg: '#172b52', icon: '#93c5fd', glow: '#60a5fa' }
       : { background: '#eef5ff', border: '#d6e5ff', iconBg: '#dfeaff', icon: '#2563eb', glow: '#93c5fd' },
-    tokens: dark
+    todayTokens: dark
       ? { background: '#0f2634', border: '#25556c', iconBg: '#123849', icon: '#67e8f9', glow: '#22d3ee' }
       : { background: '#edfaff', border: '#cceff8', iconBg: '#dff8ff', icon: '#0891b2', glow: '#67e8f9' },
-    accountCost: dark
+    todayQuota: dark
       ? { background: '#2a210b', border: '#604613', iconBg: '#3a2d0e', icon: '#fbbf24', glow: '#f59e0b' }
       : { background: '#fff8e7', border: '#f3dda5', iconBg: '#fff0c2', icon: '#b45309', glow: '#fbbf24' },
-    userCost: dark
-      ? { background: '#211a38', border: '#44346b', iconBg: '#2d234b', icon: '#c4b5fd', glow: '#a78bfa' }
-      : { background: '#f7f3ff', border: '#e5d9ff', iconBg: '#eee7ff', icon: '#7c3aed', glow: '#c4b5fd' },
-    totalCost: dark
+    totalQuota: dark
       ? { background: '#072b27', border: '#14564e', iconBg: '#0d3b35', icon: '#5eead4', glow: '#2dd4bf' }
       : { background: '#effbf7', border: '#c9f0e5', iconBg: '#ddf8ef', icon: '#047857', glow: '#5eead4' },
+    totalRequests: dark
+      ? { background: '#172136', border: '#334663', iconBg: '#22314b', icon: '#a5b4fc', glow: '#818cf8' }
+      : { background: '#f2f5ff', border: '#dce4ff', iconBg: '#e7edff', icon: '#4f46e5', glow: '#a5b4fc' },
+    totalTokens: dark
+      ? { background: '#0d2a2d', border: '#1b535a', iconBg: '#153e43', icon: '#6ee7b7', glow: '#34d399' }
+      : { background: '#f0fdf8', border: '#cceedd', iconBg: '#dcfce7', icon: '#059669', glow: '#6ee7b7' },
   };
 
   return palettes[tone];
@@ -365,22 +475,22 @@ function AccountStatTile({
       style={{
         backgroundColor: palette.background,
         borderColor: palette.border,
-        borderRadius: 16,
+        borderRadius: 14,
         borderWidth: 1,
         flex: 1,
-        minHeight: 74,
+        minHeight: 66,
         minWidth: 132,
-        paddingHorizontal: 10,
-        paddingVertical: 10,
+        paddingHorizontal: 9,
+        paddingVertical: 8,
         shadowColor: palette.glow,
         shadowOffset: { height: 4, width: 0 },
         shadowOpacity: colors.mode === 'dark' ? 0.08 : 0.11,
         shadowRadius: 9,
       }}
     >
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
-        <View style={{ alignItems: 'center', backgroundColor: palette.iconBg, borderRadius: 999, height: 24, justifyContent: 'center', width: 24 }}>
-          <Icon color={palette.icon} size={13} />
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 6 }}>
+        <View style={{ alignItems: 'center', backgroundColor: palette.iconBg, borderRadius: 999, height: 22, justifyContent: 'center', width: 22 }}>
+          <Icon color={palette.icon} size={12} />
         </View>
         <Text numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 11, fontWeight: '700' }}>
           {label}
@@ -389,7 +499,7 @@ function AccountStatTile({
       <Text
         adjustsFontSizeToFit
         numberOfLines={1}
-        style={{ color: colors.text, fontSize: 17, fontWeight: '800', marginTop: 7 }}
+        style={{ color: colors.text, fontSize: 16, fontWeight: '800', marginTop: 5 }}
       >
         {value}
       </Text>
@@ -507,11 +617,11 @@ function AccountQuotaPanel({
     gap: 6,
     justifyContent: 'center' as const,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    paddingVertical: 6,
   };
 
   return (
-    <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 16, borderWidth: 1, gap: 8, padding: 10 }}>
+    <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 14, borderWidth: 1, gap: 6, padding: 8 }}>
       <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', gap: 10 }}>
         <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7 }}>
           <Gauge color={colors.primary} size={15} />
@@ -522,18 +632,18 @@ function AccountQuotaPanel({
         </Text>
       </View>
 
-      <View style={{ gap: 7 }}>
+      <View style={{ gap: 5 }}>
         {windows.map((item) => {
           const barWidth = `${item.percent ?? 0}%` as `${number}%`;
           const isHigh = (item.percent ?? 0) >= 80;
           return (
-            <View key={item.label} style={{ gap: 5 }}>
+            <View key={item.label} style={{ gap: 4 }}>
               <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' }}>{item.label}</Text>
                 <Text style={{ color: colors.subtext, fontSize: 11 }}>{formatPercent(item.percent)} · {item.resetLabel}</Text>
               </View>
-              <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 6, overflow: 'hidden' }}>
-                <View style={{ backgroundColor: isHigh ? colors.danger : colors.primary, borderRadius: 999, height: 6, width: barWidth }} />
+              <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 5, overflow: 'hidden' }}>
+                <View style={{ backgroundColor: isHigh ? colors.danger : colors.primary, borderRadius: 999, height: 5, width: barWidth }} />
               </View>
             </View>
           );
@@ -609,6 +719,10 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const [usageSort, setUsageSort] = useState<UsageSort>('usage-desc');
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null);
   const [testFeedbackByAccountId, setTestFeedbackByAccountId] = useState<Record<number, string>>({});
+  const [expandedModelAccountId, setExpandedModelAccountId] = useState<number | null>(null);
+  const [loadingModelAccountId, setLoadingModelAccountId] = useState<number | null>(null);
+  const [modelsByAccountId, setModelsByAccountId] = useState<Record<number, AccountModelOption[]>>({});
+  const [selectedModelByAccountId, setSelectedModelByAccountId] = useState<Record<number, string>>({});
   const [togglingAccountId, setTogglingAccountId] = useState<number | null>(null);
   const [editingAccountId, setEditingAccountId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
@@ -634,7 +748,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   });
 
   const testMutation = useMutation({
-    mutationFn: (accountId: number) => testAccount(accountId),
+    mutationFn: ({ accountId, modelId }: { accountId: number; modelId?: string }) => testAccount(accountId, { modelId }),
   });
 
   const accountEditMutation = useMutation({
@@ -834,6 +948,59 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         onPress: () => accountDeleteMutation.mutate(account.id),
       },
     ]);
+  }
+
+  async function toggleAccountModelPicker(account: AdminAccount) {
+    if (expandedModelAccountId === account.id) {
+      setExpandedModelAccountId(null);
+      return;
+    }
+
+    setExpandedModelAccountId(account.id);
+    const inlineOptions = getAccountInlineModelOptions(account);
+    if (inlineOptions.length > 0) {
+      setModelsByAccountId((current) => ({ ...current, [account.id]: current[account.id] ?? inlineOptions }));
+      const defaultModel = getDefaultAccountTestModel(account, inlineOptions);
+      if (defaultModel) {
+        setSelectedModelByAccountId((current) => current[account.id] ? current : { ...current, [account.id]: defaultModel });
+      }
+    }
+
+    if (modelsByAccountId[account.id]) return;
+
+    setLoadingModelAccountId(account.id);
+    try {
+      const payload = await getAccountModels(account.id);
+      const remoteOptions = collectAccountModelOptions(payload.models);
+      const nextOptions = uniqueAccountModelOptions([...remoteOptions, ...inlineOptions]).slice(0, 16);
+      setModelsByAccountId((current) => ({ ...current, [account.id]: nextOptions }));
+      const defaultModel = getDefaultAccountTestModel(account, nextOptions);
+      if (defaultModel) {
+        setSelectedModelByAccountId((current) => current[account.id] ? current : { ...current, [account.id]: defaultModel });
+      }
+      if (nextOptions.length === 0) {
+        Alert.alert('暂无模型', '未获取到该账号可选模型。');
+      }
+    } catch (error) {
+      if (inlineOptions.length === 0) {
+        Alert.alert('模型加载失败', getErrorMessage(error));
+      }
+    } finally {
+      setLoadingModelAccountId((current) => (current === account.id ? null : current));
+    }
+  }
+
+  function selectAccountTestModel(accountId: number, model?: string) {
+    setSelectedModelByAccountId((current) => {
+      const next = { ...current };
+      if (model) {
+        next[accountId] = model;
+      } else {
+        delete next[accountId];
+      }
+      return next;
+    });
+    setExpandedModelAccountId(null);
   }
 
   async function fetchAccountQuota(account: AdminAccount) {
@@ -1107,6 +1274,11 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       const quotaInfo = quotaInfoByAccountId[account.id];
       const isQuotaQuerying = quotaQueryingAccountId === account.id;
       const isQuotaResetting = quotaResettingAccountId === account.id;
+      const selectedModel = selectedModelByAccountId[account.id];
+      const modelOptions = modelsByAccountId[account.id] ?? getAccountInlineModelOptions(account);
+      const isModelPickerOpen = expandedModelAccountId === account.id;
+      const isModelLoading = loadingModelAccountId === account.id;
+      const selectedModelLabel = modelOptions.find((option) => option.value === selectedModel)?.label ?? selectedModel;
 
       return (
         <Pressable onPress={() => router.push(`/accounts/${account.id}`)}>
@@ -1117,22 +1289,24 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
             badgeTone={visualStatus.badgeTone}
             compact
             icon={KeyRound}
+            metaInline
           >
-            <View style={{ gap: 9 }}>
+            <View style={{ gap: 6 }}>
               <View className="flex-row items-center justify-between">
                 <View className="flex-row items-center gap-2">
-                  {account.schedulable && !isError ? <ShieldCheck color={colors.subtext} size={14} /> : <ShieldOff color={colors.subtext} size={14} />}
-                  <Text style={{ color: colors.subtext, fontSize: 13 }}>状态：{statusText}</Text>
+                  {account.schedulable && !isError ? <ShieldCheck color={colors.subtext} size={12} /> : <ShieldOff color={colors.subtext} size={12} />}
+                  <Text style={{ color: colors.subtext, fontSize: 12 }}>状态：{statusText}</Text>
                 </View>
-                <Text style={{ color: colors.subtext, fontSize: 11 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
+                <Text style={{ color: colors.subtext, fontSize: 10 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
               </View>
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-                <AccountStatTile colors={colors} icon={Activity} label="请求次数" tone="requests" value={formatReqValue(todayStats.requests)} />
-                <AccountStatTile colors={colors} icon={Cpu} label="Token 消耗" tone="tokens" value={formatTokenValue(todayStats.tokens)} />
-                <AccountStatTile colors={colors} icon={DollarSign} label="账号成本" tone="accountCost" value={formatPrefixedMoney('A', todayStats.cost)} />
-                <AccountStatTile colors={colors} icon={UserRound} label="用户成本" tone="userCost" value={formatPrefixedMoney('U', todayStats.userCost)} />
-                <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalCost" value={formatMoneyValue(totalStats.cost)} />
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                <AccountStatTile colors={colors} icon={Activity} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
+                <AccountStatTile colors={colors} icon={Cpu} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
+                <AccountStatTile colors={colors} icon={DollarSign} label="今日额度" tone="todayQuota" value={formatMoneyValue(todayStats.cost)} />
+                <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
+                <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
+                <AccountStatTile colors={colors} icon={Cpu} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
               </View>
 
               <AccountQuotaPanel
@@ -1150,7 +1324,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               />
 
               {isEditing ? (
-                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 10 }}>
+                <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 8 }}>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                     <Field label="名称" value={editName} onChangeText={setEditName} placeholder="账号名称" />
                     <Field label="优先级" value={editPriority} onChangeText={setEditPriority} placeholder="0" keyboardType="number-pad" />
@@ -1158,7 +1332,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     <Field label="倍率" value={editRateMultiplier} onChangeText={setEditRateMultiplier} placeholder="1" keyboardType="decimal-pad" />
                     <Field label="备注" value={editNotes} onChangeText={setEditNotes} placeholder="备注" />
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <Pressable
                       disabled={accountEditMutation.isPending}
                       onPress={(event) => {
@@ -1182,16 +1356,16 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </View>
               ) : null}
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 7 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 6 }}
                   disabled={isTestingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
                     setTestingAccountId(account.id);
-                    testMutation.mutate(account.id, {
+                    testMutation.mutate({ accountId: account.id, modelId: selectedModel }, {
                       onSuccess: () => {
-                        setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: '测试成功' }));
+                        setTestFeedbackByAccountId((current) => ({ ...current, [account.id]: selectedModelLabel ? `测试成功：${selectedModelLabel}` : '测试成功' }));
                       },
                       onError: (error) => {
                         const message = error instanceof Error && error.message ? error.message : '测试失败';
@@ -1207,7 +1381,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{isTestingCurrent ? '测试中...' : '测试'}</Text>
                 </Pressable>
                 <Pressable
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     startEditAccount(account);
@@ -1218,7 +1392,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </Pressable>
                 <Pressable
                   disabled={accountStatusMutation.isPending}
-                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
+                  style={{ backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     accountStatusMutation.mutate({ account, enabled: nextEnabled });
@@ -1228,7 +1402,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Text style={{ color: nextEnabled ? colors.success : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{nextEnabled ? '启用' : '禁用'}</Text>
                 </Pressable>
                 <Pressable
-                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 14, paddingVertical: 7 }}
+                  style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 6 }}
                   disabled={isTogglingCurrent}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -1248,7 +1422,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </Pressable>
                 <Pressable
                   disabled={accountDeleteMutation.isPending}
-                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 13, paddingVertical: 7 }}
+                  style={{ backgroundColor: colors.errorBg, borderRadius: 999, flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 6 }}
                   onPress={(event) => {
                     event.stopPropagation();
                     confirmDeleteAccount(account);
@@ -1257,7 +1431,85 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <Trash2 color={colors.errorText} size={13} />
                   <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>删除</Text>
                 </Pressable>
+                <Pressable
+                  style={{
+                    alignItems: 'center',
+                    backgroundColor: selectedModel ? colors.successBg : colors.mutedCard,
+                    borderRadius: 999,
+                    flex: 1,
+                    flexDirection: 'row',
+                    gap: 6,
+                    minWidth: 148,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                  }}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    void toggleAccountModelPicker(account);
+                  }}
+                >
+                  <Cpu color={selectedModel ? colors.success : colors.badgeDefaultText} size={13} />
+                  <Text numberOfLines={1} style={{ color: selectedModel ? colors.success : colors.badgeDefaultText, flex: 1, fontSize: 12, fontWeight: '800' }}>
+                    {isModelLoading ? '模型加载中' : selectedModelLabel ? `模型 ${selectedModelLabel}` : '选择模型'}
+                  </Text>
+                </Pressable>
               </View>
+
+              {isModelPickerOpen ? (
+                <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 14, borderWidth: 1, gap: 6, padding: 8 }}>
+                  <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800' }}>测试模型</Text>
+                    <Text style={{ color: colors.subtext, fontSize: 11 }}>{isModelLoading ? '加载中...' : `${modelOptions.length} 个可选`}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                    <Pressable
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        selectAccountTestModel(account.id);
+                      }}
+                      style={{
+                        backgroundColor: !selectedModel ? colors.primary : colors.surface,
+                        borderColor: !selectedModel ? colors.primary : colors.border,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        paddingHorizontal: 10,
+                        paddingVertical: 7,
+                      }}
+                    >
+                      <Text style={{ color: !selectedModel ? colors.primaryText : colors.badgeDefaultText, fontSize: 11, fontWeight: '800' }}>默认模型</Text>
+                    </Pressable>
+                    {modelOptions.map((option) => {
+                      const active = selectedModel === option.value;
+                      return (
+                        <Pressable
+                          key={option.value}
+                          disabled={option.disabled}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            selectAccountTestModel(account.id, option.value);
+                          }}
+                          style={{
+                            backgroundColor: active ? colors.primary : colors.surface,
+                            borderColor: active ? colors.primary : colors.border,
+                            borderRadius: 999,
+                            borderWidth: 1,
+                            opacity: option.disabled ? 0.48 : 1,
+                            paddingHorizontal: 10,
+                            paddingVertical: 7,
+                          }}
+                        >
+                          <Text numberOfLines={1} style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 11, fontWeight: '800', maxWidth: 168 }}>
+                            {option.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                    {!isModelLoading && modelOptions.length === 0 ? (
+                      <Text style={{ color: colors.subtext, fontSize: 12 }}>暂无可选模型，可先同步模型后再试。</Text>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
 
               {testFeedback ? <Text style={{ color: colors.success, fontSize: 12 }}>测试结果：{testFeedback}</Text> : null}
             </View>
@@ -1265,7 +1517,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </Pressable>
       );
     },
-    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editName, editNotes, editPriority, editRateMultiplier, editingAccountId, handleQuotaCount, handleQuotaQuery, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
+    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editName, editNotes, editPriority, editRateMultiplier, editingAccountId, expandedModelAccountId, handleQuotaCount, handleQuotaQuery, loadingModelAccountId, modelsByAccountId, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, selectedModelByAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
   );
 
   const emptyState = useMemo(
@@ -1289,7 +1541,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     >
       <FlatList
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 8, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: 6, flexGrow: 1 }}
         data={filteredItems}
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
@@ -1301,7 +1553,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         }} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
-        ItemSeparatorComponent={() => <View className="h-3" />}
+        ItemSeparatorComponent={() => <View className="h-2" />}
         keyboardShouldPersistTaps="handled"
         initialNumToRender={8}
         maxToRenderPerBatch={8}
