@@ -15,6 +15,10 @@ import type {
   CreateApiKeyRequest,
   CreateAccountRequest,
   CreateUserRequest,
+  GroupCapacitySummary,
+  GroupListParams,
+  GroupRequest,
+  GroupUsageSummary,
   OpsDashboardOverview,
   OpsDashboardSnapshot,
   OpsMetricPoint,
@@ -909,14 +913,114 @@ export function updateUserStatus(userId: number, status: 'active' | 'disabled') 
   });
 }
 
-export function listGroups(search = '') {
+export function listGroups(params: string | GroupListParams = '') {
+  const query = typeof params === 'string'
+    ? { page: 1, page_size: 20, search: params.trim(), sort_by: 'sort_order', sort_order: 'asc' }
+    : {
+        page: params.page ?? 1,
+        page_size: params.page_size ?? 50,
+        search: params.search?.trim(),
+        platform: params.platform,
+        status: params.status,
+        is_exclusive: params.is_exclusive ?? undefined,
+        sort_by: params.sort_by ?? 'sort_order',
+        sort_order: params.sort_order ?? 'asc',
+      };
+
   return adminFetch<PaginatedData<AdminGroup>>(
-    `/api/v1/admin/groups${buildQuery({ page: 1, page_size: 20, search: search.trim() })}`
+    `/api/v1/admin/groups${buildQuery(query)}`
+  );
+}
+
+export function listAllGroups(params: { platform?: string; include_inactive?: boolean } = {}) {
+  return adminFetch<AdminGroup[]>(
+    `/api/v1/admin/groups/all${buildQuery(params)}`
   );
 }
 
 export function getGroup(groupId: number) {
   return adminFetch<AdminGroup>(`/api/v1/admin/groups/${groupId}`);
+}
+
+export function createGroup(body: GroupRequest) {
+  return adminFetch<AdminGroup>('/api/v1/admin/groups', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateGroup(groupId: number, body: Partial<GroupRequest>) {
+  return adminFetch<AdminGroup>(`/api/v1/admin/groups/${groupId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteGroup(groupId: number) {
+  return adminFetch(`/api/v1/admin/groups/${groupId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function updateGroupSortOrder(updates: Array<{ id: number; sort_order: number }>) {
+  return adminFetch('/api/v1/admin/groups/sort-order', {
+    method: 'PUT',
+    body: JSON.stringify({ updates }),
+  });
+}
+
+export function getGroupUsageSummary(timezone = Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  return adminFetch<GroupUsageSummary[]>(`/api/v1/admin/groups/usage-summary${buildQuery({ timezone })}`);
+}
+
+export function getGroupCapacitySummary() {
+  return adminFetch<GroupCapacitySummary[]>('/api/v1/admin/groups/capacity-summary');
+}
+
+export function getGroupStats(groupId: number) {
+  return adminFetch<Record<string, unknown>>(`/api/v1/admin/groups/${groupId}/stats`);
+}
+
+export function getGroupModelsListCandidates(groupId: number, platform?: string) {
+  return adminFetch<{ models?: unknown[] }>(
+    `/api/v1/admin/groups/${groupId}/models-list-candidates${buildQuery({ platform })}`
+  );
+}
+
+export function getGroupApiKeys(groupId: number, page = 1, pageSize = 20) {
+  return adminFetch<PaginatedData<AdminApiKey>>(
+    `/api/v1/admin/groups/${groupId}/api-keys${buildQuery({ page, page_size: pageSize })}`
+  );
+}
+
+export function getGroupRateMultipliers(groupId: number) {
+  return adminFetch<Array<Record<string, unknown>>>(`/api/v1/admin/groups/${groupId}/rate-multipliers`);
+}
+
+export function batchSetGroupRateMultipliers(groupId: number, entries: Array<{ user_id: number; rate_multiplier: number | null }>) {
+  return adminFetch(`/api/v1/admin/groups/${groupId}/rate-multipliers`, {
+    method: 'PUT',
+    body: JSON.stringify({ entries }),
+  });
+}
+
+export function clearGroupRateMultipliers(groupId: number) {
+  return adminFetch(`/api/v1/admin/groups/${groupId}/rate-multipliers`, {
+    method: 'DELETE',
+  });
+}
+
+export function batchSetGroupRpmOverrides(groupId: number, entries: Array<{ user_id: number; rpm_override: number | null }>) {
+  return adminFetch(`/api/v1/admin/groups/${groupId}/rpm-overrides`, {
+    method: 'PUT',
+    body: JSON.stringify({ entries }),
+  });
+}
+
+export function clearGroupRpmOverrides(groupId: number) {
+  return adminFetch(`/api/v1/admin/groups/${groupId}/rpm-overrides`, {
+    method: 'DELETE',
+  });
 }
 
 export function listAccounts(search = '') {

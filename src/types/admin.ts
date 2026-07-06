@@ -219,10 +219,94 @@ export type AdminGroup = {
   daily_limit_usd?: number | null;
   weekly_limit_usd?: number | null;
   monthly_limit_usd?: number | null;
+  default_validity_days?: number | null;
+  active_account_count?: number;
+  rate_limited_account_count?: number;
   account_count?: number;
+  rpm_limit?: number | null;
+  allow_image_generation?: boolean;
+  image_rate_independent?: boolean;
+  image_rate_multiplier?: number | null;
+  image_price_1k?: number | null;
+  image_price_2k?: number | null;
+  image_price_4k?: number | null;
+  peak_rate_enabled?: boolean;
+  peak_start?: string | null;
+  peak_end?: string | null;
+  peak_rate_multiplier?: number | null;
+  claude_code_only?: boolean;
+  fallback_group_id?: number | null;
+  fallback_group_id_on_invalid_request?: number | null;
+  allow_messages_dispatch?: boolean;
+  require_oauth_only?: boolean;
+  require_privacy_set?: boolean;
+  model_routing_enabled?: boolean;
+  mcp_xml_inject?: boolean;
+  supported_model_scopes?: string[];
   sort_order?: number;
   created_at?: string;
   updated_at?: string;
+  [key: string]: unknown;
+};
+
+export type GroupListParams = {
+  page?: number;
+  page_size?: number;
+  platform?: string;
+  status?: string;
+  is_exclusive?: boolean | null;
+  search?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+};
+
+export type GroupRequest = {
+  name: string;
+  description?: string | null;
+  platform: string;
+  rate_multiplier?: number;
+  is_exclusive?: boolean;
+  status?: string;
+  subscription_type?: string;
+  daily_limit_usd?: number | null;
+  weekly_limit_usd?: number | null;
+  monthly_limit_usd?: number | null;
+  allow_image_generation?: boolean;
+  image_rate_independent?: boolean;
+  image_rate_multiplier?: number;
+  image_price_1k?: number | null;
+  image_price_2k?: number | null;
+  image_price_4k?: number | null;
+  peak_rate_enabled?: boolean;
+  peak_start?: string;
+  peak_end?: string;
+  peak_rate_multiplier?: number;
+  claude_code_only?: boolean;
+  fallback_group_id?: number | null;
+  fallback_group_id_on_invalid_request?: number | null;
+  allow_messages_dispatch?: boolean;
+  require_oauth_only?: boolean;
+  require_privacy_set?: boolean;
+  model_routing_enabled?: boolean;
+  mcp_xml_inject?: boolean;
+  supported_model_scopes?: string[];
+  rpm_limit?: number;
+};
+
+export type GroupUsageSummary = {
+  group_id: number;
+  today_cost?: number;
+  total_cost?: number;
+};
+
+export type GroupCapacitySummary = {
+  group_id: number;
+  concurrency_used?: number;
+  concurrency_max?: number;
+  sessions_used?: number;
+  sessions_max?: number;
+  rpm_used?: number;
+  rpm_max?: number;
 };
 
 export type AccountTodayStats = {

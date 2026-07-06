@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
-import { Activity, AlertTriangle, ChevronRight, KeyRound, ServerCog, ShieldCheck } from 'lucide-react-native';
+import { Activity, AlertTriangle, ChevronRight, FolderKanban, KeyRound, ServerCog, ShieldCheck } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { Pressable, Text, View } from 'react-native';
 
@@ -15,7 +15,7 @@ type ManageModule = {
   subtitle: string;
   detail: string;
   icon: LucideIcon;
-  href: '/accounts/overview' | '/api-keys' | '/ops';
+  href: '/accounts/overview' | '/api-keys' | '/groups' | '/ops';
   accent: string;
 };
 
@@ -35,6 +35,14 @@ const MODULES: ManageModule[] = [
     icon: KeyRound,
     href: '/api-keys',
     accent: '#2563eb',
+  },
+  {
+    title: '分组管理',
+    subtitle: '分组筛选、用量容量、启停删除',
+    detail: '新建/编辑分组，查看容量、今日用量和累计用量',
+    icon: FolderKanban,
+    href: '/groups',
+    accent: '#0891b2',
   },
   {
     title: '运维监控',
