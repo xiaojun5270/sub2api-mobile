@@ -321,6 +321,7 @@ export default function UsageRecordsScreen() {
       variant="minimal"
       refreshing={usageQuery.isRefetching || statsQuery.isRefetching || cleanupQuery.isRefetching}
       onRefresh={refreshAll}
+      safeAreaEdges={['bottom']}
       bottomInsetClassName="pb-28"
       contentGapClassName="mt-2 gap-3"
     >

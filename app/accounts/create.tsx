@@ -117,7 +117,7 @@ export default function CreateAdminAccountScreen() {
     onSuccess: () => {
       setFormError(null);
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      router.replace('/(tabs)/accounts');
+      router.replace('/accounts/overview');
     },
     onError: (error) => {
       setFormError(getErrorMessage(error));

@@ -451,6 +451,7 @@ export default function GroupsScreen() {
         void usageQuery.refetch();
         void capacityQuery.refetch();
       }}
+      safeAreaEdges={['bottom']}
       bottomInsetClassName="pb-28"
       contentGapClassName="mt-2 gap-3"
     >

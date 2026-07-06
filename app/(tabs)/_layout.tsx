@@ -55,9 +55,6 @@ function NativeIosTabs() {
         <Icon sf="server.rack" selectedColor={activeColor} />
         <Label selectedStyle={{ color: activeColor, fontWeight: '700' }}>服务器</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="groups" hidden />
-      <NativeTabs.Trigger name="usage-records" hidden />
-      <NativeTabs.Trigger name="accounts" hidden />
     </NativeTabs>
   );
 }
@@ -130,9 +127,6 @@ function FallbackBottomTabs({ isDark }: { isDark: boolean }) {
           tabBarIcon: ({ color, size }) => <ServerCog color={color} size={size} />,
         }}
       />
-      <Tabs.Screen name="groups" options={{ href: null }} />
-      <Tabs.Screen name="usage-records" options={{ href: null }} />
-      <Tabs.Screen name="accounts" options={{ href: null }} />
     </Tabs>
   );
 }

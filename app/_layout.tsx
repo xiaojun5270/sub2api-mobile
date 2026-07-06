@@ -107,6 +107,14 @@ export default function RootLayout() {
               options={getStackHeaderOptions('API 密钥管理', '/manage')}
             />
             <Stack.Screen
+              name="groups/index"
+              options={getStackHeaderOptions('分组管理', '/manage')}
+            />
+            <Stack.Screen
+              name="usage-records/index"
+              options={getStackHeaderOptions('使用记录', '/manage')}
+            />
+            <Stack.Screen
               name="ops/index"
               options={getStackHeaderOptions('运维监控', '/manage')}
             />
