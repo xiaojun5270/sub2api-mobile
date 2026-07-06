@@ -89,11 +89,19 @@ export type DashboardSnapshot = {
   models?: ModelStat[];
   groups?: Array<{
     group_id?: number;
+    groupId?: number;
     group_name?: string;
+    groupName?: string;
+    name?: string;
     requests?: number;
+    total_requests?: number;
+    tokens?: number;
     total_tokens?: number;
+    cost?: number;
     total_cost?: number;
+    actual_cost?: number;
     total_actual_cost?: number;
+    standard_cost?: number;
   }>;
 };
 

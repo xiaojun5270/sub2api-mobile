@@ -1214,36 +1214,20 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     borderColor: active ? colors.primary : colors.border,
                     borderRadius: 999,
                     borderWidth: 1,
+                    flex: 1,
                     flexDirection: 'row',
                     gap: 5,
-                    paddingHorizontal: 11,
+                    justifyContent: 'center',
+                    minWidth: 0,
+                    paddingHorizontal: 8,
                     paddingVertical: 8,
                   }}
                 >
                   <Icon color={active ? colors.primaryText : colors.badgeDefaultText} size={12} />
-                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
+                  <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
                 </Pressable>
               );
             })}
-            <Pressable
-              onPress={() => setFilter('limited')}
-              style={{
-                alignItems: 'center',
-                backgroundColor: filter === 'limited' ? colors.primary : colors.mutedCard,
-                borderColor: filter === 'limited' ? colors.primary : colors.border,
-                borderRadius: 999,
-                borderWidth: 1,
-                flexDirection: 'row',
-                gap: 6,
-                paddingHorizontal: 12,
-                paddingVertical: 10,
-              }}
-            >
-              <Gauge color={filter === 'limited' ? colors.primaryText : colors.badgeDefaultText} size={13} />
-              <Text style={{ color: filter === 'limited' ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>
-                限流 {summary.limited}
-              </Text>
-            </Pressable>
           </View>
 
           <View className="mt-3 flex-row gap-2">
@@ -1262,17 +1246,42 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     borderColor: active ? colors.dark : colors.border,
                     borderRadius: 999,
                     borderWidth: 1,
+                    flex: 1,
                     flexDirection: 'row',
                     gap: 6,
-                    paddingHorizontal: 12,
+                    justifyContent: 'center',
+                    minWidth: 0,
+                    paddingHorizontal: 8,
                     paddingVertical: 10,
                   }}
                 >
                   <ArrowDownUp color={active ? colors.primaryText : colors.badgeDefaultText} size={13} />
-                  <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
+                  <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
                 </Pressable>
               );
             })}
+            <Pressable
+              onPress={() => setFilter('limited')}
+              style={{
+                alignItems: 'center',
+                backgroundColor: filter === 'limited' ? colors.primary : colors.mutedCard,
+                borderColor: filter === 'limited' ? colors.primary : colors.border,
+                borderRadius: 999,
+                borderWidth: 1,
+                flex: 1,
+                flexDirection: 'row',
+                gap: 6,
+                justifyContent: 'center',
+                minWidth: 0,
+                paddingHorizontal: 8,
+                paddingVertical: 10,
+              }}
+            >
+              <Gauge color={filter === 'limited' ? colors.primaryText : colors.badgeDefaultText} size={13} />
+              <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: filter === 'limited' ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>
+                限流 {summary.limited}
+              </Text>
+            </Pressable>
           </View>
 
           <View className="mt-3 flex-row gap-2">
@@ -1355,9 +1364,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                   <AccountStatTile colors={colors} icon={DollarSign} label="今日额度" tone="todayQuota" value={formatMoneyValue(todayStats.cost)} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
                   <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
                   <AccountStatTile colors={colors} icon={Cpu} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
+                  <AccountStatTile colors={colors} icon={Wallet} label="总额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
                 </View>
               </View>
 
