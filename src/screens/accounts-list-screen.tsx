@@ -478,8 +478,9 @@ function AccountStatTile({
         borderRadius: 14,
         borderWidth: 1,
         flex: 1,
+        flexBasis: 0,
         minHeight: 66,
-        minWidth: 132,
+        minWidth: 0,
         paddingHorizontal: 9,
         paddingVertical: 8,
         shadowColor: palette.glow,
@@ -1300,13 +1301,17 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 <Text style={{ color: colors.subtext, fontSize: 10 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
               </View>
 
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                <AccountStatTile colors={colors} icon={Activity} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
-                <AccountStatTile colors={colors} icon={Cpu} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
-                <AccountStatTile colors={colors} icon={DollarSign} label="今日额度" tone="todayQuota" value={formatMoneyValue(todayStats.cost)} />
-                <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
-                <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
-                <AccountStatTile colors={colors} icon={Cpu} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
+              <View style={{ gap: 6 }}>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <AccountStatTile colors={colors} icon={Activity} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
+                  <AccountStatTile colors={colors} icon={Cpu} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
+                  <AccountStatTile colors={colors} icon={DollarSign} label="今日额度" tone="todayQuota" value={formatMoneyValue(todayStats.cost)} />
+                </View>
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <AccountStatTile colors={colors} icon={Wallet} label="总使用额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
+                  <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
+                  <AccountStatTile colors={colors} icon={Cpu} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
+                </View>
               </View>
 
               <AccountQuotaPanel
