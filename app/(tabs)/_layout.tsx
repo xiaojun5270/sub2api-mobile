@@ -6,21 +6,21 @@ import { DynamicColorIOS, Platform, Pressable, StyleSheet, Text, View } from 're
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 
+import { useAppTheme } from '@/src/lib/theme';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
 
 const { useSnapshot } = require('valtio/react');
 
-const ANDROID_TAB_ACTIVE_COLOR = '#2563eb';
 const ANDROID_TAB_INACTIVE_COLOR = '#111827';
 
-function AndroidSelectedTabGlow() {
+function AndroidSelectedTabGlow({ dark }: { dark: boolean }) {
   return (
     <Svg height={76} pointerEvents="none" style={styles.androidTabGlow} width={76}>
       <Defs>
         <RadialGradient cx="50%" cy="50%" id="androidSelectedTabGlow" r="50%">
-          <Stop offset="0" stopColor="#e6e9ee" stopOpacity="0.96" />
-          <Stop offset="0.48" stopColor="#eef0f3" stopOpacity="0.7" />
-          <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+          <Stop offset="0" stopColor={dark ? '#1e3a8a' : '#e6e9ee'} stopOpacity={dark ? 0.8 : 0.96} />
+          <Stop offset="0.48" stopColor={dark ? '#1d4ed8' : '#eef0f3'} stopOpacity={dark ? 0.38 : 0.7} />
+          <Stop offset="1" stopColor={dark ? '#0f172a' : '#ffffff'} stopOpacity="0" />
         </RadialGradient>
       </Defs>
       <Circle cx={38} cy={38} fill="url(#androidSelectedTabGlow)" r={38} />
@@ -30,20 +30,33 @@ function AndroidSelectedTabGlow() {
 
 function AndroidPillTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const colors = useAppTheme();
+  const isDark = colors.mode === 'dark';
   const visibleRoutes = state.routes
     .map((route, routeIndex) => ({
       options: descriptors[route.key].options,
       route,
       routeIndex,
     }))
-    .filter(({ options }) => (options as { href?: unknown }).href !== null);
+    .filter(({ options, route }) => route.name !== 'index' && (options as { href?: unknown }).href !== null);
+  const activeColor = colors.primary;
+  const inactiveColor = isDark ? colors.text : ANDROID_TAB_INACTIVE_COLOR;
 
   return (
     <View pointerEvents="box-none" style={[styles.androidTabBarContainer, { bottom: Math.max(insets.bottom + 8, 13) }]}>
-      <View style={styles.androidTabBar}>
+      <View
+        style={[
+          styles.androidTabBar,
+          {
+            backgroundColor: isDark ? colors.card : '#ffffff',
+            borderColor: isDark ? colors.border : '#d7dce3',
+            shadowColor: isDark ? '#000000' : '#9ca3af',
+          },
+        ]}
+      >
         {visibleRoutes.map(({ options, route, routeIndex }) => {
           const focused = state.index === routeIndex;
-          const color = focused ? ANDROID_TAB_ACTIVE_COLOR : ANDROID_TAB_INACTIVE_COLOR;
+          const color = focused ? activeColor : inactiveColor;
           const labelSource = typeof options.tabBarLabel === 'string' ? options.tabBarLabel : options.title;
           const label = labelSource ?? route.name;
 
@@ -77,7 +90,7 @@ function AndroidPillTabBar({ state, descriptors, navigation }: BottomTabBarProps
               style={styles.androidTabItem}
               testID={options.tabBarButtonTestID}
             >
-              {focused ? <AndroidSelectedTabGlow /> : null}
+              {focused ? <AndroidSelectedTabGlow dark={isDark} /> : null}
               <View style={styles.androidTabContent}>
                 {options.tabBarIcon?.({
                   color,
@@ -158,14 +171,16 @@ function NativeIosTabs() {
 }
 
 function FallbackBottomTabs() {
+  const colors = useAppTheme();
+
   return (
     <Tabs
       initialRouteName="monitor"
       tabBar={(props) => <AndroidPillTabBar {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: ANDROID_TAB_ACTIVE_COLOR,
-        tabBarInactiveTintColor: ANDROID_TAB_INACTIVE_COLOR,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.text,
       }}
     >
       <Tabs.Screen name="index" options={{ href: null }} />
@@ -208,13 +223,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#ffffff',
     borderColor: '#d7dce3',
-    borderRadius: 46,
+    borderRadius: 36,
     borderWidth: StyleSheet.hairlineWidth,
     elevation: 12,
     flexDirection: 'row',
-    height: 92,
+    height: 72,
     paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingVertical: 4,
     shadowColor: '#9ca3af',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.16,
@@ -236,13 +251,13 @@ const styles = StyleSheet.create({
     left: '50%',
     marginLeft: -38,
     position: 'absolute',
-    top: 0,
+    top: -6,
   },
   androidTabItem: {
     alignItems: 'center',
-    borderRadius: 38,
+    borderRadius: 32,
     flex: 1,
-    height: 76,
+    height: 64,
     justifyContent: 'center',
     minWidth: 0,
     overflow: 'hidden',
