@@ -643,6 +643,14 @@ export default function MonitorScreen() {
                 icon={CircleDollarSign}
               />
             </View>
+
+            <GroupUsageDistribution
+              rows={groupUsageRows}
+              loading={snapshotQuery.isLoading}
+              error={snapshotQuery.error}
+              rangeTitle={rangeTitle}
+            />
+
             <Section
               title="账号概览"
               subtitle="总数、健康、异常和限流状态一览"
@@ -701,13 +709,6 @@ export default function MonitorScreen() {
                 { label: '缓存读取 Token', value: totalCacheReadTokens, color: '#64748b', hint: '命中缓存后复用的 token。' },
               ]}
               formatValue={formatTokenDisplay}
-            />
-
-            <GroupUsageDistribution
-              rows={groupUsageRows}
-              loading={snapshotQuery.isLoading}
-              error={snapshotQuery.error}
-              rangeTitle={rangeTitle}
             />
 
             <DonutChartCard

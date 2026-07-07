@@ -567,11 +567,13 @@ function OpsMetricTile({
   label,
   value,
   detail,
+  detailLines = 1,
   tone = 'default',
 }: {
   label: string;
   value: string;
   detail?: string;
+  detailLines?: number;
   tone?: OpsTone;
 }) {
   const colors = useAppTheme();
@@ -586,7 +588,7 @@ function OpsMetricTile({
         borderWidth: 1,
         flexBasis: '31%',
         flexGrow: 1,
-        minHeight: 86,
+        minHeight: detailLines > 1 ? 104 : 86,
         minWidth: 92,
         paddingHorizontal: 12,
         paddingVertical: 11,
@@ -604,7 +606,7 @@ function OpsMetricTile({
         {value}
       </Text>
       {detail ? (
-        <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, lineHeight: 14, marginTop: 4 }}>
+        <Text numberOfLines={detailLines} style={{ color: colors.subtext, fontSize: 10.5, lineHeight: 14, marginTop: 4 }}>
           {detail}
         </Text>
       ) : null}
@@ -1049,8 +1051,10 @@ export default function OpsScreen() {
         ? timeOptions
         : [];
   const healthTone: OpsTone = healthScore === undefined ? 'default' : healthScore >= 85 ? 'success' : healthScore < 60 ? 'danger' : 'warning';
-  const healthText = healthScore === undefined ? '--' : formatCompactNumber(healthScore);
-  const healthStatusText = healthScore === undefined ? '等待数据' : healthScore >= 85 ? '健康' : healthScore < 60 ? '异常' : '风险';
+  const isIdle = totalRequests <= 0 && qps <= 0 && tokenPerSecond <= 0 && currentConcurrency <= 0;
+  const healthText = isIdle ? '待机' : healthScore === undefined ? '--' : formatCompactNumber(healthScore);
+  const healthLabel = isIdle ? '健康' : '健康分';
+  const healthStatusText = isIdle ? '待机' : healthScore === undefined ? '等待数据' : healthScore >= 85 ? '健康' : healthScore < 60 ? '异常' : '风险';
   const slaTone: OpsTone = slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : slaPercent >= 95 ? 'warning' : 'danger';
   const errorTone: OpsTone = errorRate > 0 ? 'danger' : 'success';
   const upstreamTone: OpsTone = upstreamErrorRate > 0 || upstreamErrorCount > 0 ? 'danger' : 'success';
@@ -1190,7 +1194,7 @@ export default function OpsScreen() {
                 <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: getOpsTonePalette(colors, healthTone).value, fontSize: 30, fontWeight: '800' }}>
                   {healthText}
                 </Text>
-                <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 2 }}>健康分</Text>
+                <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 2 }}>{healthLabel}</Text>
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: colors.subtext, fontSize: 12 }}>健康状况</Text>
@@ -1210,11 +1214,6 @@ export default function OpsScreen() {
               </View>
             </View>
             <MiniSparkline values={throughputSparkValues} color={colors.primary} />
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
-              <OpsMetricTile label="请求数" value={formatCompactNumber(totalRequests)} detail={getTimeRangeLabel(timeRange)} />
-              <OpsMetricTile label="Token数" value={formatCompactNumber(tokenConsumed)} detail="累计消耗" />
-              <OpsMetricTile label="当前并发" value={formatCompactNumber(currentConcurrency)} detail={queueSize > 0 ? `队列 ${formatCompactNumber(queueSize)}` : '队列正常'} tone={queueSize > 0 ? 'warning' : 'default'} />
-            </View>
           </View>
         </View>
 
@@ -1263,12 +1262,12 @@ export default function OpsScreen() {
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
           <SectionTitle title="资源状态" icon={ServerCog} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
-            <OpsMetricTile label="CPU" value={formatWholePercent(cpuUsage)} detail={`警告 ${formatWholePercent(cpuWarningThreshold)} · 严重 ${formatWholePercent(cpuCriticalThreshold)}`} tone={cpuTone} />
-            <OpsMetricTile label="内存" value={memoryUsage ? formatWholePercent(memoryUsage) : '--'} detail={`${formatMemoryMb(memoryUsed)} / ${formatMemoryMb(memoryTotal)}`} tone={memoryTone} />
-            <OpsMetricTile label="数据库" value={dbStatus} detail={`连接 ${formatOptionalNumber(dbConnActive)} / ${formatOptionalNumber(dbConnMax)} · 活跃 ${formatOptionalNumber(dbConnActive)} · 空闲 ${formatOptionalNumber(dbConnIdle)}`} tone={dbTone} />
-            <OpsMetricTile label="REDIS" value={formatWholePercent(redisUsagePercent)} detail={`连接 ${formatOptionalNumber(redisConnTotal)} / ${formatOptionalNumber(redisConnMax)} · 活跃 ${formatOptionalNumber(redisConnActive)} · 空闲 ${formatOptionalNumber(redisConnIdle)}`} tone={redisTone} />
-            <OpsMetricTile label="协程" value={formatThresholdStatus(goroutineCount, goroutineWarningThreshold, goroutineCriticalThreshold)} detail={`当前 ${formatOptionalNumber(goroutineCount)} · 警告 ${formatOptionalNumber(goroutineWarningThreshold)} · 严重 ${formatOptionalNumber(goroutineCriticalThreshold)}`} tone={goroutineTone} />
-            <OpsMetricTile label="后台任务" value={backgroundTaskWarnings > 0 ? '告警' : '正常'} detail={`总计 ${formatOptionalNumber(backgroundTasks)} · 警告 ${formatOptionalNumber(backgroundTaskWarnings)}`} tone={backgroundTone} />
+            <OpsMetricTile label="CPU" value={formatWholePercent(cpuUsage)} detail={`警${formatWholePercent(cpuWarningThreshold)} 严${formatWholePercent(cpuCriticalThreshold)}`} detailLines={2} tone={cpuTone} />
+            <OpsMetricTile label="内存" value={memoryUsage ? formatWholePercent(memoryUsage) : '--'} detail={`${formatMemoryMb(memoryUsed)} / ${formatMemoryMb(memoryTotal)}`} detailLines={2} tone={memoryTone} />
+            <OpsMetricTile label="数据库" value={dbStatus} detail={`连 ${formatOptionalNumber(dbConnActive)}/${formatOptionalNumber(dbConnMax)}\n活 ${formatOptionalNumber(dbConnActive)} 空 ${formatOptionalNumber(dbConnIdle)}`} detailLines={2} tone={dbTone} />
+            <OpsMetricTile label="REDIS" value={formatWholePercent(redisUsagePercent)} detail={`连 ${formatOptionalNumber(redisConnTotal)}/${formatOptionalNumber(redisConnMax)}\n活 ${formatOptionalNumber(redisConnActive)} 空 ${formatOptionalNumber(redisConnIdle)}`} detailLines={2} tone={redisTone} />
+            <OpsMetricTile label="协程" value={formatThresholdStatus(goroutineCount, goroutineWarningThreshold, goroutineCriticalThreshold)} detail={`当前 ${formatOptionalNumber(goroutineCount)}\n警 ${formatOptionalNumber(goroutineWarningThreshold)} 严 ${formatOptionalNumber(goroutineCriticalThreshold)}`} detailLines={2} tone={goroutineTone} />
+            <OpsMetricTile label="后台任务" value={backgroundTaskWarnings > 0 ? '告警' : '正常'} detail={`总 ${formatOptionalNumber(backgroundTasks)}\n警告 ${formatOptionalNumber(backgroundTaskWarnings)}`} detailLines={2} tone={backgroundTone} />
           </View>
         </View>
 
