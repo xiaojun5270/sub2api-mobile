@@ -454,6 +454,20 @@ export type AccountTodayStats = {
   user_cost: number;
 };
 
+export type AccountListParams = {
+  page?: number;
+  page_size?: number;
+  platform?: string;
+  type?: string;
+  status?: string;
+  group?: string | number;
+  privacy_mode?: string;
+  search?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  timezone?: string;
+};
+
 export type AdminAccountModel = {
   id?: string;
   display_name?: string;
@@ -471,6 +485,7 @@ export type AdminAccountModel = {
 export type AdminAccount = {
   id: number;
   name: string;
+  notes?: string | null;
   platform: string;
   type: string;
   status?: string;
@@ -478,41 +493,80 @@ export type AdminAccount = {
   priority?: number;
   concurrency?: number;
   current_concurrency?: number;
+  load_factor?: number | null;
   rate_multiplier?: number;
+  credentials?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+  error?: string | null;
+  error_code?: number | null;
   error_message?: string;
   rate_limit_reset_at?: string | null;
   proxy_id?: number | null;
+  proxy?: Record<string, unknown> | null;
   privacy?: boolean;
+  privacy_mode?: string | null;
   shadow?: boolean;
   temp_unschedulable_until?: string | null;
+  expires_at?: string | null;
+  auto_pause_on_expired?: boolean;
+  quota?: Record<string, unknown>;
+  usage?: Record<string, unknown>;
   updated_at?: string;
   last_used_at?: string | null;
   created_at?: string;
   group_ids?: number[];
   groups?: AdminGroup[];
-  extra?: Record<string, string | number | boolean | null>;
-  notes?: string | null;
+  group_name?: string | null;
+  [key: string]: unknown;
 };
 
-export type AccountType = 'apikey' | 'oauth' | 'setup-token' | 'upstream';
+export type AccountType = 'apikey' | 'oauth' | 'service_account' | 'bedrock' | 'setup-token' | 'upstream';
+
+export type AccountRequestObject = Record<string, unknown>;
 
 export type CreateAccountRequest = {
   name: string;
+  notes?: string | null;
   platform: string;
   type: AccountType;
-  credentials: Record<string, string | number | boolean | null | undefined>;
-  extra?: Record<string, string | number | boolean | null | undefined>;
-  notes?: string;
-  proxy_id?: number;
+  credentials: AccountRequestObject;
+  extra?: AccountRequestObject;
+  proxy_id?: number | null;
   concurrency?: number;
+  load_factor?: number | null;
   priority?: number;
   rate_multiplier?: number;
   group_ids?: number[];
+  expires_at?: string | null;
+  auto_pause_on_expired?: boolean;
+  confirm_mixed_channel_risk?: boolean;
 };
 
 export type UpdateAccountRequest = Partial<CreateAccountRequest> & {
   status?: string;
   schedulable?: boolean;
+  privacy_mode?: string;
+};
+
+export type AccountBulkUpdateRequest = {
+  account_ids: number[];
+  status?: string;
+  proxy_id?: number | null;
+  group_ids?: number[];
+  concurrency?: number;
+  priority?: number;
+  rate_multiplier?: number;
+  privacy_mode?: string;
+};
+
+export type AccountDataImportResult = {
+  account_created?: number;
+  account_failed?: number;
+  proxy_created?: number;
+  proxy_reused?: number;
+  proxy_failed?: number;
+  errors?: unknown[];
+  [key: string]: unknown;
 };
 
 export type CreateUserRequest = {

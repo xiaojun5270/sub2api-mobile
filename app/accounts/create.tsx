@@ -8,10 +8,9 @@ import { useAppTheme } from '@/src/lib/theme';
 import { createAccount } from '@/src/services/admin';
 import type { AccountType, CreateAccountRequest } from '@/src/types/admin';
 
-const PLATFORM_OPTIONS = ['anthropic', 'openai', 'gemini', 'sora', 'antigravity'];
-const ACCOUNT_TYPE_OPTIONS: AccountType[] = ['apikey', 'oauth', 'setup-token', 'upstream'];
-type JsonScalar = string | number | boolean | null | undefined;
-type JsonRecord = Record<string, JsonScalar>;
+const PLATFORM_OPTIONS = ['openai', 'gemini', 'anthropic', 'antigravity', 'grok'];
+const ACCOUNT_TYPE_OPTIONS: AccountType[] = ['apikey', 'oauth', 'service_account', 'bedrock'];
+type JsonRecord = Record<string, unknown>;
 
 function toNumber(raw: string) {
   if (!raw.trim()) return undefined;
@@ -33,20 +32,6 @@ function parseObjectInput(raw: string, fieldLabel: string): JsonRecord | undefin
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(`${fieldLabel} 必须是 JSON 对象。`);
-  }
-
-  const entries = Object.entries(parsed as Record<string, unknown>);
-  for (const [, value] of entries) {
-    const valueType = typeof value;
-    if (
-      value !== null
-      && value !== undefined
-      && valueType !== 'string'
-      && valueType !== 'number'
-      && valueType !== 'boolean'
-    ) {
-      throw new Error(`${fieldLabel} 仅支持 string / number / boolean / null。`);
-    }
   }
 
   return parsed as JsonRecord;
@@ -82,9 +67,13 @@ export default function CreateAdminAccountScreen() {
   const [extraJson, setExtraJson] = useState('');
   const [proxyId, setProxyId] = useState('');
   const [concurrency, setConcurrency] = useState('');
+  const [loadFactor, setLoadFactor] = useState('');
   const [priority, setPriority] = useState('');
   const [rateMultiplier, setRateMultiplier] = useState('');
   const [groupIds, setGroupIds] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [autoPauseOnExpired, setAutoPauseOnExpired] = useState(true);
+  const [confirmMixedChannelRisk, setConfirmMixedChannelRisk] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => Boolean(name.trim() && credentialsJson.trim()), [credentialsJson, name]);
@@ -106,9 +95,13 @@ export default function CreateAdminAccountScreen() {
         notes: notes.trim() || undefined,
         proxy_id: toNumber(proxyId),
         concurrency: toNumber(concurrency),
+        load_factor: toNumber(loadFactor) ?? null,
         priority: toNumber(priority),
         rate_multiplier: toNumber(rateMultiplier),
         group_ids: toGroupIds(groupIds),
+        expires_at: expiresAt.trim() || null,
+        auto_pause_on_expired: autoPauseOnExpired,
+        confirm_mixed_channel_risk: confirmMixedChannelRisk || undefined,
         extra,
       };
 
@@ -330,6 +323,25 @@ export default function CreateAdminAccountScreen() {
               }}
             />
 
+            <Text style={{ marginBottom: 6, fontSize: 12, color: colors.subtext }}>load_factor</Text>
+            <TextInput
+              value={loadFactor}
+              onChangeText={setLoadFactor}
+              keyboardType="decimal-pad"
+              placeholder="例如：1，留空则按后端默认"
+              placeholderTextColor={colors.placeholder}
+              style={{
+                backgroundColor: colors.muted,
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 12,
+                color: colors.text,
+                marginBottom: 10,
+              }}
+            />
+
             <Text style={{ marginBottom: 6, fontSize: 12, color: colors.subtext }}>priority</Text>
             <TextInput
               value={priority}
@@ -368,6 +380,24 @@ export default function CreateAdminAccountScreen() {
               }}
             />
 
+            <Text style={{ marginBottom: 6, fontSize: 12, color: colors.subtext }}>expires_at</Text>
+            <TextInput
+              value={expiresAt}
+              onChangeText={setExpiresAt}
+              placeholder="例如：2026-12-31T23:59:59+08:00"
+              placeholderTextColor={colors.placeholder}
+              style={{
+                backgroundColor: colors.muted,
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 12,
+                color: colors.text,
+                marginBottom: 10,
+              }}
+            />
+
             <Text style={{ marginBottom: 6, fontSize: 12, color: colors.subtext }}>group_ids（逗号分隔）</Text>
             <TextInput
               value={groupIds}
@@ -384,6 +414,45 @@ export default function CreateAdminAccountScreen() {
                 color: colors.text,
               }}
             />
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              <Pressable
+                onPress={() => setAutoPauseOnExpired((value) => !value)}
+                style={{
+                  alignItems: 'center',
+                  backgroundColor: autoPauseOnExpired ? colors.primary : colors.muted,
+                  borderColor: autoPauseOnExpired ? colors.primary : colors.border,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                }}
+              >
+                <Text style={{ color: autoPauseOnExpired ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '800' }}>
+                  过期自动暂停
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setConfirmMixedChannelRisk((value) => !value)}
+                style={{
+                  alignItems: 'center',
+                  backgroundColor: confirmMixedChannelRisk ? colors.primary : colors.muted,
+                  borderColor: confirmMixedChannelRisk ? colors.primary : colors.border,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  paddingHorizontal: 12,
+                  paddingVertical: 9,
+                }}
+              >
+                <Text style={{ color: confirmMixedChannelRisk ? colors.primaryText : colors.text, fontSize: 12, fontWeight: '800' }}>
+                  确认混合渠道风险
+                </Text>
+              </Pressable>
+            </View>
           </View>
 
           {formError ? (

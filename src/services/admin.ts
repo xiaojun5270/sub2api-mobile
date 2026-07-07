@@ -1,6 +1,9 @@
 import { adminFetch } from '@/src/lib/admin-fetch';
 import type {
   AccountTodayStats,
+  AccountBulkUpdateRequest,
+  AccountDataImportResult,
+  AccountListParams,
   AdminAccount,
   AdminAccountModel,
   AdminApiKey,
@@ -1104,11 +1107,33 @@ export function clearGroupRpmOverrides(groupId: number) {
   });
 }
 
-export function listAccounts(search = '') {
-  void search;
-  return adminFetch<PaginatedData<AdminAccount>>(
-    `/api/v1/admin/accounts${buildQuery({ page: 1, page_size: 20 })}`
+export async function listAccounts(params: string | AccountListParams = '') {
+  const query = typeof params === 'string'
+    ? {
+        page: 1,
+        page_size: 100,
+        search: params.trim(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }
+    : {
+        page: params.page ?? 1,
+        page_size: params.page_size ?? 100,
+        platform: params.platform,
+        type: params.type,
+        status: params.status,
+        group: params.group,
+        privacy_mode: params.privacy_mode,
+        search: params.search?.trim(),
+        sort_by: params.sort_by,
+        sort_order: params.sort_order,
+        timezone: params.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone,
+      };
+
+  const payload = await adminFetch<unknown>(
+    `/api/v1/admin/accounts${buildQuery(query)}`
   );
+
+  return toPaginatedData<AdminAccount>(payload, ['accounts', 'items', 'data']);
 }
 
 export function getAccount(accountId: number) {
@@ -1132,6 +1157,68 @@ export function updateAccount(accountId: number, body: UpdateAccountRequest) {
 export function deleteAccount(accountId: number) {
   return adminFetch(`/api/v1/admin/accounts/${accountId}`, {
     method: 'DELETE',
+  });
+}
+
+export function checkAccountMixedChannelRisk(body: { platform: string; group_ids?: number[] }) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/check-mixed-channel', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function applyAccountOAuthCredentials(
+  accountId: number,
+  body: {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: string | number | null;
+    client_id?: string;
+    account_id?: string;
+    email?: string;
+  }
+) {
+  return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}/apply-oauth-credentials`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getAccountTempUnschedulable(accountId: number) {
+  return adminFetch<Record<string, unknown>>(`/api/v1/admin/accounts/${accountId}/temp-unschedulable`);
+}
+
+export function clearAccountTempUnschedulable(accountId: number) {
+  return adminFetch(`/api/v1/admin/accounts/${accountId}/temp-unschedulable`, {
+    method: 'DELETE',
+  });
+}
+
+export function batchCreateAccounts(accounts: CreateAccountRequest[]) {
+  return adminFetch<{ accounts?: AdminAccount[]; items?: AdminAccount[]; created?: number; errors?: unknown[] }>(
+    '/api/v1/admin/accounts/batch',
+    {
+      method: 'POST',
+      body: JSON.stringify({ accounts }),
+    }
+  );
+}
+
+export function batchUpdateAccountCredentials(body: {
+  account_ids: number[];
+  credentials: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+}) {
+  return adminFetch('/api/v1/admin/accounts/batch-update-credentials', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function bulkUpdateAccounts(body: AccountBulkUpdateRequest) {
+  return adminFetch('/api/v1/admin/accounts/bulk-update', {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 
@@ -1392,6 +1479,133 @@ export function recoverAccountState(accountId: number) {
 export function syncAccountModels(accountId: number) {
   return adminFetch(`/api/v1/admin/accounts/${accountId}/models/sync-upstream`, {
     method: 'POST',
+  });
+}
+
+export function previewSyncAccountModels(body: Record<string, unknown>) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/models/sync-upstream-preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function previewCrsAccountSync(body: { base_url: string; username: string; password: string }) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/sync/crs/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function syncCrsAccounts(body: {
+  base_url: string;
+  username: string;
+  password: string;
+  sync_proxies?: boolean;
+  selected_account_ids?: Array<string | number>;
+}) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/sync/crs', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function exportAccountsData(params: AccountListParams & { ids?: number[] | string; include_proxies?: boolean } = {}) {
+  const ids = Array.isArray(params.ids) ? params.ids.join(',') : params.ids;
+
+  return adminFetch<Record<string, unknown>>(
+    `/api/v1/admin/accounts/data${buildQuery({
+      ids,
+      platform: params.platform,
+      type: params.type,
+      status: params.status,
+      group: params.group,
+      privacy_mode: params.privacy_mode,
+      search: params.search?.trim(),
+      sort_by: params.sort_by,
+      sort_order: params.sort_order,
+      include_proxies: params.include_proxies,
+    })}`
+  );
+}
+
+export function importAccountsData(body: { data: Record<string, unknown>; skip_default_group_bind?: boolean }) {
+  return adminFetch<AccountDataImportResult>('/api/v1/admin/accounts/data', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function importCodexSessionAccount(body: {
+  content: string;
+  name: string;
+  notes?: string | null;
+  proxy_id?: number | null;
+  concurrency?: number;
+  load_factor?: number | null;
+  priority?: number;
+  rate_multiplier?: number;
+  group_ids?: number[];
+  expires_at?: string | null;
+  auto_pause_on_expired?: boolean;
+  credential_extras?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+  update_existing?: boolean;
+}) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/import/codex-session', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function createAccountFromCodexPat(body: {
+  access_token: string;
+  name: string;
+  notes?: string | null;
+  proxy_id?: number | null;
+  concurrency?: number;
+  load_factor?: number | null;
+  priority?: number;
+  rate_multiplier?: number;
+  group_ids?: number[];
+  expires_at?: string | null;
+  auto_pause_on_expired?: boolean;
+  credential_extras?: Record<string, unknown>;
+  extra?: Record<string, unknown>;
+}) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/openai/create-from-codex-pat', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function getAntigravityDefaultModelMapping() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/accounts/antigravity/default-model-mapping');
+}
+
+export function refreshOpenAiToken(body: { refresh_token: string; proxy_id?: number; client_id?: string }) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/openai/refresh-token', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function revertAccountProxyFallback(accountId: number) {
+  return adminFetch(`/api/v1/admin/accounts/${accountId}/revert-proxy-fallback`, {
+    method: 'POST',
+  });
+}
+
+export function setAccountPrivacy(accountId: number, body: { privacy_mode?: string; privacy?: boolean; enabled?: boolean } = {}) {
+  return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}/set-privacy`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function createShadowAccount(accountId: number, body: Record<string, unknown> = {}) {
+  return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}/shadow`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 

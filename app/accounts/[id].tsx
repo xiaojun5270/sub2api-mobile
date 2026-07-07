@@ -8,6 +8,7 @@ import {
   DatabaseZap,
   KeyRound,
   PauseCircle,
+  Shield,
   RefreshCw,
   RotateCcw,
   Save,
@@ -24,8 +25,11 @@ import { LineTrendChart } from '@/src/components/line-trend-chart';
 import { formatCompactNumber, formatDisplayTime, formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
+  applyAccountOAuthCredentials,
   clearAccountError,
   clearAccountRateLimit,
+  clearAccountTempUnschedulable,
+  createShadowAccount,
   getAccount,
   getAccountModels,
   getAccountStats,
@@ -34,8 +38,10 @@ import {
   getDashboardSnapshot,
   recoverAccountState,
   refreshAccount,
+  revertAccountProxyFallback,
   resetAccountQuota,
   setAccountSchedulable,
+  setAccountPrivacy,
   syncAccountModels,
   testAccount,
   updateAccount,
@@ -43,7 +49,19 @@ import {
 import type { AdminAccount } from '@/src/types/admin';
 
 type RangeKey = '24h' | '7d' | '30d';
-type AccountAction = 'test' | 'refresh' | 'clear-error' | 'clear-rate-limit' | 'recover' | 'reset-quota' | 'sync-models' | 'toggle-schedulable';
+type AccountAction =
+  | 'test'
+  | 'refresh'
+  | 'clear-error'
+  | 'clear-rate-limit'
+  | 'clear-temp-unschedulable'
+  | 'recover'
+  | 'reset-quota'
+  | 'sync-models'
+  | 'toggle-schedulable'
+  | 'toggle-privacy'
+  | 'revert-proxy-fallback'
+  | 'create-shadow';
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
   { key: '24h', label: '24H' },
@@ -100,6 +118,14 @@ function toNumber(raw: string) {
   return Number.isFinite(value) ? value : undefined;
 }
 
+function toNullableNumber(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.toLowerCase() === 'null') return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : undefined;
+}
+
 function toGroupIds(raw: string) {
   const values = raw
     .split(',')
@@ -121,9 +147,16 @@ function modelName(value: string | { id?: string; display_name?: string; model?:
   return value.display_name || value.id || value.model || value.name || '--';
 }
 
-function formatExtraValue(value: string | number | boolean | null) {
+function formatExtraValue(value: unknown) {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[object]';
+    }
+  }
   return String(value);
 }
 
@@ -353,17 +386,32 @@ export default function AccountDetailScreen() {
   const account = accountQuery.data;
   const [name, setName] = useState('');
   const [concurrency, setConcurrency] = useState('');
+  const [loadFactor, setLoadFactor] = useState('');
   const [priority, setPriority] = useState('');
   const [rateMultiplier, setRateMultiplier] = useState('');
+  const [proxyId, setProxyId] = useState('');
+  const [expiresAt, setExpiresAt] = useState('');
+  const [privacyMode, setPrivacyMode] = useState('');
   const [groupIds, setGroupIds] = useState('');
   const [notes, setNotes] = useState('');
+  const [oauthAccessToken, setOauthAccessToken] = useState('');
+  const [oauthRefreshToken, setOauthRefreshToken] = useState('');
+  const [oauthExpiresAt, setOauthExpiresAt] = useState('');
+  const [oauthClientId, setOauthClientId] = useState('');
+  const [oauthAccountId, setOauthAccountId] = useState('');
+  const [oauthEmail, setOauthEmail] = useState('');
+  const [oauthMessage, setOauthMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!account) return;
     setName(account.name || '');
     setConcurrency(account.concurrency ? String(account.concurrency) : '');
+    setLoadFactor(account.load_factor !== undefined && account.load_factor !== null ? String(account.load_factor) : '');
     setPriority(account.priority ? String(account.priority) : '');
     setRateMultiplier(account.rate_multiplier ? String(account.rate_multiplier) : '');
+    setProxyId(account.proxy_id !== undefined && account.proxy_id !== null ? String(account.proxy_id) : '');
+    setExpiresAt(account.expires_at || '');
+    setPrivacyMode(account.privacy_mode || '');
     setGroupIds(account.group_ids?.join(',') || account.groups?.map((group) => group.id).join(',') || '');
     setNotes(account.notes || '');
   }, [account]);
@@ -373,8 +421,12 @@ export default function AccountDetailScreen() {
       updateAccount(accountId, {
         name: name.trim() || undefined,
         concurrency: toNumber(concurrency),
+        load_factor: toNumber(loadFactor) ?? null,
         priority: toNumber(priority),
         rate_multiplier: toNumber(rateMultiplier),
+        proxy_id: toNullableNumber(proxyId),
+        expires_at: expiresAt.trim() || null,
+        privacy_mode: privacyMode.trim() || undefined,
         group_ids: toGroupIds(groupIds),
         notes: notes.trim() || undefined,
       }),
@@ -392,9 +444,13 @@ export default function AccountDetailScreen() {
       if (action === 'refresh') return refreshAccount(accountId);
       if (action === 'clear-error') return clearAccountError(accountId);
       if (action === 'clear-rate-limit') return clearAccountRateLimit(accountId);
+      if (action === 'clear-temp-unschedulable') return clearAccountTempUnschedulable(accountId);
       if (action === 'recover') return recoverAccountState(accountId);
       if (action === 'reset-quota') return resetAccountQuota(accountId);
       if (action === 'sync-models') return syncAccountModels(accountId);
+      if (action === 'toggle-privacy') return setAccountPrivacy(accountId);
+      if (action === 'revert-proxy-fallback') return revertAccountProxyFallback(accountId);
+      if (action === 'create-shadow') return createShadowAccount(accountId);
       return setAccountSchedulable(accountId, !(account?.schedulable ?? true));
     },
     onSuccess: (_, action) => {
@@ -403,10 +459,14 @@ export default function AccountDetailScreen() {
         refresh: '刷新已提交',
         'clear-error': '错误已清除',
         'clear-rate-limit': '限流已清除',
+        'clear-temp-unschedulable': '临时不可调度已清除',
         recover: '状态已恢复',
         'reset-quota': '额度已重置',
         'sync-models': '模型同步已提交',
         'toggle-schedulable': '调度状态已更新',
+        'toggle-privacy': '隐私模式已切换',
+        'revert-proxy-fallback': '代理 fallback 已恢复',
+        'create-shadow': 'Shadow 账号已创建',
       };
       setActionMessage(labels[action]);
       queryClient.invalidateQueries({ queryKey: ['account', accountId] });
@@ -415,6 +475,31 @@ export default function AccountDetailScreen() {
       queryClient.invalidateQueries({ queryKey: ['account-today-stats', accountId] });
     },
     onError: (error) => setActionMessage(getErrorMessage(error)),
+  });
+
+  const oauthMutation = useMutation({
+    mutationFn: () => {
+      if (!oauthAccessToken.trim()) {
+        throw new Error('access_token 不能为空');
+      }
+
+      return applyAccountOAuthCredentials(accountId, {
+        access_token: oauthAccessToken.trim(),
+        refresh_token: oauthRefreshToken.trim() || undefined,
+        expires_at: oauthExpiresAt.trim() || undefined,
+        client_id: oauthClientId.trim() || undefined,
+        account_id: oauthAccountId.trim() || undefined,
+        email: oauthEmail.trim() || undefined,
+      });
+    },
+    onSuccess: () => {
+      setOauthMessage('OAuth 凭证已应用');
+      setOauthAccessToken('');
+      setOauthRefreshToken('');
+      queryClient.invalidateQueries({ queryKey: ['account', accountId] });
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+    },
+    onError: (error) => setOauthMessage(getErrorMessage(error)),
   });
 
   const trendPoints = (snapshotQuery.data?.trend ?? []).map((item) => ({
@@ -478,9 +563,11 @@ export default function AccountDetailScreen() {
                   <MetricTile label="并发" value={`${account.current_concurrency ?? 0}/${account.concurrency ?? '--'}`} />
                   <MetricTile label="优先级" value={`${account.priority ?? 0}`} />
                   <MetricTile label="倍率" value={`${(account.rate_multiplier ?? 1).toFixed(2)}x`} />
+                  <MetricTile label="权重" value={account.load_factor !== undefined && account.load_factor !== null ? `${account.load_factor}` : '--'} />
                   <MetricTile label="代理" value={account.proxy_id ? `#${account.proxy_id}` : '--'} />
-                  <MetricTile label="隐私" value={account.privacy ? '开启' : '关闭'} />
+                  <MetricTile label="隐私" value={account.privacy_mode || (account.privacy ? '开启' : '关闭')} />
                   <MetricTile label="Shadow" value={account.shadow ? '开启' : '关闭'} />
+                  <MetricTile label="过期" value={formatDisplayTime(account.expires_at)} />
                 </View>
                 <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
                   最近使用 {formatDisplayTime(account.last_used_at)} · 更新 {formatDisplayTime(account.updated_at)} · 创建 {formatDisplayTime(account.created_at)}
@@ -535,8 +622,12 @@ export default function AccountDetailScreen() {
                   <ActionButton label={(account.schedulable ?? true) ? '暂停调度' : '恢复调度'} icon={PauseCircle} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('toggle-schedulable')} />
                   <ActionButton label="清除错误" icon={AlertTriangle} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('clear-error')} />
                   <ActionButton label="清除限流" icon={RotateCcw} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('clear-rate-limit')} />
+                  <ActionButton label="清临时暂停" icon={RotateCcw} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('clear-temp-unschedulable')} />
                   <ActionButton label="恢复状态" icon={ShieldCheck} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('recover')} />
                   <ActionButton label="同步模型" icon={DatabaseZap} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('sync-models')} />
+                  <ActionButton label="切换隐私" icon={Shield} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('toggle-privacy')} />
+                  <ActionButton label="恢复代理" icon={RefreshCw} disabled={actionMutation.isPending} onPress={() => actionMutation.mutate('revert-proxy-fallback')} />
+                  <ActionButton label="创建 Shadow" icon={DatabaseZap} disabled={actionMutation.isPending} onPress={() => confirmAction('create-shadow', '创建 Shadow 账号', '确认按后端默认配置创建 Shadow 账号吗？')} />
                   <ActionButton label="重置额度" icon={RotateCcw} danger disabled={actionMutation.isPending} onPress={() => confirmAction('reset-quota', '重置额度', '确认重置该账号额度吗？')} />
                 </View>
                 {actionMessage ? (
@@ -550,8 +641,12 @@ export default function AccountDetailScreen() {
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                   <FormField label="名称" value={name} onChangeText={setName} />
                   <FormField label="并发" value={concurrency} onChangeText={setConcurrency} keyboardType="number-pad" />
+                  <FormField label="权重" value={loadFactor} onChangeText={setLoadFactor} keyboardType="decimal-pad" />
                   <FormField label="优先级" value={priority} onChangeText={setPriority} keyboardType="number-pad" />
                   <FormField label="倍率" value={rateMultiplier} onChangeText={setRateMultiplier} keyboardType="decimal-pad" />
+                  <FormField label="代理 ID" value={proxyId} onChangeText={setProxyId} placeholder="留空不改，null 清空" />
+                  <FormField label="隐私模式" value={privacyMode} onChangeText={setPrivacyMode} placeholder="例如 privacy/default" />
+                  <FormField label="过期时间" value={expiresAt} onChangeText={setExpiresAt} placeholder="2026-12-31T23:59:59+08:00" />
                   <FormField label="分组 ID" value={groupIds} onChangeText={setGroupIds} placeholder="1,2,5" />
                   <FormField label="备注" value={notes} onChangeText={setNotes} multiline />
                 </View>
@@ -577,6 +672,40 @@ export default function AccountDetailScreen() {
                   <Text style={{ color: colors.primaryText, fontSize: 14, fontWeight: '800' }}>{updateMutation.isPending ? '保存中...' : '保存修改'}</Text>
                 </Pressable>
               </Section>
+
+              {`${account.type || ''}`.toLowerCase() === 'oauth' ? (
+                <Section title="OAuth 凭证" icon={KeyRound}>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                    <FormField label="access_token" value={oauthAccessToken} onChangeText={setOauthAccessToken} multiline />
+                    <FormField label="refresh_token" value={oauthRefreshToken} onChangeText={setOauthRefreshToken} multiline />
+                    <FormField label="expires_at" value={oauthExpiresAt} onChangeText={setOauthExpiresAt} placeholder="时间戳或 ISO 时间" />
+                    <FormField label="client_id" value={oauthClientId} onChangeText={setOauthClientId} />
+                    <FormField label="account_id" value={oauthAccountId} onChangeText={setOauthAccountId} />
+                    <FormField label="email" value={oauthEmail} onChangeText={setOauthEmail} />
+                  </View>
+                  {oauthMessage ? (
+                    <View style={{ backgroundColor: oauthMessage === 'OAuth 凭证已应用' ? colors.successBg : colors.errorBg, borderRadius: 12, marginTop: 12, padding: 12 }}>
+                      <Text style={{ color: oauthMessage === 'OAuth 凭证已应用' ? colors.success : colors.errorText, fontSize: 13 }}>{oauthMessage}</Text>
+                    </View>
+                  ) : null}
+                  <Pressable
+                    disabled={oauthMutation.isPending}
+                    onPress={() => {
+                      setOauthMessage(null);
+                      oauthMutation.mutate();
+                    }}
+                    style={{
+                      alignItems: 'center',
+                      backgroundColor: oauthMutation.isPending ? colors.disabled : colors.primary,
+                      borderRadius: 14,
+                      marginTop: 14,
+                      paddingVertical: 13,
+                    }}
+                  >
+                    <Text style={{ color: colors.primaryText, fontSize: 14, fontWeight: '800' }}>{oauthMutation.isPending ? '应用中...' : '应用 OAuth 凭证'}</Text>
+                  </Pressable>
+                </Section>
+              ) : null}
 
               <Section title="用量分析" icon={BarChart3}>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>

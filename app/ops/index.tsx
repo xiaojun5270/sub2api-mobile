@@ -8,7 +8,7 @@ import { Pressable, Text, View } from 'react-native';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { formatCompactNumber, formatDisplayTime } from '@/src/lib/formatters';
-import { useAppTheme } from '@/src/lib/theme';
+import { type AppTheme, useAppTheme } from '@/src/lib/theme';
 import {
   getOpsAccountAvailability,
   getOpsAlertEvents,
@@ -32,6 +32,7 @@ import {
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
 import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
+import Svg, { Path } from 'react-native-svg';
 
 type OpsTimeRange = '1h' | '24h' | '7d' | '30d';
 type OpsFilterMenu = 'platform' | 'group' | 'time' | null;
@@ -453,6 +454,150 @@ function MiniBar({ value, tone = 'default' }: { value: number; tone?: 'default' 
   );
 }
 
+type OpsTone = 'default' | 'success' | 'danger' | 'warning';
+
+function getOpsTonePalette(colors: AppTheme, tone: OpsTone) {
+  if (tone === 'success') {
+    return { background: colors.successBg, border: colors.mode === 'dark' ? '#14584b' : '#d5f4e6', value: colors.success };
+  }
+  if (tone === 'danger') {
+    return { background: colors.errorBg, border: colors.mode === 'dark' ? '#7f1d2f' : '#ffe0e6', value: colors.errorText };
+  }
+  if (tone === 'warning') {
+    return { background: colors.accentBg, border: colors.mode === 'dark' ? '#6b4b14' : '#fde6bd', value: colors.accentText };
+  }
+
+  return { background: colors.chartPanel, border: colors.border, value: colors.text };
+}
+
+function getLatencyTone(value: number): OpsTone {
+  if (!Number.isFinite(value) || value <= 0) return 'default';
+  if (value >= 30000) return 'danger';
+  if (value >= 10000) return 'warning';
+  return 'success';
+}
+
+function getPercentUsageTone(value: number): OpsTone {
+  if (!Number.isFinite(value) || value <= 0) return 'default';
+  if (value >= 90) return 'danger';
+  if (value >= 75) return 'warning';
+  return 'success';
+}
+
+function OpsMetricTile({
+  label,
+  value,
+  detail,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: OpsTone;
+}) {
+  const colors = useAppTheme();
+  const palette = getOpsTonePalette(colors, tone);
+
+  return (
+    <View
+      style={{
+        backgroundColor: palette.background,
+        borderColor: palette.border,
+        borderRadius: 16,
+        borderWidth: 1,
+        flexBasis: '31%',
+        flexGrow: 1,
+        minHeight: 86,
+        minWidth: 92,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+      }}
+    >
+      <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 12, lineHeight: 16 }}>
+        {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+        numberOfLines={1}
+        style={{ color: palette.value, fontSize: 22, fontWeight: '800', lineHeight: 28, marginTop: 7 }}
+      >
+        {value}
+      </Text>
+      {detail ? (
+        <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, lineHeight: 14, marginTop: 4 }}>
+          {detail}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function MiniSparkline({ values, color }: { values: number[]; color: string }) {
+  const colors = useAppTheme();
+  const width = 240;
+  const height = 56;
+  const normalizedValues = values.filter((value) => Number.isFinite(value));
+
+  if (normalizedValues.length < 2) {
+    return <View style={{ backgroundColor: colors.chartTrack, borderRadius: 999, height: 4, marginTop: 14 }} />;
+  }
+
+  const max = Math.max(...normalizedValues, 1);
+  const min = Math.min(...normalizedValues, 0);
+  const range = Math.max(max - min, 1);
+  const path = normalizedValues
+    .map((value, index) => {
+      const x = (index / Math.max(normalizedValues.length - 1, 1)) * width;
+      const y = height - ((value - min) / range) * (height - 10) - 5;
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+    })
+    .join(' ');
+
+  return (
+    <View style={{ backgroundColor: colors.chartPanel, borderRadius: 16, marginTop: 14, overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 8 }}>
+      <Svg height={height} viewBox={`0 0 ${width} ${height}`} width="100%">
+        <Path d={path} fill="none" stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} />
+      </Svg>
+    </View>
+  );
+}
+
+function LatencySummaryCard({
+  title,
+  value,
+  tone = 'default',
+  items,
+}: {
+  title: string;
+  value: string;
+  tone?: OpsTone;
+  items: Array<{ label: string; value: string; tone?: OpsTone }>;
+}) {
+  const colors = useAppTheme();
+  const palette = getOpsTonePalette(colors, tone);
+
+  return (
+    <View style={{ backgroundColor: colors.chartPanel, borderColor: colors.border, borderRadius: 18, borderWidth: 1, flex: 1, minWidth: 260, padding: 14 }}>
+      <Text style={{ color: colors.subtext, fontSize: 12, fontWeight: '700' }}>{title}</Text>
+      <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: palette.value, fontSize: 30, fontWeight: '800', lineHeight: 36, marginTop: 8 }}>
+        {value}
+      </Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+        {items.map((item) => {
+          const itemPalette = getOpsTonePalette(colors, item.tone ?? 'default');
+          return (
+            <View key={`${title}-${item.label}`} style={{ flexBasis: '47%', flexGrow: 1 }}>
+              <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11 }}>{item.label}</Text>
+              <Text numberOfLines={1} style={{ color: itemPalette.value, fontSize: 13, fontWeight: '800', marginTop: 3 }}>{item.value}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function RecordCard({
   item,
   title,
@@ -804,6 +949,21 @@ export default function OpsScreen() {
       : activeFilterMenu === 'time'
         ? timeOptions
         : [];
+  const healthTone: OpsTone = healthScore === undefined ? 'default' : healthScore >= 85 ? 'success' : healthScore < 60 ? 'danger' : 'warning';
+  const healthText = healthScore === undefined ? '--' : formatCompactNumber(healthScore);
+  const healthStatusText = healthScore === undefined ? '等待数据' : healthScore >= 85 ? '健康' : healthScore < 60 ? '异常' : '风险';
+  const slaTone: OpsTone = slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : slaPercent >= 95 ? 'warning' : 'danger';
+  const errorTone: OpsTone = errorRate > 0 ? 'danger' : 'success';
+  const upstreamTone: OpsTone = upstreamErrorRate > 0 || upstreamErrorCount > 0 ? 'danger' : 'success';
+  const latencyTone = getLatencyTone(p99Latency || avgLatency);
+  const ttftTone = getLatencyTone(ttftP99 || ttftAvg);
+  const cpuTone = getPercentUsageTone(cpuUsage);
+  const memoryTone = memoryUsage ? getPercentUsageTone(memoryUsage) : 'default';
+  const dbTone: OpsTone = dbStatus === '正常' ? 'success' : dbStatus === '异常' ? 'danger' : 'default';
+  const redisTone: OpsTone = redisStatus === '正常' ? 'success' : redisStatus === '异常' ? 'danger' : 'default';
+  const throughputSparkValues = throughputPoints.length > 1
+    ? throughputPoints.map((point) => point.value)
+    : [qps, rpm, totalRequests].filter((value) => Number.isFinite(value) && value > 0);
 
   function selectFilterOption(value: string) {
     if (activeFilterMenu === 'platform') {
@@ -909,42 +1069,106 @@ export default function OpsScreen() {
           ) : null}
         </View>
 
-        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
           <SectionTitle title="实时状态" icon={Gauge} />
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-            <InfoTile label="健康分" value={healthScore === undefined ? '--' : formatCompactNumber(healthScore)} tone={healthScore === undefined ? 'default' : healthScore >= 90 ? 'success' : healthScore < 60 ? 'danger' : 'default'} />
-            <InfoTile label="QPS" value={qps.toFixed(qps >= 10 ? 0 : 2)} tone={qps > 0 ? 'success' : 'default'} />
-            <InfoTile label="TPS" value={formatCompactNumber(tokenPerSecond)} tone={tokenPerSecond > 0 ? 'success' : 'default'} />
-            <InfoTile label="请求数" value={formatCompactNumber(totalRequests)} />
-            <InfoTile label="Token数" value={formatCompactNumber(tokenConsumed)} />
-            <InfoTile label="SLA" value={slaPercent === undefined ? '--' : formatPercent(slaPercent)} tone={slaPercent === undefined ? 'default' : slaPercent >= 99 ? 'success' : 'danger'} />
-            <InfoTile label="错误率" value={formatPercent(errorRate * 100)} tone={errorRate > 0 ? 'danger' : 'success'} />
-            <InfoTile label="错误数" value={formatCompactNumber(errors)} tone={errors > 0 ? 'danger' : 'default'} />
-            <InfoTile label="上游错误率" value={formatPercent(upstreamErrorRate * 100)} tone={upstreamErrorRate > 0 ? 'danger' : 'success'} />
-            <InfoTile label="上游错误" value={formatCompactNumber(upstreamErrorCount)} tone={upstreamErrorCount > 0 ? 'danger' : 'default'} />
-            <InfoTile label="429/529" value={`${formatCompactNumber(upstream429Count)} / ${formatCompactNumber(upstream529Count)}`} tone={upstream429Count + upstream529Count > 0 ? 'danger' : 'default'} />
-            <InfoTile label="业务限流" value={formatCompactNumber(businessLimited)} tone={businessLimited > 0 ? 'danger' : 'default'} />
-            <InfoTile label="平均延迟" value={formatLatency(avgLatency)} />
-            <InfoTile label="P50 延迟" value={formatLatency(p50Latency)} />
-            <InfoTile label="P90 延迟" value={formatLatency(p90Latency)} />
-            <InfoTile label="P95 延迟" value={formatLatency(p95Latency)} />
-            <InfoTile label="P99 延迟" value={formatLatency(p99Latency)} />
-            <InfoTile label="最大延迟" value={formatLatency(maxLatency)} />
-            <InfoTile label="TTFT Avg" value={formatLatency(ttftAvg)} />
-            <InfoTile label="TTFT P50" value={formatLatency(ttftP50)} />
-            <InfoTile label="TTFT P90" value={formatLatency(ttftP90)} />
-            <InfoTile label="TTFT P95" value={formatLatency(ttftP95)} />
-            <InfoTile label="TTFT P99" value={formatLatency(ttftP99)} />
-            <InfoTile label="TTFT Max" value={formatLatency(ttftMax)} />
-            <InfoTile label="CPU" value={formatPercent(cpuUsage)} tone={cpuUsage > 85 ? 'danger' : 'default'} />
-            <InfoTile label="内存" value={memoryUsage ? formatPercent(memoryUsage) : `${formatCompactNumber(memoryUsed)}MB`} />
-            <InfoTile label="DB" value={dbStatus} tone={dbStatus === '正常' ? 'success' : dbStatus === '异常' ? 'danger' : 'default'} />
-            <InfoTile label="DB 连接" value={`${formatCompactNumber(dbConnActive)} / ${formatCompactNumber(dbConnIdle)} / ${formatCompactNumber(dbConnWaiting)}`} />
-            <InfoTile label="Redis" value={redisStatus} tone={redisStatus === '正常' ? 'success' : redisStatus === '异常' ? 'danger' : 'default'} />
-            <InfoTile label="Redis 连接" value={`${formatCompactNumber(redisConnTotal)} / ${formatCompactNumber(redisConnIdle)}`} />
-            <InfoTile label="锁键" value={formatCompactNumber(lockKeys)} />
-            <InfoTile label="后台任务" value={formatCompactNumber(backgroundTasks)} />
-            <InfoTile label="告警事件" value={formatCompactNumber(totalAlertEvents)} tone={alertCount > 0 ? 'danger' : 'default'} />
+          <View style={{ backgroundColor: colors.chartPanel, borderColor: colors.border, borderRadius: 20, borderWidth: 1, marginTop: 14, padding: 14 }}>
+            <View style={{ alignItems: 'center', flexDirection: 'row', gap: 14 }}>
+              <View
+                style={{
+                  alignItems: 'center',
+                  backgroundColor: getOpsTonePalette(colors, healthTone).background,
+                  borderColor: getOpsTonePalette(colors, healthTone).value,
+                  borderRadius: 999,
+                  borderWidth: 5,
+                  height: 104,
+                  justifyContent: 'center',
+                  width: 104,
+                }}
+              >
+                <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: getOpsTonePalette(colors, healthTone).value, fontSize: 30, fontWeight: '800' }}>
+                  {healthText}
+                </Text>
+                <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 2 }}>健康分</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: colors.subtext, fontSize: 12 }}>健康状况</Text>
+                <Text style={{ color: getOpsTonePalette(colors, healthTone).value, fontSize: 24, fontWeight: '800', marginTop: 4 }}>
+                  {healthStatusText}
+                </Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.subtext, fontSize: 11 }}>QPS</Text>
+                    <Text numberOfLines={1} style={{ color: colors.text, fontSize: 18, fontWeight: '800', marginTop: 3 }}>{qps.toFixed(qps >= 10 ? 0 : 2)}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.subtext, fontSize: 11 }}>TPS</Text>
+                    <Text numberOfLines={1} style={{ color: colors.text, fontSize: 18, fontWeight: '800', marginTop: 3 }}>{formatCompactNumber(tokenPerSecond)}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            <MiniSparkline values={throughputSparkValues} color={colors.primary} />
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
+              <OpsMetricTile label="请求数" value={formatCompactNumber(totalRequests)} detail={getTimeRangeLabel(timeRange)} />
+              <OpsMetricTile label="Token数" value={formatCompactNumber(tokenConsumed)} detail="累计消耗" />
+              <OpsMetricTile label="当前并发" value={formatCompactNumber(currentConcurrency)} detail={queueSize > 0 ? `队列 ${formatCompactNumber(queueSize)}` : '队列正常'} tone={queueSize > 0 ? 'warning' : 'default'} />
+            </View>
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
+          <SectionTitle title="质量指标" icon={ShieldCheck} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
+            <OpsMetricTile label="SLA" value={slaPercent === undefined ? '--' : formatPercent(slaPercent)} detail="排除业务限流" tone={slaTone} />
+            <OpsMetricTile label="错误率" value={formatPercent(errorRate * 100)} detail={`错误 ${formatCompactNumber(errors)}`} tone={errorTone} />
+            <OpsMetricTile label="上游错误率" value={formatPercent(upstreamErrorRate * 100)} detail={`上游 ${formatCompactNumber(upstreamErrorCount)}`} tone={upstreamTone} />
+            <OpsMetricTile label="429 / 529" value={`${formatCompactNumber(upstream429Count)} / ${formatCompactNumber(upstream529Count)}`} detail="上游限流" tone={upstream429Count + upstream529Count > 0 ? 'danger' : 'default'} />
+            <OpsMetricTile label="业务限流" value={formatCompactNumber(businessLimited)} detail="业务规则触发" tone={businessLimited > 0 ? 'warning' : 'default'} />
+            <OpsMetricTile label="告警事件" value={formatCompactNumber(totalAlertEvents)} detail={alertCount > 0 ? `打开 ${formatCompactNumber(alertCount)}` : '无打开告警'} tone={alertCount > 0 ? 'danger' : 'success'} />
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
+          <SectionTitle title="延迟指标" icon={Clock} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
+            <LatencySummaryCard
+              title="请求延迟 P99"
+              value={formatLatency(p99Latency)}
+              tone={latencyTone}
+              items={[
+                { label: 'Avg', value: formatLatency(avgLatency), tone: getLatencyTone(avgLatency) },
+                { label: 'P50', value: formatLatency(p50Latency), tone: getLatencyTone(p50Latency) },
+                { label: 'P90', value: formatLatency(p90Latency), tone: getLatencyTone(p90Latency) },
+                { label: 'P95', value: formatLatency(p95Latency), tone: getLatencyTone(p95Latency) },
+                { label: 'Max', value: formatLatency(maxLatency), tone: getLatencyTone(maxLatency) },
+              ]}
+            />
+            <LatencySummaryCard
+              title="TTFT P99"
+              value={formatLatency(ttftP99)}
+              tone={ttftTone}
+              items={[
+                { label: 'Avg', value: formatLatency(ttftAvg), tone: getLatencyTone(ttftAvg) },
+                { label: 'P50', value: formatLatency(ttftP50), tone: getLatencyTone(ttftP50) },
+                { label: 'P90', value: formatLatency(ttftP90), tone: getLatencyTone(ttftP90) },
+                { label: 'P95', value: formatLatency(ttftP95), tone: getLatencyTone(ttftP95) },
+                { label: 'Max', value: formatLatency(ttftMax), tone: getLatencyTone(ttftMax) },
+              ]}
+            />
+          </View>
+        </View>
+
+        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
+          <SectionTitle title="资源状态" icon={ServerCog} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
+            <OpsMetricTile label="CPU" value={formatPercent(cpuUsage)} detail="系统负载" tone={cpuTone} />
+            <OpsMetricTile label="内存" value={memoryUsage ? formatPercent(memoryUsage) : `${formatCompactNumber(memoryUsed)}MB`} detail={memoryUsed ? `${formatCompactNumber(memoryUsed)} MB` : undefined} tone={memoryTone} />
+            <OpsMetricTile label="DB" value={dbStatus} detail="数据库状态" tone={dbTone} />
+            <OpsMetricTile label="DB 连接" value={`${formatCompactNumber(dbConnActive)} / ${formatCompactNumber(dbConnIdle)} / ${formatCompactNumber(dbConnWaiting)}`} detail="活跃 / 空闲 / 等待" />
+            <OpsMetricTile label="Redis" value={redisStatus} detail="缓存状态" tone={redisTone} />
+            <OpsMetricTile label="Redis 连接" value={`${formatCompactNumber(redisConnTotal)} / ${formatCompactNumber(redisConnIdle)}`} detail="总数 / 空闲" />
+            <OpsMetricTile label="锁键" value={formatCompactNumber(lockKeys)} detail="分布式锁" tone={lockKeys > 0 ? 'warning' : 'default'} />
+            <OpsMetricTile label="后台任务" value={formatCompactNumber(backgroundTasks)} detail="后台队列" />
           </View>
         </View>
 

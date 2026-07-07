@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import {
   Activity,
@@ -7,6 +8,7 @@ import {
   CircleCheck,
   Clock3,
   Cpu,
+  Download,
   DollarSign,
   Gauge,
   Hash,
@@ -19,6 +21,7 @@ import {
   ShieldCheck,
   ShieldOff,
   Trash2,
+  Upload,
   Wallet,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -35,12 +38,14 @@ import {
   batchClearAccountErrors,
   batchRefreshAccounts,
   deleteAccount,
+  exportAccountsData,
   getAccountTodayStats,
   getAccountTodayStatsBatch,
   getAccountStats,
   getGrokAccountQuota,
   getAccountModels,
   getOpenAiAccountQuota,
+  importAccountsData,
   listAccounts,
   resetAccountQuota,
   resetOpenAiAccountQuota,
@@ -547,6 +552,36 @@ function toOptionalNumber(raw: string) {
   return Number.isFinite(value) ? value : undefined;
 }
 
+function toNullableNumber(raw: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.toLowerCase() === 'null') return null;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function toGroupIds(raw: string) {
+  const values = raw
+    .split(',')
+    .map((item) => Number(item.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return values.length > 0 ? values : undefined;
+}
+
+function parseJsonObjectInput(raw: string, label: string) {
+  if (!raw.trim()) {
+    throw new Error(`${label} 不能为空`);
+  }
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+
+  return parsed;
+}
+
 function Field({
   label,
   value,
@@ -755,8 +790,16 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const [editName, setEditName] = useState('');
   const [editPriority, setEditPriority] = useState('');
   const [editConcurrency, setEditConcurrency] = useState('');
+  const [editLoadFactor, setEditLoadFactor] = useState('');
   const [editRateMultiplier, setEditRateMultiplier] = useState('');
+  const [editProxyId, setEditProxyId] = useState('');
+  const [editGroupIds, setEditGroupIds] = useState('');
+  const [editPrivacyMode, setEditPrivacyMode] = useState('');
+  const [editExpiresAt, setEditExpiresAt] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [importJson, setImportJson] = useState('');
+  const [toolsMessage, setToolsMessage] = useState<string | null>(null);
   const [quotaInfoByAccountId, setQuotaInfoByAccountId] = useState<Record<number, AccountQuotaPanelState>>({});
   const [quotaQueryingAccountId, setQuotaQueryingAccountId] = useState<number | null>(null);
   const [quotaResettingAccountId, setQuotaResettingAccountId] = useState<number | null>(null);
@@ -764,8 +807,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const queryClient = useQueryClient();
 
   const accountsQuery = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => listAccounts(),
+    queryKey: ['accounts', keyword],
+    queryFn: () => listAccounts({ search: keyword, page: 1, page_size: 100 }),
   });
 
   const toggleMutation = useMutation({
@@ -784,7 +827,12 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         name: editName.trim() || undefined,
         priority: toOptionalNumber(editPriority),
         concurrency: toOptionalNumber(editConcurrency),
+        load_factor: toOptionalNumber(editLoadFactor) ?? null,
         rate_multiplier: toOptionalNumber(editRateMultiplier),
+        proxy_id: toNullableNumber(editProxyId),
+        group_ids: toGroupIds(editGroupIds),
+        privacy_mode: editPrivacyMode.trim() || undefined,
+        expires_at: editExpiresAt.trim() || null,
         notes: editNotes.trim(),
       }),
     onSuccess: () => {
@@ -815,6 +863,28 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const batchClearErrorMutation = useMutation({
     mutationFn: (accountIds: number[]) => batchClearAccountErrors(accountIds),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  });
+
+  const exportDataMutation = useMutation({
+    mutationFn: async () => {
+      const ids = filteredItems.map((item) => item.id);
+      const payload = await exportAccountsData({ ids, include_proxies: false });
+      await Clipboard.setStringAsync(JSON.stringify(payload, null, 2));
+      return ids.length;
+    },
+    onSuccess: (count) => setToolsMessage(`已复制 ${count} 个账号的数据`),
+    onError: (error) => setToolsMessage(getErrorMessage(error)),
+  });
+
+  const importDataMutation = useMutation({
+    mutationFn: () => importAccountsData({ data: parseJsonObjectInput(importJson, '导入数据'), skip_default_group_bind: false }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      const created = result.account_created ?? 0;
+      const failed = result.account_failed ?? 0;
+      setToolsMessage(`导入完成：创建 ${created}，失败 ${failed}`);
+    },
+    onError: (error) => setToolsMessage(getErrorMessage(error)),
   });
 
   const items = accountsQuery.data?.items ?? [];
@@ -963,7 +1033,12 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     setEditName(account.name || '');
     setEditPriority(account.priority !== undefined ? String(account.priority) : '');
     setEditConcurrency(account.concurrency !== undefined ? String(account.concurrency) : '');
+    setEditLoadFactor(account.load_factor !== undefined && account.load_factor !== null ? String(account.load_factor) : '');
     setEditRateMultiplier(account.rate_multiplier !== undefined ? String(account.rate_multiplier) : '');
+    setEditProxyId(account.proxy_id !== undefined && account.proxy_id !== null ? String(account.proxy_id) : '');
+    setEditGroupIds(account.group_ids?.join(',') || account.groups?.map((group) => group.id).join(',') || '');
+    setEditPrivacyMode(account.privacy_mode || '');
+    setEditExpiresAt(account.expires_at || '');
     setEditNotes(account.notes || '');
   }
 
@@ -1306,10 +1381,65 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               </Text>
             </Pressable>
           </View>
+
+          <View className="mt-3">
+            <Pressable
+              onPress={() => setToolsOpen((value) => !value)}
+              style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10 }}
+            >
+              <Download color={colors.badgeDefaultText} size={13} />
+              <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>
+                {toolsOpen ? '收起导入/导出' : '导入/导出'}
+              </Text>
+            </Pressable>
+
+            {toolsOpen ? (
+              <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 16, borderWidth: 1, gap: 10, marginTop: 10, padding: 10 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    disabled={filteredItems.length === 0 || exportDataMutation.isPending}
+                    onPress={() => {
+                      setToolsMessage(null);
+                      exportDataMutation.mutate();
+                    }}
+                    style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: filteredItems.length === 0 ? 0.6 : 1, paddingVertical: 11 }}
+                  >
+                    <Download color={colors.primaryText} size={13} />
+                    <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{exportDataMutation.isPending ? '导出中...' : '导出筛选'}</Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={importDataMutation.isPending}
+                    onPress={() => {
+                      setToolsMessage(null);
+                      importDataMutation.mutate();
+                    }}
+                    style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', paddingVertical: 11 }}
+                  >
+                    <Upload color={colors.primaryText} size={13} />
+                    <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{importDataMutation.isPending ? '导入中...' : '导入 JSON'}</Text>
+                  </Pressable>
+                </View>
+                <TextInput
+                  value={importJson}
+                  onChangeText={setImportJson}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder="粘贴 /admin/accounts/data 导出的 JSON 对象"
+                  placeholderTextColor={colors.placeholder}
+                  style={{ backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, minHeight: 96, paddingHorizontal: 12, paddingVertical: 10 }}
+                />
+                {toolsMessage ? (
+                  <View style={{ backgroundColor: toolsMessage.includes('失败') || toolsMessage.includes('必须') || toolsMessage.includes('不能为空') ? colors.errorBg : colors.successBg, borderRadius: 12, padding: 10 }}>
+                    <Text style={{ color: toolsMessage.includes('失败') || toolsMessage.includes('必须') || toolsMessage.includes('不能为空') ? colors.errorText : colors.success, fontSize: 12 }}>{toolsMessage}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+          </View>
         </View>
       </View>
     ),
-    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, filter, filteredItems, summary.active, summary.errors, summary.limited, summary.paused, summary.total, usageSort]
+    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, exportDataMutation.isPending, filter, filteredItems, importDataMutation.isPending, importJson, summary.active, summary.errors, summary.limited, summary.paused, summary.total, toolsMessage, toolsOpen, usageSort]
   );
 
   const renderItem = useCallback(
@@ -1390,7 +1520,12 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     <Field label="名称" value={editName} onChangeText={setEditName} placeholder="账号名称" />
                     <Field label="优先级" value={editPriority} onChangeText={setEditPriority} placeholder="0" keyboardType="number-pad" />
                     <Field label="并发" value={editConcurrency} onChangeText={setEditConcurrency} placeholder="留空不改" keyboardType="number-pad" />
+                    <Field label="权重" value={editLoadFactor} onChangeText={setEditLoadFactor} placeholder="load_factor" keyboardType="decimal-pad" />
                     <Field label="倍率" value={editRateMultiplier} onChangeText={setEditRateMultiplier} placeholder="1" keyboardType="decimal-pad" />
+                    <Field label="代理 ID" value={editProxyId} onChangeText={setEditProxyId} placeholder="null 可清空" />
+                    <Field label="分组 ID" value={editGroupIds} onChangeText={setEditGroupIds} placeholder="1,2,5" />
+                    <Field label="隐私模式" value={editPrivacyMode} onChangeText={setEditPrivacyMode} placeholder="privacy/default" />
+                    <Field label="过期时间" value={editExpiresAt} onChangeText={setEditExpiresAt} placeholder="2026-12-31T23:59:59+08:00" />
                     <Field label="备注" value={editNotes} onChangeText={setEditNotes} placeholder="备注" />
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
@@ -1582,7 +1717,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </Pressable>
       );
     },
-    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editName, editNotes, editPriority, editRateMultiplier, editingAccountId, expandedModelAccountId, handleQuotaCount, handleQuotaQuery, loadingModelAccountId, modelsByAccountId, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, selectedModelByAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
+    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editExpiresAt, editGroupIds, editLoadFactor, editName, editNotes, editPriority, editPrivacyMode, editProxyId, editRateMultiplier, editingAccountId, expandedModelAccountId, handleQuotaCount, handleQuotaQuery, loadingModelAccountId, modelsByAccountId, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, selectedModelByAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
   );
 
   const emptyState = useMemo(
