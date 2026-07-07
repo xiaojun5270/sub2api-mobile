@@ -317,6 +317,12 @@ function normalizePercent(value?: number) {
   return Math.max(0, Math.min(100, value));
 }
 
+function calculateWindowPercent(used?: number, limit?: number) {
+  if (used === undefined || limit === undefined || !Number.isFinite(used) || !Number.isFinite(limit)) return undefined;
+  if (limit <= 1 || used < 0) return undefined;
+  return normalizePercent((used / limit) * 100);
+}
+
 function formatPercent(value?: number) {
   if (value === undefined) return '--';
   return `${value >= 10 || value === 0 ? value.toFixed(0) : value.toFixed(1)}%`;
@@ -358,15 +364,23 @@ function getCodexWindowUsage(account: AdminAccount, windowKey: '5h' | '7d'): Cod
   const percentKeys = [
     `${prefix}_used_percent`,
     `${prefix}_usage_percent`,
+    `${prefix}_used_percentage`,
+    `${prefix}_usage_percentage`,
     `${prefix}_usage_pct`,
     `${prefix}_percent`,
     `${compactPrefix}UsedPercent`,
     `${compactPrefix}UsagePercent`,
+    `${compactPrefix}UsedPercentage`,
+    `${compactPrefix}UsagePercentage`,
     `${compactPrefix}UsagePct`,
     windowKey === '5h' ? 'usage_5h_percent' : 'usage_7d_percent',
+    windowKey === '5h' ? 'usage_5h_percentage' : 'usage_7d_percentage',
     windowKey === '5h' ? 'usage5hPercent' : 'usage7dPercent',
+    windowKey === '5h' ? 'usage5hPercentage' : 'usage7dPercentage',
     windowKey === '5h' ? 'rate_limit_5h_percent' : 'rate_limit_7d_percent',
+    windowKey === '5h' ? 'rate_limit_5h_percentage' : 'rate_limit_7d_percentage',
     windowKey === '5h' ? 'rateLimit5hPercent' : 'rateLimit7dPercent',
+    windowKey === '5h' ? 'rateLimit5hPercentage' : 'rateLimit7dPercentage',
   ];
   const usageKeys = windowKey === '5h'
     ? ['codex_5h_usage', 'codex_5h_used', 'codex5hUsage', 'codex5hUsed', 'usage_5h', 'usage5h', 'usage_5_hours', 'used_5h', 'used5h']
@@ -379,9 +393,7 @@ function getCodexWindowUsage(account: AdminAccount, windowKey: '5h' | '7d'): Cod
   const limit = getAccountWindowNumber(account, limitKeys);
   const percent = rawPercent !== undefined
     ? normalizePercent(rawPercent)
-    : limit !== undefined && limit > 0 && used !== undefined
-      ? normalizePercent((used / limit) * 100)
-      : undefined;
+    : calculateWindowPercent(used, limit);
   const resetAfterSeconds = getAccountWindowNumber(account, [
     `${prefix}_reset_after_seconds`,
     `${prefix}_resetAfterSeconds`,

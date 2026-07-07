@@ -1665,6 +1665,10 @@ export function getOpsRuntimeAlert() {
   return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/runtime/alert');
 }
 
+export function getOpsMetricThresholds() {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/ops/settings/metric-thresholds');
+}
+
 export function getOpsRequests(params: OpsQueryParams = {}) {
   return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/requests', params);
 }

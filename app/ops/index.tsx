@@ -19,6 +19,7 @@ import {
   getOpsErrors,
   getOpsErrorTrend,
   getOpsLatencyHistogram,
+  getOpsMetricThresholds,
   getOpsOpenAiTokenStats,
   getOpsRealtimeTraffic,
   getOpsRequests,
@@ -283,6 +284,31 @@ function formatPercent(value: number) {
   return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
 }
 
+function formatWholePercent(value: number) {
+  if (!Number.isFinite(value)) return '--';
+  return `${Math.round(value)}%`;
+}
+
+function formatOptionalNumber(value?: number) {
+  return value === undefined || !Number.isFinite(value) ? '-' : formatCompactNumber(value);
+}
+
+function formatMemoryMb(value?: number) {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return '-';
+  if (value >= 1024) return `${(value / 1024).toFixed(value >= 10240 ? 1 : 2)}GB`;
+  return `${formatCompactNumber(value)}MB`;
+}
+
+function normalizePercentField(value?: number) {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizeRateField(value?: number) {
+  const percent = normalizePercentField(value);
+  return percent === undefined ? undefined : percent / 100;
+}
+
 function formatHealth(value: unknown) {
   if (value === null || value === undefined || value === '--') return '--';
   return isTruthyValue(value) ? '正常' : '异常';
@@ -510,6 +536,33 @@ function getPercentUsageTone(value: number): OpsTone {
   return 'success';
 }
 
+function getThresholdTone(value: number, warning: number, critical: number): OpsTone {
+  if (!Number.isFinite(value) || value <= 0) return 'success';
+  if (Number.isFinite(critical) && value >= critical) return 'danger';
+  if (Number.isFinite(warning) && value >= warning) return 'warning';
+  return 'success';
+}
+
+function formatThresholdStatus(value: number, warning: number, critical: number) {
+  const tone = getThresholdTone(value, warning, critical);
+  if (tone === 'danger') return '异常';
+  if (tone === 'warning') return '告警';
+  return '正常';
+}
+
+function firstNestedNumber(source: unknown, sectionKeys: string[], valueKeys: string[]) {
+  for (const sectionKey of sectionKeys) {
+    const section = nestedRecord(source, sectionKey);
+    const value = firstNumberValue(section, valueKeys);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function getThresholdValue(source: unknown, sectionKeys: string[], directKeys: string[], valueKeys: string[], fallback: number) {
+  return firstNumberValue(source, directKeys) ?? firstNestedNumber(source, sectionKeys, valueKeys) ?? fallback;
+}
+
 function OpsMetricTile({
   label,
   value,
@@ -725,6 +778,7 @@ export default function OpsScreen() {
   const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs', opsListParams], queryFn: () => getOpsSystemLogs({ ...opsListParams, page: 1, page_size: 20 }), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
+  const metricThresholdsQuery = useQuery({ queryKey: ['ops-metric-thresholds'], queryFn: getOpsMetricThresholds, staleTime: 60_000 });
   const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events', opsListParams], queryFn: () => getOpsAlertEvents({ ...opsListParams, limit: 20 }), staleTime: 30_000 });
 
   const resolveAlertMutation = useMutation({
@@ -738,6 +792,7 @@ export default function OpsScreen() {
   const concurrency = concurrencyQuery.data;
   const tokenStats = tokenStatsQuery.data || snapshot?.openai_token_stats;
   const runtimeAlert = runtimeAlertQuery.data;
+  const metricThresholds = metricThresholdsQuery.data;
   const logsHealth = logsHealthQuery.data;
   const rawSystemLogs = getItems(systemLogsQuery.data);
   const rawAlertEvents = getItems(alertEventsQuery.data);
@@ -872,17 +927,18 @@ export default function OpsScreen() {
   const realtimeRequests = firstNumber(realtime, ['request_count_total', 'requestCountTotal', 'total_requests', 'totalRequests', 'requests']);
   const totalRequests = firstNumber(overview, ['request_count_total', 'requestCountTotal', 'total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount']) || realtimeRequests || successCount + errors;
   const rawErrorRate = firstNumberValue(overview, ['error_rate', 'errorRate', 'errors_rate']);
-  const errorRate = rawErrorRate !== undefined ? (rawErrorRate > 1 ? rawErrorRate / 100 : rawErrorRate) : totalRequests > 0 ? errors / totalRequests : 0;
+  const normalizedErrorRate = normalizeRateField(rawErrorRate);
+  const errorRate = normalizedErrorRate !== undefined ? normalizedErrorRate : totalRequests > 0 ? errors / totalRequests : 0;
   const slaErrorCount = firstNumber(overview, ['error_count_sla', 'errorCountSla', 'sla_error_count', 'slaErrorCount']);
   const upstreamErrorCount = firstNumber(overview, ['upstream_error_count_excl_429_529', 'upstreamErrorCountExcl429529', 'upstream_errors_excl_429_529', 'upstreamErrorsExcl429529']);
   const rawUpstreamErrorRate = firstNumberValue(overview, ['upstream_error_rate', 'upstreamErrorRate']);
-  const upstreamErrorRate = rawUpstreamErrorRate !== undefined ? (rawUpstreamErrorRate > 1 ? rawUpstreamErrorRate / 100 : rawUpstreamErrorRate) : totalRequests > 0 ? upstreamErrorCount / totalRequests : 0;
+  const normalizedUpstreamErrorRate = normalizeRateField(rawUpstreamErrorRate);
+  const upstreamErrorRate = normalizedUpstreamErrorRate !== undefined ? normalizedUpstreamErrorRate : totalRequests > 0 ? upstreamErrorCount / totalRequests : 0;
   const rawSla = firstNumberValue(overview, ['sla', 'sla_rate', 'slaRate', 'success_rate', 'successRate']);
-  const slaPercent = rawSla !== undefined
-    ? Math.max(0, Math.min(100, rawSla > 1 ? rawSla : rawSla * 100))
-    : totalRequests > 0
+  const normalizedSla = normalizePercentField(rawSla);
+  const slaPercent = totalRequests > 0
       ? Math.max(0, Math.min(100, ((totalRequests - slaErrorCount) / totalRequests) * 100))
-      : undefined;
+      : normalizedSla;
   const healthScore = firstNumberValue(overview, ['health_score', 'healthScore']);
   const qps = firstNumber(qpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
   const rpm = firstNumber(overview, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || firstNumber(realtime, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || qps * 60;
@@ -910,15 +966,20 @@ export default function OpsScreen() {
   const cpuUsage = firstNumber(systemMetrics, ['cpu_usage_percent', 'cpuUsagePercent']) || firstNumber(overview, ['cpu_usage_percent', 'cpuUsagePercent']);
   const memoryUsage = firstNumber(systemMetrics, ['memory_usage_percent', 'memoryUsagePercent']) || firstNumber(overview, ['memory_usage_percent', 'memoryUsagePercent']);
   const memoryUsed = firstNumber(systemMetrics, ['memory_used_mb', 'memoryUsedMb']) || firstNumber(overview, ['memory_used_mb', 'memoryUsedMb']);
+  const memoryTotal = firstNumber(systemMetrics, ['memory_total_mb', 'memoryTotalMb', 'memory_limit_mb', 'memoryLimitMb']) || firstNumber(overview, ['memory_total_mb', 'memoryTotalMb', 'memory_limit_mb', 'memoryLimitMb']);
   const dbStatus = formatHealth(systemMetrics?.db_ok ?? systemMetrics?.dbOk);
   const redisStatus = formatHealth(systemMetrics?.redis_ok ?? systemMetrics?.redisOk);
-  const dbConnActive = firstNumber(systemMetrics, ['db_conn_active', 'dbConnActive']);
-  const dbConnIdle = firstNumber(systemMetrics, ['db_conn_idle', 'dbConnIdle']);
-  const dbConnWaiting = firstNumber(systemMetrics, ['db_conn_waiting', 'dbConnWaiting']);
+  const dbConnActive = firstNumberValue(systemMetrics, ['db_conn_active', 'dbConnActive']);
+  const dbConnIdle = firstNumberValue(systemMetrics, ['db_conn_idle', 'dbConnIdle']);
+  const dbConnMax = firstNumber(systemMetrics, ['db_conn_max', 'dbConnMax', 'db_conn_limit', 'dbConnLimit', 'db_max_open_conns', 'dbMaxOpenConns']) || 128;
   const redisConnTotal = firstNumber(systemMetrics, ['redis_conn_total', 'redisConnTotal']);
-  const redisConnIdle = firstNumber(systemMetrics, ['redis_conn_idle', 'redisConnIdle']);
-  const lockKeys = firstNumber(systemMetrics, ['lock_keys', 'lockKeys', 'redis_lock_keys', 'redisLockKeys']);
-  const backgroundTasks = firstNumber(systemMetrics, ['background_jobs', 'backgroundJobs', 'job_count', 'jobCount', 'goroutine_count', 'goroutineCount']);
+  const redisConnIdle = firstNumberValue(systemMetrics, ['redis_conn_idle', 'redisConnIdle']);
+  const redisConnMax = firstNumber(systemMetrics, ['redis_conn_max', 'redisConnMax', 'redis_conn_limit', 'redisConnLimit', 'redis_max_connections', 'redisMaxConnections']) || 1024;
+  const redisConnActive = firstNumberValue(systemMetrics, ['redis_conn_active', 'redisConnActive']) ?? (redisConnIdle !== undefined ? Math.max(redisConnTotal - redisConnIdle, 0) : undefined);
+  const redisUsagePercent = redisConnMax > 0 ? (redisConnTotal / redisConnMax) * 100 : 0;
+  const goroutineCount = firstNumber(systemMetrics, ['goroutine_count', 'goroutineCount', 'go_routine_count', 'goRoutineCount']);
+  const backgroundTasks = firstNumber(systemMetrics, ['background_jobs', 'backgroundJobs', 'background_tasks', 'backgroundTasks', 'job_count', 'jobCount', 'job_heartbeats', 'jobHeartbeats', 'job_heartbeat_count', 'jobHeartbeatCount']);
+  const backgroundTaskWarnings = firstNumber(systemMetrics, ['background_job_warnings', 'backgroundJobWarnings', 'background_task_warnings', 'backgroundTaskWarnings', 'job_warning_count', 'jobWarningCount', 'warning_jobs', 'warningJobs']);
   const logsTotal = firstNumber(logsHealth, ['total_logs', 'totalLogs', 'total']);
   const logsErrorCount = firstNumber(nestedRecord(logsHealth, 'levels'), ['error', 'errors']);
   const logsHealthStatus = logsTotal > 0 ? '正常' : firstText(logsHealth, ['status', 'state', 'health']);
@@ -928,6 +989,7 @@ export default function OpsScreen() {
 
   const throughputPoints = summarizeTrendByBucket(throughputOverallSource, ['success_count', 'successCount', 'requests', 'request_count', 'requestCount', 'total_requests', 'totalRequests', 'count', 'value']);
   const accountSwitchPoints = summarizeTrendByBucket(throughputOverallSource, ['account_switch_count', 'accountSwitchCount', 'avg_account_switch_count', 'avgAccountSwitchCount', 'switch_count', 'switchCount'], 'average');
+  const hasAccountSwitchTrend = accountSwitchPoints.some((point) => Number.isFinite(point.value) && point.value > 0);
   const errorTrendPoints = summarizeTrendByBucket(errorTrendOverallSource, ['error_count_total', 'errorCountTotal', 'errors', 'error_count', 'errorCount', 'count', 'value']);
   const latencyHistogramPoints = filteredLatencyHistogram.map((item, index) => ({
     label: firstText(item, ['range', 'bucket', 'label']) !== '--' ? firstText(item, ['range', 'bucket', 'label']) : `${index + 1}`,
@@ -974,10 +1036,11 @@ export default function OpsScreen() {
     systemLogsQuery.refetch();
     logsHealthQuery.refetch();
     runtimeAlertQuery.refetch();
+    metricThresholdsQuery.refetch();
     alertEventsQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || metricThresholdsQuery.isRefetching || alertEventsQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching;
   const activeFilterOptions: FilterOption[] = activeFilterMenu === 'platform'
     ? platformOptions
     : activeFilterMenu === 'group'
@@ -993,10 +1056,18 @@ export default function OpsScreen() {
   const upstreamTone: OpsTone = upstreamErrorRate > 0 || upstreamErrorCount > 0 ? 'danger' : 'success';
   const latencyTone = getLatencyTone(p99Latency || avgLatency);
   const ttftTone = getLatencyTone(ttftP99 || ttftAvg);
-  const cpuTone = getPercentUsageTone(cpuUsage);
-  const memoryTone = memoryUsage ? getPercentUsageTone(memoryUsage) : 'default';
+  const cpuWarningThreshold = getThresholdValue(metricThresholds, ['cpu', 'cpu_usage', 'cpuUsage', 'cpu_usage_percent'], ['cpu_warning_percent', 'cpuWarningPercent', 'cpu_warning', 'cpuWarning', 'cpu_usage_warning', 'cpuUsageWarning'], ['warning', 'warn', 'warning_threshold', 'warningThreshold'], 80);
+  const cpuCriticalThreshold = getThresholdValue(metricThresholds, ['cpu', 'cpu_usage', 'cpuUsage', 'cpu_usage_percent'], ['cpu_critical_percent', 'cpuCriticalPercent', 'cpu_critical', 'cpuCritical', 'cpu_usage_critical', 'cpuUsageCritical'], ['critical', 'critical_threshold', 'criticalThreshold', 'danger', 'severe'], 95);
+  const memoryWarningThreshold = getThresholdValue(metricThresholds, ['memory', 'memory_usage', 'memoryUsage', 'memory_usage_percent'], ['memory_warning_percent', 'memoryWarningPercent', 'memory_warning', 'memoryWarning'], ['warning', 'warn', 'warning_threshold', 'warningThreshold'], 80);
+  const memoryCriticalThreshold = getThresholdValue(metricThresholds, ['memory', 'memory_usage', 'memoryUsage', 'memory_usage_percent'], ['memory_critical_percent', 'memoryCriticalPercent', 'memory_critical', 'memoryCritical'], ['critical', 'critical_threshold', 'criticalThreshold', 'danger', 'severe'], 95);
+  const goroutineWarningThreshold = getThresholdValue(metricThresholds, ['goroutine', 'goroutine_count', 'goroutineCount'], ['goroutine_warning', 'goroutineWarning', 'goroutine_count_warning', 'goroutineCountWarning'], ['warning', 'warn', 'warning_threshold', 'warningThreshold'], 8000);
+  const goroutineCriticalThreshold = getThresholdValue(metricThresholds, ['goroutine', 'goroutine_count', 'goroutineCount'], ['goroutine_critical', 'goroutineCritical', 'goroutine_count_critical', 'goroutineCountCritical'], ['critical', 'critical_threshold', 'criticalThreshold', 'danger', 'severe'], 15000);
+  const cpuTone = getThresholdTone(cpuUsage, cpuWarningThreshold, cpuCriticalThreshold);
+  const memoryTone = memoryUsage ? getThresholdTone(memoryUsage, memoryWarningThreshold, memoryCriticalThreshold) : 'default';
   const dbTone: OpsTone = dbStatus === '正常' ? 'success' : dbStatus === '异常' ? 'danger' : 'default';
-  const redisTone: OpsTone = redisStatus === '正常' ? 'success' : redisStatus === '异常' ? 'danger' : 'default';
+  const redisTone: OpsTone = redisStatus === '异常' ? 'danger' : getPercentUsageTone(redisUsagePercent);
+  const goroutineTone = getThresholdTone(goroutineCount, goroutineWarningThreshold, goroutineCriticalThreshold);
+  const backgroundTone: OpsTone = backgroundTaskWarnings > 0 ? 'warning' : 'success';
   const throughputSparkValues = throughputPoints.length > 1
     ? throughputPoints.map((point) => point.value)
     : [qps, rpm, totalRequests].filter((value) => Number.isFinite(value) && value > 0);
@@ -1192,17 +1263,16 @@ export default function OpsScreen() {
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 22, borderWidth: 1, padding: 16 }}>
           <SectionTitle title="资源状态" icon={ServerCog} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 }}>
-            <OpsMetricTile label="CPU" value={formatPercent(cpuUsage)} detail="系统负载" tone={cpuTone} />
-            <OpsMetricTile label="内存" value={memoryUsage ? formatPercent(memoryUsage) : `${formatCompactNumber(memoryUsed)}MB`} detail={memoryUsed ? `${formatCompactNumber(memoryUsed)} MB` : undefined} tone={memoryTone} />
-            <OpsMetricTile label="DB" value={dbStatus} detail="数据库状态" tone={dbTone} />
-            <OpsMetricTile label="DB 连接" value={`${formatCompactNumber(dbConnActive)} / ${formatCompactNumber(dbConnIdle)} / ${formatCompactNumber(dbConnWaiting)}`} detail="活跃 / 空闲 / 等待" />
-            <OpsMetricTile label="Redis" value={redisStatus} detail="缓存状态" tone={redisTone} />
-            <OpsMetricTile label="Redis 连接" value={`${formatCompactNumber(redisConnTotal)} / ${formatCompactNumber(redisConnIdle)}`} detail="总数 / 空闲" />
-            <OpsMetricTile label="锁键" value={formatCompactNumber(lockKeys)} detail="分布式锁" tone={lockKeys > 0 ? 'warning' : 'default'} />
-            <OpsMetricTile label="后台任务" value={formatCompactNumber(backgroundTasks)} detail="后台队列" />
+            <OpsMetricTile label="CPU" value={formatWholePercent(cpuUsage)} detail={`警告 ${formatWholePercent(cpuWarningThreshold)} · 严重 ${formatWholePercent(cpuCriticalThreshold)}`} tone={cpuTone} />
+            <OpsMetricTile label="内存" value={memoryUsage ? formatWholePercent(memoryUsage) : '--'} detail={`${formatMemoryMb(memoryUsed)} / ${formatMemoryMb(memoryTotal)}`} tone={memoryTone} />
+            <OpsMetricTile label="数据库" value={dbStatus} detail={`连接 ${formatOptionalNumber(dbConnActive)} / ${formatOptionalNumber(dbConnMax)} · 活跃 ${formatOptionalNumber(dbConnActive)} · 空闲 ${formatOptionalNumber(dbConnIdle)}`} tone={dbTone} />
+            <OpsMetricTile label="REDIS" value={formatWholePercent(redisUsagePercent)} detail={`连接 ${formatOptionalNumber(redisConnTotal)} / ${formatOptionalNumber(redisConnMax)} · 活跃 ${formatOptionalNumber(redisConnActive)} · 空闲 ${formatOptionalNumber(redisConnIdle)}`} tone={redisTone} />
+            <OpsMetricTile label="协程" value={formatThresholdStatus(goroutineCount, goroutineWarningThreshold, goroutineCriticalThreshold)} detail={`当前 ${formatOptionalNumber(goroutineCount)} · 警告 ${formatOptionalNumber(goroutineWarningThreshold)} · 严重 ${formatOptionalNumber(goroutineCriticalThreshold)}`} tone={goroutineTone} />
+            <OpsMetricTile label="后台任务" value={backgroundTaskWarnings > 0 ? '告警' : '正常'} detail={`总计 ${formatOptionalNumber(backgroundTasks)} · 警告 ${formatOptionalNumber(backgroundTaskWarnings)}`} tone={backgroundTone} />
           </View>
         </View>
 
+        {accountAvailabilityRows.length > 0 ? (
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="账号可用性" icon={ShieldCheck} />
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
@@ -1240,9 +1310,9 @@ export default function OpsScreen() {
                 </RecordCard>
               );
             })}
-            {accountAvailabilityRows.length === 0 ? <EmptyText loading={accountAvailabilityQuery.isLoading} empty="暂无账号可用性数据。" /> : null}
           </View>
         </View>
+        ) : null}
 
         {concurrencyRows.length > 0 ? (
           <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
@@ -1270,6 +1340,7 @@ export default function OpsScreen() {
           </View>
         ) : null}
 
+        {userConcurrencyRows.length > 0 ? (
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
           <SectionTitle title="用户并发" icon={Users} />
           <View style={{ gap: 10, marginTop: 12 }}>
@@ -1288,11 +1359,11 @@ export default function OpsScreen() {
                 </RecordCard>
               );
             })}
-            {userConcurrencyRows.length === 0 ? <EmptyText loading={userConcurrencyQuery.isLoading} empty="暂无用户并发数据。" /> : null}
           </View>
         </View>
+        ) : null}
 
-        {accountSwitchPoints.length > 1 ? (
+        {hasAccountSwitchTrend && accountSwitchPoints.length > 1 ? (
           <LineTrendChart title="平均账号切换趋势" subtitle="账号路由切换随时间变化" points={accountSwitchPoints} color="#14b8a6" icon={Activity} formatValue={formatCompactNumber} />
         ) : null}
 
