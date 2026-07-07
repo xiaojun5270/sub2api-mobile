@@ -290,6 +290,28 @@ function getExtraString(account: AdminAccount, keys: string[]) {
   return firstStringValue(account.extra, keys);
 }
 
+function getAccountString(account: AdminAccount, keys: string[]) {
+  return firstStringValue(account as unknown, keys) ?? getExtraString(account, keys);
+}
+
+function getAccountWindowNumber(account: AdminAccount, keys: string[]) {
+  const sources = [account, account.extra, account.usage, account.quota, account.credentials];
+  for (const source of sources) {
+    const value = firstNumberValue(source, keys);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function getAccountWindowString(account: AdminAccount, keys: string[]) {
+  const sources = [account, account.extra, account.usage, account.quota, account.credentials];
+  for (const source of sources) {
+    const value = firstStringValue(source, keys);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 function normalizePercent(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   const percent = value > 0 && value <= 1 ? value * 100 : value;
@@ -333,9 +355,52 @@ function formatResetLabel(resetAfterSeconds?: number, resetAt?: string) {
 
 function getCodexWindowUsage(account: AdminAccount, windowKey: '5h' | '7d'): CodexWindowUsage {
   const prefix = windowKey === '5h' ? 'codex_5h' : 'codex_7d';
-  const percent = normalizePercent(getExtraNumber(account, [`${prefix}_used_percent`, `${prefix}_usage_percent`]));
-  const resetAfterSeconds = getExtraNumber(account, [`${prefix}_reset_after_seconds`, `${prefix}_resetAfterSeconds`]);
-  const resetAt = getExtraString(account, [`${prefix}_reset_at`, `${prefix}_resetAt`]);
+  const compactPrefix = windowKey === '5h' ? 'codex5h' : 'codex7d';
+  const percentKeys = [
+    `${prefix}_used_percent`,
+    `${prefix}_usage_percent`,
+    `${prefix}_usage_pct`,
+    `${prefix}_percent`,
+    `${compactPrefix}UsedPercent`,
+    `${compactPrefix}UsagePercent`,
+    `${compactPrefix}UsagePct`,
+    windowKey === '5h' ? 'usage_5h_percent' : 'usage_7d_percent',
+    windowKey === '5h' ? 'usage5hPercent' : 'usage7dPercent',
+    windowKey === '5h' ? 'rate_limit_5h_percent' : 'rate_limit_7d_percent',
+    windowKey === '5h' ? 'rateLimit5hPercent' : 'rateLimit7dPercent',
+  ];
+  const usageKeys = windowKey === '5h'
+    ? ['codex_5h_usage', 'codex_5h_used', 'codex5hUsage', 'codex5hUsed', 'usage_5h', 'usage5h', 'usage_5_hours', 'used_5h', 'used5h']
+    : ['codex_7d_usage', 'codex_7d_used', 'codex7dUsage', 'codex7dUsed', 'usage_7d', 'usage7d', 'usage_week', 'weekly_usage', 'used_7d', 'used7d'];
+  const limitKeys = windowKey === '5h'
+    ? ['codex_5h_limit', 'codex_5h_quota', 'codex5hLimit', 'codex5hQuota', 'rate_limit_5h', 'rateLimit5h', 'limit_5h', 'quota_5h']
+    : ['codex_7d_limit', 'codex_7d_quota', 'codex7dLimit', 'codex7dQuota', 'rate_limit_7d', 'rateLimit7d', 'limit_7d', 'quota_7d', 'weekly_limit'];
+  const rawPercent = getAccountWindowNumber(account, percentKeys);
+  const used = getAccountWindowNumber(account, usageKeys);
+  const limit = getAccountWindowNumber(account, limitKeys);
+  const percent = rawPercent !== undefined
+    ? normalizePercent(rawPercent)
+    : limit !== undefined && limit > 0 && used !== undefined
+      ? normalizePercent((used / limit) * 100)
+      : undefined;
+  const resetAfterSeconds = getAccountWindowNumber(account, [
+    `${prefix}_reset_after_seconds`,
+    `${prefix}_resetAfterSeconds`,
+    `${compactPrefix}ResetAfterSeconds`,
+    windowKey === '5h' ? 'reset_after_seconds_5h' : 'reset_after_seconds_7d',
+    windowKey === '5h' ? 'resetAfterSeconds5h' : 'resetAfterSeconds7d',
+    windowKey === '5h' ? 'rate_limit_5h_reset_after_seconds' : 'rate_limit_7d_reset_after_seconds',
+    windowKey === '5h' ? 'rateLimit5hResetAfterSeconds' : 'rateLimit7dResetAfterSeconds',
+  ]);
+  const resetAt = getAccountWindowString(account, [
+    `${prefix}_reset_at`,
+    `${prefix}_resetAt`,
+    `${compactPrefix}ResetAt`,
+    windowKey === '5h' ? 'reset_at_5h' : 'reset_at_7d',
+    windowKey === '5h' ? 'resetAt5h' : 'resetAt7d',
+    windowKey === '5h' ? 'rate_limit_5h_reset_at' : 'rate_limit_7d_reset_at',
+    windowKey === '5h' ? 'rateLimit5hResetAt' : 'rateLimit7dResetAt',
+  ]);
 
   return {
     label: windowKey,
@@ -463,12 +528,14 @@ function getAccountStatPalette(colors: AppTheme, tone: AccountStatTone) {
 function AccountStatTile({
   colors,
   icon: Icon,
+  detail,
   label,
   tone,
   value,
 }: {
   colors: AppTheme;
   icon: LucideIcon;
+  detail?: string;
   label: string;
   tone: AccountStatTone;
   value: string;
@@ -484,7 +551,7 @@ function AccountStatTile({
         borderWidth: 1,
         flex: 1,
         flexBasis: 0,
-        minHeight: 66,
+        minHeight: detail ? 78 : 66,
         minWidth: 0,
         paddingHorizontal: 9,
         paddingVertical: 8,
@@ -509,6 +576,11 @@ function AccountStatTile({
       >
         {value}
       </Text>
+      {detail ? (
+        <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, fontWeight: '700', marginTop: 3 }}>
+          {detail}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -537,12 +609,14 @@ function getAccountInlineTotalStats(account: AdminAccount): AccountTotalSummary 
 }
 
 function normalizeTodaySummary(value: unknown): AccountTodaySummary {
+  const cost = firstNumberValue(value, ['cost', 'actual_cost', 'actualCost', 'account_cost', 'accountCost']) ?? 0;
+
   return {
-    requests: firstNumberValue(value, ['requests']) ?? 0,
-    tokens: firstNumberValue(value, ['tokens']) ?? 0,
-    cost: firstNumberValue(value, ['cost']) ?? 0,
-    standardCost: firstNumberValue(value, ['standard_cost']) ?? 0,
-    userCost: firstNumberValue(value, ['user_cost']) ?? 0,
+    requests: firstNumberValue(value, ['requests', 'request_count', 'requestCount']) ?? 0,
+    tokens: firstNumberValue(value, ['tokens', 'total_tokens', 'totalTokens']) ?? 0,
+    cost,
+    standardCost: firstNumberValue(value, ['standard_cost', 'standardCost']) ?? 0,
+    userCost: firstNumberValue(value, ['user_cost', 'userCost']) ?? cost,
   };
 }
 
@@ -642,7 +716,7 @@ function AccountQuotaPanel({
   onReset: () => void;
 }) {
   const windows = [getCodexWindowUsage(account, '5h'), getCodexWindowUsage(account, '7d')];
-  const updatedAt = getExtraString(account, ['codex_usage_updated_at', 'codexUsageUpdatedAt']);
+  const updatedAt = getAccountString(account, ['codex_usage_updated_at', 'codexUsageUpdatedAt']);
   const canQuery = mode === 'openai' || mode === 'grok';
   const canReset = mode === 'openai' || mode === 'generic';
   const resetDisabled = resetting || !canReset || (mode === 'openai' && info?.availableCount === 0);
@@ -1491,7 +1565,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   <AccountStatTile colors={colors} icon={Activity} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
                   <AccountStatTile colors={colors} icon={Cpu} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
-                  <AccountStatTile colors={colors} icon={DollarSign} label="今日额度" tone="todayQuota" value={formatMoneyValue(todayStats.cost)} />
+                  <AccountStatTile colors={colors} detail={`U ${formatMoneyValue(todayStats.userCost)}`} icon={DollarSign} label="今日额度" tone="todayQuota" value={`A ${formatMoneyValue(todayStats.cost)}`} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />

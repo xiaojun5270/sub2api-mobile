@@ -1223,14 +1223,14 @@ export function bulkUpdateAccounts(body: AccountBulkUpdateRequest) {
 }
 
 function normalizeAccountTodayStats(source: unknown): AccountTodayStats {
-  const cost = firstNumberField(source, ['cost']) ?? 0;
+  const cost = firstNumberField(source, ['cost', 'actual_cost', 'actualCost', 'account_cost', 'accountCost']) ?? 0;
 
   return {
-    requests: firstNumberField(source, ['requests']) ?? 0,
-    tokens: firstNumberField(source, ['tokens']) ?? 0,
+    requests: firstNumberField(source, ['requests', 'request_count', 'requestCount']) ?? 0,
+    tokens: firstNumberField(source, ['tokens', 'total_tokens', 'totalTokens']) ?? 0,
     cost,
-    standard_cost: firstNumberField(source, ['standard_cost']) ?? 0,
-    user_cost: firstNumberField(source, ['user_cost']) ?? 0,
+    standard_cost: firstNumberField(source, ['standard_cost', 'standardCost']) ?? 0,
+    user_cost: firstNumberField(source, ['user_cost', 'userCost']) ?? cost,
   };
 }
 
