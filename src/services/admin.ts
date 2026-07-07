@@ -264,6 +264,9 @@ async function adminFetchWithOptionalQuery<T>(
 
 type OpsQueryParams = {
   time_range?: string;
+  start?: string;
+  end?: string;
+  interval?: string;
   start_time?: string;
   end_time?: string;
   platform?: string;

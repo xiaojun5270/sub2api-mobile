@@ -337,6 +337,32 @@ function getTokenStatsTimeRange(value: OpsTimeRange) {
   return value === '1h' ? '1h' : undefined;
 }
 
+function getOpsRangeMs(value: OpsTimeRange) {
+  if (value === '24h') return 24 * 60 * 60 * 1000;
+  if (value === '7d') return 7 * 24 * 60 * 60 * 1000;
+  if (value === '30d') return 30 * 24 * 60 * 60 * 1000;
+  return 60 * 60 * 1000;
+}
+
+function getOpsTrendInterval(value: OpsTimeRange) {
+  if (value === '24h') return '1h';
+  if (value === '7d') return '6h';
+  if (value === '30d') return '1d';
+  return '1m';
+}
+
+function getOpsTrendParams(value: OpsTimeRange, platform?: string, groupId?: number) {
+  const end = new Date();
+  const start = new Date(end.getTime() - getOpsRangeMs(value));
+  return {
+    end: end.toISOString(),
+    group_id: groupId,
+    interval: getOpsTrendInterval(value),
+    platform,
+    start: start.toISOString(),
+  };
+}
+
 function parseGroupId(value: string) {
   const groupId = Number(value);
   return Number.isFinite(groupId) && groupId > 0 ? groupId : undefined;
@@ -642,17 +668,23 @@ export default function OpsScreen() {
   const [activeFilterMenu, setActiveFilterMenu] = useState<OpsFilterMenu>(null);
   const selectedGroupId = parseGroupId(groupFilter);
 
-  const opsQueryParams = useMemo(() => ({
+  const opsWindowParams = useMemo(() => ({
     group_id: selectedGroupId,
     platform: platformFilter || undefined,
-    time_range: timeRange,
+    window: timeRange,
   }), [platformFilter, selectedGroupId, timeRange]);
 
   const opsRealtimeParams = useMemo(() => ({
     group_id: selectedGroupId,
     platform: platformFilter || undefined,
-    window: '1h',
+    window: '1m',
   }), [platformFilter, selectedGroupId]);
+
+  const opsTrendQueryKey = useMemo(() => ({
+    group_id: selectedGroupId,
+    platform: platformFilter || undefined,
+    time_range: timeRange,
+  }), [platformFilter, selectedGroupId, timeRange]);
 
   const opsDimensionParams = useMemo(() => ({
     group_id: selectedGroupId,
@@ -675,25 +707,25 @@ export default function OpsScreen() {
     sort_order: 'desc',
   }), [platformFilter, selectedGroupId, timeRange]);
 
-  const overviewQuery = useQuery({ queryKey: ['ops-overview', opsQueryParams], queryFn: () => getOpsDashboardOverview(opsQueryParams), staleTime: 30_000 });
-  const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot', opsQueryParams], queryFn: () => getOpsDashboardSnapshot(opsQueryParams), staleTime: 30_000 });
+  const overviewQuery = useQuery({ queryKey: ['ops-overview', opsWindowParams], queryFn: () => getOpsDashboardOverview(opsWindowParams), staleTime: 30_000 });
+  const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot', opsWindowParams], queryFn: () => getOpsDashboardSnapshot(opsWindowParams), staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime', opsRealtimeParams], queryFn: () => getOpsRealtimeTraffic(opsRealtimeParams), staleTime: 15_000 });
   const concurrencyQuery = useQuery({ queryKey: ['ops-concurrency', opsDimensionParams], queryFn: () => getOpsConcurrency(opsDimensionParams), staleTime: 15_000 });
   const userConcurrencyQuery = useQuery({ queryKey: ['ops-user-concurrency', opsDimensionParams], queryFn: () => getOpsUserConcurrency(opsDimensionParams), staleTime: 15_000 });
   const accountAvailabilityQuery = useQuery({ queryKey: ['ops-account-availability', opsDimensionParams], queryFn: () => getOpsAccountAvailability(opsDimensionParams), staleTime: 15_000 });
   const tokenStatsQuery = useQuery({ queryKey: ['ops-openai-token-stats', opsTokenStatsParams], queryFn: () => getOpsOpenAiTokenStats(opsTokenStatsParams), staleTime: 30_000 });
-  const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend', opsQueryParams], queryFn: () => getOpsThroughputTrend(opsQueryParams), staleTime: 60_000 });
-  const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend', opsQueryParams], queryFn: () => getOpsErrorTrend(opsQueryParams), staleTime: 60_000 });
-  const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution', opsQueryParams], queryFn: () => getOpsErrorDistribution(opsQueryParams), staleTime: 60_000 });
-  const latencyHistogramQuery = useQuery({ queryKey: ['ops-latency-histogram', opsQueryParams], queryFn: () => getOpsLatencyHistogram(opsQueryParams), staleTime: 60_000 });
+  const throughputQuery = useQuery({ queryKey: ['ops-throughput-trend', opsTrendQueryKey], queryFn: () => getOpsThroughputTrend(getOpsTrendParams(timeRange, platformFilter || undefined, selectedGroupId)), staleTime: 60_000 });
+  const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend', opsTrendQueryKey], queryFn: () => getOpsErrorTrend(getOpsTrendParams(timeRange, platformFilter || undefined, selectedGroupId)), staleTime: 60_000 });
+  const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution', opsWindowParams], queryFn: () => getOpsErrorDistribution(opsWindowParams), staleTime: 60_000 });
+  const latencyHistogramQuery = useQuery({ queryKey: ['ops-latency-histogram', opsWindowParams], queryFn: () => getOpsLatencyHistogram(opsWindowParams), staleTime: 60_000 });
   const requestsQuery = useQuery({ queryKey: ['ops-requests', opsListParams], queryFn: () => getOpsRequests(opsListParams), staleTime: 30_000 });
   const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors', opsListParams], queryFn: () => getOpsRequestErrors({ ...opsListParams, view: 'errors' }), staleTime: 30_000 });
   const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors', opsListParams], queryFn: () => getOpsUpstreamErrors(opsListParams), staleTime: 30_000 });
   const errorsQuery = useQuery({ queryKey: ['ops-errors', opsListParams], queryFn: () => getOpsErrors(opsListParams), staleTime: 30_000 });
-  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs', opsQueryParams], queryFn: () => getOpsSystemLogs({ ...opsQueryParams, page: 1, page_size: 20 }), staleTime: 30_000 });
+  const systemLogsQuery = useQuery({ queryKey: ['ops-system-logs', opsListParams], queryFn: () => getOpsSystemLogs({ ...opsListParams, page: 1, page_size: 20 }), staleTime: 30_000 });
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
-  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events', opsQueryParams], queryFn: () => getOpsAlertEvents({ ...opsQueryParams, limit: 20 }), staleTime: 30_000 });
+  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events', opsListParams], queryFn: () => getOpsAlertEvents({ ...opsListParams, limit: 20 }), staleTime: 30_000 });
 
   const resolveAlertMutation = useMutation({
     mutationFn: (id: number | string) => updateOpsAlertEventStatus(id, 'resolved'),
@@ -841,10 +873,16 @@ export default function OpsScreen() {
   const totalRequests = firstNumber(overview, ['request_count_total', 'requestCountTotal', 'total_requests', 'totalRequests', 'requests', 'request_count', 'requestCount']) || realtimeRequests || successCount + errors;
   const rawErrorRate = firstNumberValue(overview, ['error_rate', 'errorRate', 'errors_rate']);
   const errorRate = rawErrorRate !== undefined ? (rawErrorRate > 1 ? rawErrorRate / 100 : rawErrorRate) : totalRequests > 0 ? errors / totalRequests : 0;
+  const slaErrorCount = firstNumber(overview, ['error_count_sla', 'errorCountSla', 'sla_error_count', 'slaErrorCount']);
+  const upstreamErrorCount = firstNumber(overview, ['upstream_error_count_excl_429_529', 'upstreamErrorCountExcl429529', 'upstream_errors_excl_429_529', 'upstreamErrorsExcl429529']);
   const rawUpstreamErrorRate = firstNumberValue(overview, ['upstream_error_rate', 'upstreamErrorRate']);
-  const upstreamErrorRate = rawUpstreamErrorRate !== undefined ? (rawUpstreamErrorRate > 1 ? rawUpstreamErrorRate / 100 : rawUpstreamErrorRate) : 0;
+  const upstreamErrorRate = rawUpstreamErrorRate !== undefined ? (rawUpstreamErrorRate > 1 ? rawUpstreamErrorRate / 100 : rawUpstreamErrorRate) : totalRequests > 0 ? upstreamErrorCount / totalRequests : 0;
   const rawSla = firstNumberValue(overview, ['sla', 'sla_rate', 'slaRate', 'success_rate', 'successRate']);
-  const slaPercent = rawSla !== undefined ? (rawSla > 1 ? rawSla : rawSla * 100) : undefined;
+  const slaPercent = rawSla !== undefined
+    ? Math.max(0, Math.min(100, rawSla > 1 ? rawSla : rawSla * 100))
+    : totalRequests > 0
+      ? Math.max(0, Math.min(100, ((totalRequests - slaErrorCount) / totalRequests) * 100))
+      : undefined;
   const healthScore = firstNumberValue(overview, ['health_score', 'healthScore']);
   const qps = firstNumber(qpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']) || firstNumber(realtime, ['qps_current', 'qpsCurrent', 'qps', 'queries_per_second', 'requests_per_second', 'requestsPerSecond']);
   const rpm = firstNumber(overview, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || firstNumber(realtime, ['rpm', 'requests_per_minute', 'requestsPerMinute']) || qps * 60;
@@ -867,7 +905,6 @@ export default function OpsScreen() {
   const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
   const tokenConsumed = firstNumber(overview, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']) || firstNumber(tokenStats, ['token_consumed', 'tokenConsumed', 'tokens', 'total_tokens', 'totalTokens']);
   const businessLimited = firstNumber(overview, ['business_limited_count', 'businessLimitedCount']);
-  const upstreamErrorCount = firstNumber(overview, ['upstream_error_count_excl_429_529', 'upstreamErrorCountExcl429529', 'upstream_errors_excl_429_529', 'upstreamErrorsExcl429529']);
   const upstream429Count = firstNumber(overview, ['upstream_429_count', 'upstream429Count']);
   const upstream529Count = firstNumber(overview, ['upstream_529_count', 'upstream529Count']);
   const cpuUsage = firstNumber(systemMetrics, ['cpu_usage_percent', 'cpuUsagePercent']) || firstNumber(overview, ['cpu_usage_percent', 'cpuUsagePercent']);
@@ -941,7 +978,6 @@ export default function OpsScreen() {
   }
 
   const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || alertEventsQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching;
-  const lastRefreshText = formatKnownTime(firstTextValue(overview, ['created_at', 'createdAt', 'updated_at', 'updatedAt']), firstTextValue(logsHealth, ['latest_log_at', 'latestLogAt']));
   const activeFilterOptions: FilterOption[] = activeFilterMenu === 'platform'
     ? platformOptions
     : activeFilterMenu === 'group'
@@ -1016,7 +1052,7 @@ export default function OpsScreen() {
       <Stack.Screen options={{ title: '运维监控' }} />
       <ScreenShell
         title="运维监控"
-        subtitle={`状态：就绪 · 刷新 ${lastRefreshText}`}
+        subtitle=""
         icon={ServerCog}
         variant="minimal"
         refreshing={refreshing}
@@ -1037,11 +1073,6 @@ export default function OpsScreen() {
             {renderFilterChip('platform', platformFilter ? platformFilter.toUpperCase() : '全部平台', Boolean(platformFilter))}
             {renderFilterChip('group', groupFilter ? `分组 #${groupFilter}` : '全部分组', Boolean(groupFilter))}
             {renderFilterChip('time', getTimeRangeLabel(timeRange), true)}
-            <View style={{ backgroundColor: alertCount > 0 ? colors.errorBg : colors.successBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 }}>
-              <Text style={{ color: alertCount > 0 ? colors.errorText : colors.success, fontSize: 12, fontWeight: '800' }}>
-                {alertCount > 0 ? `预警 ${formatCompactNumber(alertCount)}` : '预警规则'}
-              </Text>
-            </View>
           </View>
           {activeFilterMenu ? (
             <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 14, borderWidth: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12, padding: 10 }}>

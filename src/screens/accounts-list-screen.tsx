@@ -314,8 +314,7 @@ function getAccountWindowString(account: AdminAccount, keys: string[]) {
 
 function normalizePercent(value?: number) {
   if (value === undefined || !Number.isFinite(value)) return undefined;
-  const percent = value > 0 && value <= 1 ? value * 100 : value;
-  return Math.max(0, Math.min(100, percent));
+  return Math.max(0, Math.min(100, value));
 }
 
 function formatPercent(value?: number) {
