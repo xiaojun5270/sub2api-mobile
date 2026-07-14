@@ -135,29 +135,9 @@ function toGroupIds(raw: string) {
   return values.length > 0 ? values : undefined;
 }
 
-function getAccountStatus(account?: AdminAccount) {
-  if (!account) return '未知';
-  if (account.status === 'error' || account.error_message) return '异常';
-  if (account.schedulable === false) return '暂停';
-  return account.status || '正常';
-}
-
 function modelName(value: string | { id?: string; display_name?: string; model?: string; name?: string; enabled?: boolean }) {
   if (typeof value === 'string') return value;
   return value.display_name || value.id || value.model || value.name || '--';
-}
-
-function formatExtraValue(value: unknown) {
-  if (value === null) return 'null';
-  if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return '[object]';
-    }
-  }
-  return String(value);
 }
 
 function recordNumber(source: Record<string, unknown>, keys: string[]) {
@@ -199,55 +179,6 @@ function MetricTile({ label, value }: { label: string; value: string }) {
     <View style={{ backgroundColor: colors.mutedCard, borderRadius: 14, flex: 1, minWidth: 92, padding: 12 }}>
       <Text style={{ color: colors.subtext, fontSize: 11 }}>{label}</Text>
       <Text numberOfLines={1} style={{ color: colors.text, fontSize: 16, fontWeight: '800', marginTop: 6 }}>{value}</Text>
-    </View>
-  );
-}
-
-function ExtraInfoTile({ label, value }: { label: string; value: string }) {
-  const colors = useAppTheme();
-
-  return (
-    <View
-      style={{
-        backgroundColor: colors.chartPanel,
-        borderColor: colors.border,
-        borderRadius: 14,
-        borderWidth: 1,
-        flexGrow: 1,
-        flexShrink: 1,
-        flexBasis: '47%',
-        minHeight: 88,
-        minWidth: 148,
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-      }}
-    >
-      <Text
-        numberOfLines={2}
-        style={{
-          color: colors.subtext,
-          fontSize: 10,
-          fontWeight: '500',
-          lineHeight: 14,
-        }}
-      >
-        {label}
-      </Text>
-      <Text
-        adjustsFontSizeToFit
-        minimumFontScale={0.78}
-        numberOfLines={2}
-        selectable
-        style={{
-          color: colors.text,
-          fontSize: 14,
-          fontWeight: '600',
-          lineHeight: 18,
-          marginTop: 7,
-        }}
-      >
-        {value}
-      </Text>
     </View>
   );
 }
@@ -508,10 +439,6 @@ export default function AccountDetailScreen() {
   }));
   const usageItems = usageQuery.data?.items ?? usageQuery.data?.usage ?? [];
   const models = modelsQuery.data?.models ?? [];
-  const extraEntries = useMemo(
-    () => Object.entries(account?.extra ?? {}).filter(([, value]) => value !== undefined).slice(0, 12),
-    [account?.extra]
-  );
   const modelChartItems = models.slice(0, 8).map((item) => ({
     label: modelName(item),
     value: typeof item === 'object' && item.enabled === false ? 0 : 1,
@@ -553,58 +480,6 @@ export default function AccountDetailScreen() {
 
           {account ? (
             <>
-              <Section title="基础状态" icon={ShieldCheck}>
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  <MetricTile label="账号 ID" value={`#${account.id}`} />
-                  <MetricTile label="状态" value={getAccountStatus(account)} />
-                  <MetricTile label="调度" value={(account.schedulable ?? true) ? '可调度' : '已暂停'} />
-                  <MetricTile label="平台" value={account.platform || '--'} />
-                  <MetricTile label="类型" value={account.type || '--'} />
-                  <MetricTile label="并发" value={`${account.current_concurrency ?? 0}/${account.concurrency ?? '--'}`} />
-                  <MetricTile label="优先级" value={`${account.priority ?? 0}`} />
-                  <MetricTile label="倍率" value={`${(account.rate_multiplier ?? 1).toFixed(2)}x`} />
-                  <MetricTile label="权重" value={account.load_factor !== undefined && account.load_factor !== null ? `${account.load_factor}` : '--'} />
-                  <MetricTile label="代理" value={account.proxy_id ? `#${account.proxy_id}` : '--'} />
-                  <MetricTile label="隐私" value={account.privacy_mode || (account.privacy ? '开启' : '关闭')} />
-                  <MetricTile label="Shadow" value={account.shadow ? '开启' : '关闭'} />
-                  <MetricTile label="过期" value={formatDisplayTime(account.expires_at)} />
-                </View>
-                <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 12 }}>
-                  最近使用 {formatDisplayTime(account.last_used_at)} · 更新 {formatDisplayTime(account.updated_at)} · 创建 {formatDisplayTime(account.created_at)}
-                </Text>
-                {account.rate_limit_reset_at ? (
-                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                    限流重置 {formatDisplayTime(account.rate_limit_reset_at)}
-                  </Text>
-                ) : null}
-                {account.temp_unschedulable_until ? (
-                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                    临时不可调度至 {formatDisplayTime(account.temp_unschedulable_until)}
-                  </Text>
-                ) : null}
-                {account.groups?.length ? (
-                  <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 6 }}>
-                    分组 {account.groups.map((group) => group.name).join(' · ')}
-                  </Text>
-                ) : null}
-                {account.error_message ? (
-                  <View style={{ backgroundColor: colors.errorBg, borderRadius: 12, marginTop: 12, padding: 12 }}>
-                    <Text style={{ color: colors.errorText, fontSize: 13, lineHeight: 20 }}>{account.error_message}</Text>
-                  </View>
-                ) : null}
-              </Section>
-
-              {(account.notes || extraEntries.length > 0) ? (
-                <Section title="高级信息" icon={DatabaseZap}>
-                  {account.notes ? <Text style={{ color: colors.subtext, fontSize: 13, lineHeight: 20, marginBottom: 10 }}>{account.notes}</Text> : null}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                    {extraEntries.map(([key, value]) => (
-                      <ExtraInfoTile key={key} label={key} value={formatExtraValue(value)} />
-                    ))}
-                  </View>
-                </Section>
-              ) : null}
-
               <Section title="今日用量" icon={Activity}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   <MetricTile label="请求" value={formatCompactNumber(todayQuery.data?.requests ?? 0)} />

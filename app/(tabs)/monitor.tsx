@@ -231,7 +231,74 @@ function optionalNumberFrom(source: Record<string, unknown> | undefined, keys: s
   return undefined;
 }
 
-function formatAverageResponse(stats?: Record<string, unknown>, opsOverview?: Record<string, unknown>) {
+function nestedRecordFrom(source: Record<string, unknown> | undefined, keys: string[]) {
+  if (!source) return undefined;
+
+  for (const key of keys) {
+    if (isRecord(source[key])) return source[key];
+  }
+
+  return undefined;
+}
+
+const AVERAGE_DURATION_MS_KEYS = [
+  'avg_response_time_ms',
+  'avgResponseTimeMs',
+  'average_response_time_ms',
+  'averageResponseTimeMs',
+  'avg_response_ms',
+  'avgResponseMs',
+  'avg_latency_ms',
+  'avgLatencyMs',
+  'average_latency_ms',
+  'averageLatencyMs',
+  'duration_avg_ms',
+  'durationAvgMs',
+  'avg_duration_ms',
+  'avgDurationMs',
+  'average_duration_ms',
+  'averageDurationMs',
+];
+
+function averageDurationFromTrend(trend: unknown[]) {
+  let weightedDuration = 0;
+  let requestCount = 0;
+  let durationTotal = 0;
+  let durationCount = 0;
+
+  for (const item of trend) {
+    if (!isRecord(item)) continue;
+
+    const duration = optionalNumberFrom(item, AVERAGE_DURATION_MS_KEYS);
+    if (duration === undefined || duration < 0) continue;
+
+    const requests = optionalNumberFrom(item, [
+      'requests',
+      'total_requests',
+      'totalRequests',
+      'request_count',
+      'requestCount',
+      'success_count',
+      'successCount',
+    ]) ?? 0;
+
+    durationTotal += duration;
+    durationCount += 1;
+    if (requests > 0) {
+      weightedDuration += duration * requests;
+      requestCount += requests;
+    }
+  }
+
+  if (requestCount > 0) return weightedDuration / requestCount;
+  return durationCount > 0 ? durationTotal / durationCount : undefined;
+}
+
+function formatAverageResponse(
+  stats?: Record<string, unknown>,
+  opsOverview?: Record<string, unknown>,
+  trend: unknown[] = []
+) {
   const seconds = optionalNumberFrom(stats, [
     'avg_response_seconds',
     'avgResponseSeconds',
@@ -240,28 +307,15 @@ function formatAverageResponse(stats?: Record<string, unknown>, opsOverview?: Re
   ]);
   if (seconds !== undefined) return `${seconds.toFixed(2)}s`;
 
-  const milliseconds = optionalNumberFrom(stats, [
-    'avg_response_time_ms',
-    'avgResponseTimeMs',
-    'average_response_time_ms',
-    'averageResponseTimeMs',
-    'avg_response_ms',
-    'avgResponseMs',
-    'avg_latency_ms',
-    'avgLatencyMs',
-    'duration_avg_ms',
-    'durationAvgMs',
-  ]) ?? optionalNumberFrom(opsOverview, [
-    'avg_latency_ms',
-    'avgLatencyMs',
-    'duration_avg_ms',
-    'durationAvgMs',
-    'average_latency_ms',
-    'averageLatencyMs',
-  ]);
+  const durationMetrics = nestedRecordFrom(opsOverview, ['duration', 'latency']);
+  const milliseconds = optionalNumberFrom(stats, AVERAGE_DURATION_MS_KEYS)
+    ?? optionalNumberFrom(opsOverview, AVERAGE_DURATION_MS_KEYS)
+    ?? optionalNumberFrom(durationMetrics, ['avg_ms', 'avgMs', 'average_ms', 'averageMs', 'avg', 'average'])
+    ?? averageDurationFromTrend(trend);
   if (milliseconds !== undefined) return `${(milliseconds / 1000).toFixed(2)}s`;
 
-  const generic = optionalNumberFrom(stats, ['avg_response_time', 'avgResponseTime', 'average_response_time', 'averageResponseTime']);
+  const generic = optionalNumberFrom(stats, ['avg_response_time', 'avgResponseTime', 'average_response_time', 'averageResponseTime'])
+    ?? optionalNumberFrom(opsOverview, ['avg_response_time', 'avgResponseTime', 'average_response_time', 'averageResponseTime']);
   if (generic !== undefined) return `${(generic >= 1000 ? generic / 1000 : generic).toFixed(2)}s`;
 
   return '--';
@@ -334,17 +388,53 @@ function Section({
   );
 }
 
-function StatCard({ title, value, detail, icon }: { title: string; value: string; detail?: string; icon: LucideIcon }) {
+type StatCardTone = 'primary' | 'success' | 'danger' | 'accent' | 'muted';
+
+function StatCard({
+  title,
+  value,
+  detail,
+  icon,
+  tone = 'primary',
+}: {
+  title: string;
+  value: string;
+  detail?: string;
+  icon: LucideIcon;
+  tone?: StatCardTone;
+}) {
   const colors = useAppTheme();
+  const palette = {
+    primary: { border: colors.mode === 'dark' ? '#294a7d' : '#d9e7ff', detail: colors.primary },
+    success: { border: colors.mode === 'dark' ? '#14584b' : '#ccefe0', detail: colors.success },
+    danger: { border: colors.mode === 'dark' ? '#7f1d2f' : '#ffd9e2', detail: colors.danger },
+    accent: { border: colors.mode === 'dark' ? '#6b4b14' : '#fde7bd', detail: colors.accentText },
+    muted: { border: colors.border, detail: colors.subtext },
+  }[tone];
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.card, borderColor: colors.border, borderRadius: 16, borderWidth: 1, padding: 14 }}>
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-        <IconBadge icon={icon} containerSize={30} size={15} />
-        <Text style={{ flex: 1, fontSize: 12, color: colors.subtext }}>{title}</Text>
+    <View
+      style={{
+        backgroundColor: colors.card,
+        borderColor: palette.border,
+        borderRadius: 16,
+        borderWidth: 1,
+        elevation: 2,
+        flex: 1,
+        minHeight: 126,
+        padding: 14,
+        shadowColor: colors.mode === 'dark' ? '#000000' : '#64748b',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: colors.mode === 'dark' ? 0.2 : 0.08,
+        shadowRadius: 10,
+      }}
+    >
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 9 }}>
+        <IconBadge icon={icon} tone={tone} containerSize={36} size={17} />
+        <Text numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 12, fontWeight: '600' }}>{title}</Text>
       </View>
-      <Text style={{ marginTop: 8, fontSize: 24, fontWeight: '700', color: colors.text }}>{value}</Text>
-      {detail ? <Text style={{ marginTop: 6, fontSize: 12, color: colors.subtext }}>{detail}</Text> : null}
+      <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={{ color: colors.text, fontSize: 23, fontWeight: '800', lineHeight: 29, marginTop: 9 }}>{value}</Text>
+      {detail ? <Text numberOfLines={1} style={{ color: palette.detail, fontSize: 11, fontWeight: '600', lineHeight: 15, marginTop: 5 }}>{detail}</Text> : null}
     </View>
   );
 }
@@ -383,10 +473,13 @@ function GroupUsageDistribution({
 
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 16 }}>
-      <View style={{ alignItems: 'flex-start', flexDirection: 'row', gap: 12, justifyContent: 'space-between' }}>
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.text, fontSize: 18, fontWeight: '700' }}>分组使用分布</Text>
-          <Text style={{ color: colors.subtext, fontSize: 12, marginTop: 6 }}>{rangeTitle} 分组请求、Token 与费用分布</Text>
+      <View style={{ alignItems: 'flex-start', flexDirection: 'row', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between' }}>
+        <View style={{ flex: 1, flexDirection: 'row', gap: 10, minWidth: 170 }}>
+          <IconBadge icon={PieChart} tone="primary" containerSize={36} size={17} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.text, fontSize: 18, fontWeight: '700' }}>分组使用分布</Text>
+            <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 17, marginTop: 4 }}>{rangeTitle} 分组请求、Token 与费用分布</Text>
+          </View>
         </View>
         <View style={{ backgroundColor: colors.mutedCard, borderColor: colors.border, borderRadius: 999, borderWidth: 1, flexDirection: 'row', padding: 2 }}>
           {([
@@ -607,7 +700,7 @@ export default function MonitorScreen() {
   const selectedTokenTotal = trend.reduce((sum, item) => sum + item.total_tokens, 0);
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
   const selectedOutputTotal = trend.reduce((sum, item) => sum + item.output_tokens, 0);
-  const averageResponse = formatAverageResponse(statsRecord, opsOverviewRecord);
+  const averageResponse = formatAverageResponse(statsRecord, opsOverviewRecord, trend);
   const currentRpm = stats?.rpm ?? optionalNumberFrom(opsOverviewRecord, ['rpm', 'requests_per_minute', 'requestsPerMinute']);
   const currentTpm = stats?.tpm ?? optionalNumberFrom(opsOverviewRecord, ['tpm', 'tokens_per_minute', 'tokensPerMinute']);
   const rangeTitle = RANGE_TITLE_MAP[rangeKey];
@@ -700,12 +793,14 @@ export default function MonitorScreen() {
                 value={formatTokenDisplay(usesTodayFallback ? selectedTokenTotal || stats?.today_tokens : selectedTokenTotal)}
                 detail={`输出 ${formatTokenDisplay(usesTodayFallback ? selectedOutputTotal || stats?.today_output_tokens : selectedOutputTotal)}`}
                 icon={Zap}
+                tone="accent"
               />
               <StatCard
                 title={`${rangeTitle} 成本`}
                 value={formatMoney(usesTodayFallback ? selectedCostTotal || stats?.today_cost : selectedCostTotal)}
                 detail={`TPM ${formatNumber(stats?.tpm)}`}
                 icon={CircleDollarSign}
+                tone="success"
               />
             </View>
 
@@ -715,12 +810,14 @@ export default function MonitorScreen() {
                 value={formatNumber(stats?.today_requests)}
                 detail={`累计 ${formatNumber(stats?.total_requests)}`}
                 icon={Activity}
+                tone="success"
               />
               <StatCard
                 title="总 Token"
                 value={formatTokenDisplay(stats?.total_tokens)}
                 detail={`累计成本 ${formatMoney(stats?.total_cost)}`}
                 icon={DatabaseZap}
+                tone="primary"
               />
             </View>
 
@@ -730,12 +827,14 @@ export default function MonitorScreen() {
                 value={`${formatCompactNumber(currentRpm)} RPM`}
                 detail={`${formatCompactNumber(currentTpm)} TPM`}
                 icon={Gauge}
+                tone="accent"
               />
               <StatCard
                 title="平均响应"
                 value={averageResponse}
                 detail={`${formatNumber(stats?.active_users)} 活跃用户`}
                 icon={Clock3}
+                tone="danger"
               />
             </View>
 
