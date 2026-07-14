@@ -5,7 +5,9 @@ import {
   Activity,
   BarChart3,
   CircleDollarSign,
+  Clock3,
   DatabaseZap,
+  Gauge,
   LayoutDashboard,
   PieChart,
   ShieldCheck,
@@ -24,7 +26,7 @@ import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
 import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
-import { getAdminSettings, getDashboardModels, getDashboardSnapshot, getDashboardStats, getDashboardTrend, listAccounts } from '@/src/services/admin';
+import { getAdminSettings, getDashboardModels, getDashboardSnapshot, getDashboardStats, getDashboardTrend, getOpsDashboardOverview, listAllAccounts } from '@/src/services/admin';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
 
 const { useSnapshot } = require('valtio/react');
@@ -212,6 +214,57 @@ function numberFrom(source: Record<string, unknown>, keys: string[]) {
   }
 
   return 0;
+}
+
+function optionalNumberFrom(source: Record<string, unknown> | undefined, keys: string[]) {
+  if (!source) return undefined;
+
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+      const number = Number(value.replace(/,/g, ''));
+      if (Number.isFinite(number)) return number;
+    }
+  }
+
+  return undefined;
+}
+
+function formatAverageResponse(stats?: Record<string, unknown>, opsOverview?: Record<string, unknown>) {
+  const seconds = optionalNumberFrom(stats, [
+    'avg_response_seconds',
+    'avgResponseSeconds',
+    'average_response_seconds',
+    'averageResponseSeconds',
+  ]);
+  if (seconds !== undefined) return `${seconds.toFixed(2)}s`;
+
+  const milliseconds = optionalNumberFrom(stats, [
+    'avg_response_time_ms',
+    'avgResponseTimeMs',
+    'average_response_time_ms',
+    'averageResponseTimeMs',
+    'avg_response_ms',
+    'avgResponseMs',
+    'avg_latency_ms',
+    'avgLatencyMs',
+    'duration_avg_ms',
+    'durationAvgMs',
+  ]) ?? optionalNumberFrom(opsOverview, [
+    'avg_latency_ms',
+    'avgLatencyMs',
+    'duration_avg_ms',
+    'durationAvgMs',
+    'average_latency_ms',
+    'averageLatencyMs',
+  ]);
+  if (milliseconds !== undefined) return `${(milliseconds / 1000).toFixed(2)}s`;
+
+  const generic = optionalNumberFrom(stats, ['avg_response_time', 'avgResponseTime', 'average_response_time', 'averageResponseTime']);
+  if (generic !== undefined) return `${(generic >= 1000 ? generic / 1000 : generic).toFixed(2)}s`;
+
+  return '--';
 }
 
 function stringFrom(source: Record<string, unknown>, keys: string[]) {
@@ -475,6 +528,12 @@ export default function MonitorScreen() {
     enabled: hasAccount,
     staleTime: 60_000,
   });
+  const opsOverviewQuery = useQuery({
+    queryKey: ['monitor-ops-overview'],
+    queryFn: () => getOpsDashboardOverview({ window: '24h' }),
+    enabled: hasAccount,
+    staleTime: 60_000,
+  });
   const settingsQuery = useQuery({
     queryKey: ['admin-settings'],
     queryFn: getAdminSettings,
@@ -483,7 +542,7 @@ export default function MonitorScreen() {
   });
   const accountsQuery = useQuery({
     queryKey: ['monitor-accounts'],
-    queryFn: () => listAccounts(''),
+    queryFn: () => listAllAccounts({ page_size: 100 }),
     enabled: hasAccount,
     staleTime: 60_000,
   });
@@ -517,6 +576,7 @@ export default function MonitorScreen() {
 
   function refetchAll() {
     statsQuery.refetch();
+    opsOverviewQuery.refetch();
     settingsQuery.refetch();
     accountsQuery.refetch();
     trendQuery.refetch();
@@ -525,6 +585,8 @@ export default function MonitorScreen() {
   }
 
   const stats = statsQuery.data;
+  const statsRecord = isRecord(stats) ? stats : undefined;
+  const opsOverviewRecord = isRecord(opsOverviewQuery.data) ? opsOverviewQuery.data : undefined;
   const siteName = settingsQuery.data?.site_name?.trim() || '管理控制台';
   const accounts = accountsQuery.data?.items ?? [];
   const trend = trendQuery.data?.trend ?? [];
@@ -545,6 +607,9 @@ export default function MonitorScreen() {
   const selectedTokenTotal = trend.reduce((sum, item) => sum + item.total_tokens, 0);
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
   const selectedOutputTotal = trend.reduce((sum, item) => sum + item.output_tokens, 0);
+  const averageResponse = formatAverageResponse(statsRecord, opsOverviewRecord);
+  const currentRpm = stats?.rpm ?? optionalNumberFrom(opsOverviewRecord, ['rpm', 'requests_per_minute', 'requestsPerMinute']);
+  const currentTpm = stats?.tpm ?? optionalNumberFrom(opsOverviewRecord, ['tpm', 'tokens_per_minute', 'tokensPerMinute']);
   const rangeTitle = RANGE_TITLE_MAP[rangeKey];
   const usesTodayFallback = rangeKey === 'today' || rangeKey === '24h';
   const isLoading = statsQuery.isLoading || settingsQuery.isLoading || accountsQuery.isLoading;
@@ -565,7 +630,7 @@ export default function MonitorScreen() {
   const totalInputTokens = useMemo(() => trend.reduce((sum, item) => sum + item.input_tokens, 0), [trend]);
   const totalOutputTokens = useMemo(() => trend.reduce((sum, item) => sum + item.output_tokens, 0), [trend]);
   const totalCacheReadTokens = useMemo(() => trend.reduce((sum, item) => sum + item.cache_read_tokens, 0), [trend]);
-  const isRefreshing = statsQuery.isRefetching || settingsQuery.isRefetching || accountsQuery.isRefetching || trendQuery.isRefetching || modelsQuery.isRefetching || snapshotQuery.isRefetching;
+  const isRefreshing = statsQuery.isRefetching || opsOverviewQuery.isRefetching || settingsQuery.isRefetching || accountsQuery.isRefetching || trendQuery.isRefetching || modelsQuery.isRefetching || snapshotQuery.isRefetching;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
@@ -641,6 +706,36 @@ export default function MonitorScreen() {
                 value={formatMoney(usesTodayFallback ? selectedCostTotal || stats?.today_cost : selectedCostTotal)}
                 detail={`TPM ${formatNumber(stats?.tpm)}`}
                 icon={CircleDollarSign}
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <StatCard
+                title="今日请求"
+                value={formatNumber(stats?.today_requests)}
+                detail={`累计 ${formatNumber(stats?.total_requests)}`}
+                icon={Activity}
+              />
+              <StatCard
+                title="总 Token"
+                value={formatTokenDisplay(stats?.total_tokens)}
+                detail={`累计成本 ${formatMoney(stats?.total_cost)}`}
+                icon={DatabaseZap}
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <StatCard
+                title="性能指标"
+                value={`${formatCompactNumber(currentRpm)} RPM`}
+                detail={`${formatCompactNumber(currentTpm)} TPM`}
+                icon={Gauge}
+              />
+              <StatCard
+                title="平均响应"
+                value={averageResponse}
+                detail={`${formatNumber(stats?.active_users)} 活跃用户`}
+                icon={Clock3}
               />
             </View>
 

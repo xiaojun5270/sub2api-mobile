@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import * as Clipboard from 'expo-clipboard';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { router } from 'expo-router';
 import {
   Activity,
@@ -26,7 +28,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
+import { Alert, FlatList, Platform, Pressable, RefreshControl, Text, TextInput, View } from 'react-native';
 import type { Edge } from 'react-native-safe-area-context';
 
 import { ListCard } from '@/src/components/list-card';
@@ -46,7 +48,7 @@ import {
   getAccountModels,
   getOpenAiAccountQuota,
   importAccountsData,
-  listAccounts,
+  listAllAccounts,
   resetAccountQuota,
   resetOpenAiAccountQuota,
   setAccountSchedulable,
@@ -667,6 +669,71 @@ function parseJsonObjectInput(raw: string, label: string) {
   return parsed;
 }
 
+function chunkItems<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function createAccountsExportFilename() {
+  const now = new Date();
+  const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+  return `sub2api-accounts-${date}-${time}.json`;
+}
+
+async function exportJsonFile(data: Record<string, unknown>) {
+  const filename = createAccountsExportFilename();
+  const content = JSON.stringify(data, null, 2);
+
+  if (Platform.OS === 'web') {
+    if (typeof document === 'undefined') throw new Error('当前环境无法下载文件');
+    const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  if (!FileSystem.cacheDirectory) throw new Error('无法创建导出文件');
+  const uri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(uri, content, { encoding: FileSystem.EncodingType.UTF8 });
+
+  if (!(await Sharing.isAvailableAsync())) throw new Error('当前设备不支持文件分享');
+  await Sharing.shareAsync(uri, {
+    dialogTitle: '导出账号数据',
+    mimeType: 'application/json',
+    UTI: 'public.json',
+  });
+}
+
+async function pickJsonImportFile() {
+  const result = await DocumentPicker.getDocumentAsync({
+    copyToCacheDirectory: true,
+    multiple: false,
+    type: ['application/json', 'text/json', 'text/plain', 'application/octet-stream'],
+  });
+  if (result.canceled || !result.assets[0]) return undefined;
+
+  const asset = result.assets[0];
+  const content = Platform.OS === 'web' && asset.file
+    ? await asset.file.text()
+    : Platform.OS === 'web'
+      ? await (await fetch(asset.uri)).text()
+      : await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 });
+
+  return {
+    data: parseJsonObjectInput(content, '导入文件'),
+    name: asset.name,
+  };
+}
+
 function Field({
   label,
   value,
@@ -883,7 +950,6 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const [editExpiresAt, setEditExpiresAt] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [importJson, setImportJson] = useState('');
   const [toolsMessage, setToolsMessage] = useState<string | null>(null);
   const [quotaInfoByAccountId, setQuotaInfoByAccountId] = useState<Record<number, AccountQuotaPanelState>>({});
   const [quotaQueryingAccountId, setQuotaQueryingAccountId] = useState<number | null>(null);
@@ -893,7 +959,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
   const accountsQuery = useQuery({
     queryKey: ['accounts', keyword],
-    queryFn: () => listAccounts({ search: keyword, page: 1, page_size: 100 }),
+    queryFn: () => listAllAccounts({ search: keyword, page_size: 100 }),
   });
 
   const toggleMutation = useMutation({
@@ -954,22 +1020,30 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     mutationFn: async () => {
       const ids = filteredItems.map((item) => item.id);
       const payload = await exportAccountsData({ ids, include_proxies: false });
-      await Clipboard.setStringAsync(JSON.stringify(payload, null, 2));
+      await exportJsonFile(payload);
       return ids.length;
     },
-    onSuccess: (count) => setToolsMessage(`已复制 ${count} 个账号的数据`),
-    onError: (error) => setToolsMessage(getErrorMessage(error)),
+    onSuccess: (count) => setToolsMessage(`已导出 ${count} 个账号的 JSON 文件`),
+    onError: (error) => setToolsMessage(`导出失败：${getErrorMessage(error)}`),
   });
 
   const importDataMutation = useMutation({
-    mutationFn: () => importAccountsData({ data: parseJsonObjectInput(importJson, '导入数据'), skip_default_group_bind: false }),
+    mutationFn: async () => {
+      const selected = await pickJsonImportFile();
+      if (!selected) return undefined;
+      const result = await importAccountsData({ data: selected.data, skip_default_group_bind: false });
+      return { ...result, filename: selected.name };
+    },
     onSuccess: (result) => {
+      if (!result) return;
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['monitor-accounts'] });
+      queryClient.invalidateQueries({ queryKey: ['monitor-stats'] });
       const created = result.account_created ?? 0;
       const failed = result.account_failed ?? 0;
-      setToolsMessage(`导入完成：创建 ${created}，失败 ${failed}`);
+      setToolsMessage(`${result.filename} 导入完成：创建 ${created}，失败 ${failed}`);
     },
-    onError: (error) => setToolsMessage(getErrorMessage(error)),
+    onError: (error) => setToolsMessage(`导入失败：${getErrorMessage(error)}`),
   });
 
   const items = accountsQuery.data?.items ?? [];
@@ -980,24 +1054,29 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     enabled: accountIds.length > 0,
     staleTime: 60_000,
     queryFn: async () => {
-      try {
-        return await getAccountTodayStatsBatch(accountIds);
-      } catch {
-        const entries = await Promise.all(
-          accountIds.map(async (accountId) => {
-            const stats = await getAccountTodayStats(accountId).catch(() => ({
-              requests: 0,
-              tokens: 0,
-              cost: 0,
-              standard_cost: 0,
-              user_cost: 0,
-            }));
-            return [accountId, stats] as const;
-          })
-        );
+      const results: Record<number, AccountTodayStats> = {};
 
-        return Object.fromEntries(entries) as Record<number, AccountTodayStats>;
+      for (const accountIdBatch of chunkItems(accountIds, 100)) {
+        try {
+          Object.assign(results, await getAccountTodayStatsBatch(accountIdBatch));
+        } catch {
+          const entries = await Promise.all(
+            accountIdBatch.map(async (accountId) => {
+              const stats = await getAccountTodayStats(accountId).catch(() => ({
+                requests: 0,
+                tokens: 0,
+                cost: 0,
+                standard_cost: 0,
+                user_cost: 0,
+              }));
+              return [accountId, stats] as const;
+            })
+          );
+          Object.assign(results, Object.fromEntries(entries));
+        }
       }
+
+      return results;
     },
   });
   const totalStatsQuery = useQuery({
@@ -1005,24 +1084,29 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     enabled: accountIds.length > 0,
     staleTime: 120_000,
     queryFn: async () => {
-      const entries = await Promise.all(
-        items.map(async (account) => {
-          const inlineStats = getAccountInlineTotalStats(account);
-          if (inlineStats) return [account.id, inlineStats] as const;
+      const results: Record<number, AccountTotalSummary> = {};
 
-          const stats = await getAccountStats(account.id, { days: 30 }).catch(() => undefined);
-          return [
-            account.id,
-            {
-              cost: Number(stats?.total_account_cost ?? stats?.total_actual_cost ?? stats?.total_cost ?? 0),
-              requests: Number(stats?.total_requests ?? 0),
-              tokens: Number(stats?.total_tokens ?? 0),
-            },
-          ] as const;
-        })
-      );
+      for (const accountBatch of chunkItems(items, 25)) {
+        const entries = await Promise.all(
+          accountBatch.map(async (account) => {
+            const inlineStats = getAccountInlineTotalStats(account);
+            if (inlineStats) return [account.id, inlineStats] as const;
 
-      return Object.fromEntries(entries) as Record<number, AccountTotalSummary>;
+            const stats = await getAccountStats(account.id, { days: 30 }).catch(() => undefined);
+            return [
+              account.id,
+              {
+                cost: Number(stats?.total_account_cost ?? stats?.total_actual_cost ?? stats?.total_cost ?? 0),
+                requests: Number(stats?.total_requests ?? 0),
+                tokens: Number(stats?.total_tokens ?? 0),
+              },
+            ] as const;
+          })
+        );
+        Object.assign(results, Object.fromEntries(entries));
+      }
+
+      return results;
     },
   });
 
@@ -1490,7 +1574,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     style={{ alignItems: 'center', backgroundColor: colors.primary, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: filteredItems.length === 0 ? 0.6 : 1, paddingVertical: 11 }}
                   >
                     <Download color={colors.primaryText} size={13} />
-                    <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{exportDataMutation.isPending ? '导出中...' : '导出筛选'}</Text>
+                    <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{exportDataMutation.isPending ? '导出中...' : '导出文件'}</Text>
                   </Pressable>
                   <Pressable
                     disabled={importDataMutation.isPending}
@@ -1501,18 +1585,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                     style={{ alignItems: 'center', backgroundColor: colors.dark, borderRadius: 12, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', paddingVertical: 11 }}
                   >
                     <Upload color={colors.primaryText} size={13} />
-                    <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{importDataMutation.isPending ? '导入中...' : '导入 JSON'}</Text>
+                    <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>{importDataMutation.isPending ? '导入中...' : '选择文件导入'}</Text>
                   </Pressable>
                 </View>
-                <TextInput
-                  value={importJson}
-                  onChangeText={setImportJson}
-                  multiline
-                  textAlignVertical="top"
-                  placeholder="粘贴 /admin/accounts/data 导出的 JSON 对象"
-                  placeholderTextColor={colors.placeholder}
-                  style={{ backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 12, borderWidth: 1, color: colors.text, minHeight: 96, paddingHorizontal: 12, paddingVertical: 10 }}
-                />
                 {toolsMessage ? (
                   <View style={{ backgroundColor: toolsMessage.includes('失败') || toolsMessage.includes('必须') || toolsMessage.includes('不能为空') ? colors.errorBg : colors.successBg, borderRadius: 12, padding: 10 }}>
                     <Text style={{ color: toolsMessage.includes('失败') || toolsMessage.includes('必须') || toolsMessage.includes('不能为空') ? colors.errorText : colors.success, fontSize: 12 }}>{toolsMessage}</Text>
@@ -1524,7 +1599,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </View>
       </View>
     ),
-    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, exportDataMutation.isPending, filter, filteredItems, importDataMutation.isPending, importJson, summary.active, summary.errors, summary.limited, summary.paused, summary.total, toolsMessage, toolsOpen, usageSort]
+    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, exportDataMutation.isPending, filter, filteredItems, importDataMutation.isPending, summary.active, summary.errors, summary.limited, summary.paused, summary.total, toolsMessage, toolsOpen, usageSort]
   );
 
   const renderItem = useCallback(

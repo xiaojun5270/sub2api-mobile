@@ -1139,6 +1139,36 @@ export async function listAccounts(params: string | AccountListParams = '') {
   return toPaginatedData<AdminAccount>(payload, ['accounts', 'items', 'data']);
 }
 
+export async function listAllAccounts(params: Omit<AccountListParams, 'page'> = {}) {
+  const requestedPageSize = Math.max(1, Math.min(params.page_size ?? 100, 100));
+  const firstPage = await listAccounts({ ...params, page: 1, page_size: requestedPageSize });
+  const effectivePageSize = Math.max(firstPage.page_size || requestedPageSize, 1);
+  const pageCount = Math.max(firstPage.pages, Math.ceil(firstPage.total / effectivePageSize), 1);
+
+  if (pageCount <= 1) return firstPage;
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      listAccounts({ ...params, page: index + 2, page_size: requestedPageSize })
+    )
+  );
+  const itemsById = new Map<number, AdminAccount>();
+
+  [firstPage, ...remainingPages].forEach((page) => {
+    page.items.forEach((account) => itemsById.set(account.id, account));
+  });
+
+  const items = Array.from(itemsById.values());
+  return {
+    ...firstPage,
+    items,
+    total: Math.max(firstPage.total, items.length),
+    page: 1,
+    page_size: Math.max(items.length, 1),
+    pages: 1,
+  };
+}
+
 export function getAccount(accountId: number) {
   return adminFetch<AdminAccount>(`/api/v1/admin/accounts/${accountId}`);
 }
