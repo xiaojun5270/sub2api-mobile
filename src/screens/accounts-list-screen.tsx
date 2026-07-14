@@ -98,7 +98,6 @@ type AccountModelOption = {
 };
 
 type AccountStatTone = 'todayRequests' | 'todayTokens' | 'todayQuota' | 'totalQuota' | 'totalRequests' | 'totalTokens';
-type AccountStatMaximums = Record<AccountStatTone, number>;
 
 type CodexWindowUsage = {
   label: '5h' | '7d';
@@ -539,26 +538,6 @@ function getAccountStatPalette(colors: AppTheme, tone: AccountStatTone) {
   return palettes[tone];
 }
 
-function mixHexColors(from: string, to: string, amount: number) {
-  const parse = (value: string) => {
-    const match = /^#([0-9a-f]{6})$/i.exec(value);
-    if (!match) return undefined;
-    return [0, 2, 4].map((offset) => Number.parseInt(match[1].slice(offset, offset + 2), 16));
-  };
-  const fromChannels = parse(from);
-  const toChannels = parse(to);
-  if (!fromChannels || !toChannels) return to;
-
-  const ratio = Math.max(0, Math.min(1, amount));
-  const channels = fromChannels.map((channel, index) => Math.round(channel + (toChannels[index] - channel) * ratio));
-  return `#${channels.map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
-}
-
-function getMetricIntensity(value: number, maximum: number) {
-  if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(maximum) || maximum <= 0) return 0;
-  return Math.max(0.32, Math.min(1, Math.sqrt(value / maximum)));
-}
-
 function getQuotaUsageColor(colors: AppTheme, percent?: number) {
   if (percent === undefined || !Number.isFinite(percent)) return colors.subtext;
   if (percent >= 90) return colors.danger;
@@ -567,12 +546,17 @@ function getQuotaUsageColor(colors: AppTheme, percent?: number) {
   return colors.success;
 }
 
+function getQuotaUsageTextColor(colors: AppTheme, percent?: number) {
+  if (percent !== undefined && percent >= 90) return colors.danger;
+  if (percent !== undefined && percent >= 70) return colors.accentText;
+  return colors.subtext;
+}
+
 function AccountStatTile({
   colors,
   icon: Icon,
   detail,
   label,
-  intensity,
   tone,
   value,
 }: {
@@ -580,12 +564,10 @@ function AccountStatTile({
   icon: LucideIcon;
   detail?: string;
   label: string;
-  intensity: number;
   tone: AccountStatTone;
   value: string;
 }) {
   const palette = getAccountStatPalette(colors, tone);
-  const valueColor = mixHexColors(colors.subtext, palette.icon, intensity);
 
   return (
     <View
@@ -617,12 +599,12 @@ function AccountStatTile({
       <Text
         adjustsFontSizeToFit
         numberOfLines={1}
-        style={{ color: valueColor, fontSize: 16, fontWeight: '800', marginTop: 5 }}
+        style={{ color: colors.text, fontSize: 16, fontWeight: '800', marginTop: 5 }}
       >
         {value}
       </Text>
       {detail ? (
-        <Text numberOfLines={1} style={{ color: valueColor, fontSize: 11, fontWeight: '700', marginTop: 3 }}>
+        <Text numberOfLines={1} style={{ color: colors.subtext, fontSize: 11, fontWeight: '700', marginTop: 3 }}>
           {detail}
         </Text>
       ) : null}
@@ -833,12 +815,9 @@ function AccountQuotaPanel({
   const countButtonLabel = mode === 'openai' && info?.availableCount !== undefined
     ? `可重置 ${formatCompactNumber(info.availableCount)} 次`
     : '次数';
-  const countButtonColor = mode === 'openai' && info?.availableCount !== undefined
-    ? info.availableCount > 0 ? colors.success : colors.danger
-    : colors.badgeDefaultText;
-  const countButtonBackground = mode === 'openai' && info?.availableCount !== undefined
-    ? info.availableCount > 0 ? colors.successBg : colors.dangerBg
-    : colors.surface;
+  const hasNoResetCount = mode === 'openai' && info?.availableCount === 0;
+  const countButtonColor = hasNoResetCount ? colors.danger : colors.badgeDefaultText;
+  const countButtonBackground = hasNoResetCount ? colors.dangerBg : colors.surface;
   const quotaMeta = mode === 'openai' && info?.availableCount !== undefined
     ? updatedAt
       ? `更新 ${formatTime(updatedAt)}`
@@ -874,12 +853,13 @@ function AccountQuotaPanel({
         {windows.map((item) => {
           const barWidth = `${item.percent ?? 0}%` as `${number}%`;
           const usageColor = getQuotaUsageColor(colors, item.percent);
+          const usageTextColor = getQuotaUsageTextColor(colors, item.percent);
           return (
             <View key={item.label} style={{ gap: 4 }}>
               <View style={{ alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' }}>
-                <Text style={{ color: usageColor, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' }}>{item.label}</Text>
+                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '800', textTransform: 'uppercase' }}>{item.label}</Text>
                 <View style={{ alignItems: 'center', flexDirection: 'row', flexShrink: 1, gap: 4 }}>
-                  <Text style={{ color: usageColor, fontSize: 11, fontWeight: '800' }}>{formatPercent(item.percent)}</Text>
+                  <Text style={{ color: usageTextColor, fontSize: 11, fontWeight: '800' }}>{formatPercent(item.percent)}</Text>
                   <Text numberOfLines={1} style={{ color: colors.subtext, flexShrink: 1, fontSize: 11 }}>· {item.resetLabel}</Text>
                 </View>
               </View>
@@ -1226,29 +1206,6 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
     return sorted;
   }, [filter, items, keyword, todayByAccountId, usageSort]);
-  const statMaximums = useMemo<AccountStatMaximums>(() => {
-    const maximums: AccountStatMaximums = {
-      todayRequests: 0,
-      todayTokens: 0,
-      todayQuota: 0,
-      totalRequests: 0,
-      totalTokens: 0,
-      totalQuota: 0,
-    };
-
-    filteredItems.forEach((account) => {
-      const today = todayByAccountId.get(account.id);
-      const total = totalByAccountId.get(account.id);
-      maximums.todayRequests = Math.max(maximums.todayRequests, today?.requests ?? 0);
-      maximums.todayTokens = Math.max(maximums.todayTokens, today?.tokens ?? 0);
-      maximums.todayQuota = Math.max(maximums.todayQuota, today?.cost ?? 0);
-      maximums.totalRequests = Math.max(maximums.totalRequests, total?.requests ?? 0);
-      maximums.totalTokens = Math.max(maximums.totalTokens, total?.tokens ?? 0);
-      maximums.totalQuota = Math.max(maximums.totalQuota, total?.cost ?? 0);
-    });
-
-    return maximums;
-  }, [filteredItems, todayByAccountId, totalByAccountId]);
   const errorMessage = accountsQuery.error instanceof Error ? accountsQuery.error.message : '';
 
   function confirmBatch(action: 'refresh' | 'clear-error') {
@@ -1725,14 +1682,14 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
 
               <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <AccountStatTile colors={colors} icon={Activity} intensity={getMetricIntensity(todayStats.requests, statMaximums.todayRequests)} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
-                  <AccountStatTile colors={colors} icon={Cpu} intensity={getMetricIntensity(todayStats.tokens, statMaximums.todayTokens)} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
-                  <AccountStatTile colors={colors} detail={`U ${formatMoneyValue(todayStats.userCost)}`} icon={DollarSign} intensity={getMetricIntensity(todayStats.cost, statMaximums.todayQuota)} label="今日额度" tone="todayQuota" value={`A ${formatMoneyValue(todayStats.cost)}`} />
+                  <AccountStatTile colors={colors} icon={Activity} label="今日请求" tone="todayRequests" value={formatReqValue(todayStats.requests)} />
+                  <AccountStatTile colors={colors} icon={Cpu} label="今日 Token" tone="todayTokens" value={formatTokenValue(todayStats.tokens)} />
+                  <AccountStatTile colors={colors} detail={`U ${formatMoneyValue(todayStats.userCost)}`} icon={DollarSign} label="今日额度" tone="todayQuota" value={`A ${formatMoneyValue(todayStats.cost)}`} />
                 </View>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  <AccountStatTile colors={colors} icon={Hash} intensity={getMetricIntensity(totalStats.requests, statMaximums.totalRequests)} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
-                  <AccountStatTile colors={colors} icon={Cpu} intensity={getMetricIntensity(totalStats.tokens, statMaximums.totalTokens)} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
-                  <AccountStatTile colors={colors} icon={Wallet} intensity={getMetricIntensity(totalStats.cost, statMaximums.totalQuota)} label="总额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
+                  <AccountStatTile colors={colors} icon={Hash} label="总请求" tone="totalRequests" value={formatReqValue(totalStats.requests)} />
+                  <AccountStatTile colors={colors} icon={Cpu} label="总 Token" tone="totalTokens" value={formatTokenValue(totalStats.tokens)} />
+                  <AccountStatTile colors={colors} icon={Wallet} label="总额度" tone="totalQuota" value={formatMoneyValue(totalStats.cost)} />
                 </View>
               </View>
 
@@ -1953,7 +1910,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </Pressable>
       );
     },
-    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editExpiresAt, editGroupIds, editLoadFactor, editName, editNotes, editPriority, editPrivacyMode, editProxyId, editRateMultiplier, editingAccountId, expandedModelAccountId, handleQuotaCount, handleQuotaQuery, loadingModelAccountId, modelsByAccountId, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, selectedModelByAccountId, statMaximums, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
+    [accountDeleteMutation, accountEditMutation, accountStatusMutation, colors, confirmQuotaReset, editConcurrency, editExpiresAt, editGroupIds, editLoadFactor, editName, editNotes, editPriority, editPrivacyMode, editProxyId, editRateMultiplier, editingAccountId, expandedModelAccountId, handleQuotaCount, handleQuotaQuery, loadingModelAccountId, modelsByAccountId, quotaInfoByAccountId, quotaQueryingAccountId, quotaResettingAccountId, selectedModelByAccountId, testFeedbackByAccountId, testMutation, testingAccountId, todayByAccountId, toggleMutation, togglingAccountId, totalByAccountId]
   );
 
   const emptyState = useMemo(
