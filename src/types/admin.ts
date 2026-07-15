@@ -500,6 +500,8 @@ export type AdminAccount = {
   error?: string | null;
   error_code?: number | null;
   error_message?: string;
+  is_rate_limited?: boolean;
+  rate_limited_at?: string | null;
   rate_limit_reset_at?: string | null;
   proxy_id?: number | null;
   proxy?: Record<string, unknown> | null;

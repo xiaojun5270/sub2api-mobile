@@ -1380,23 +1380,15 @@ export async function getAccountTodayStatsBatch(accountIds: number[]) {
   });
 
   const missingIds = accountIds.filter((accountId) => !result[accountId]);
-  if (missingIds.length > 0) {
-    const fallbackEntries = await Promise.all(
-      missingIds.map(async (accountId) => {
-        const stats = await getAccountTodayStats(accountId).catch(() => ({
-          requests: 0,
-          tokens: 0,
-          cost: 0,
-          standard_cost: 0,
-          user_cost: 0,
-        }));
-        return [accountId, stats] as const;
-      })
-    );
-    fallbackEntries.forEach(([accountId, stats]) => {
-      result[accountId] = stats;
-    });
-  }
+  missingIds.forEach((accountId) => {
+    result[accountId] = {
+      requests: 0,
+      tokens: 0,
+      cost: 0,
+      standard_cost: 0,
+      user_cost: 0,
+    };
+  });
 
   return result;
 }

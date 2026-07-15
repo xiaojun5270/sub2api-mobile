@@ -102,6 +102,13 @@ function getErrorMessage(error: unknown) {
   return '操作失败，请稍后重试。';
 }
 
+function getAccountErrorDetail(account: AdminAccount) {
+  const message = account.error_message?.trim() || account.error?.trim();
+  if (message) return message;
+  if (account.error_code !== undefined && account.error_code !== null) return `错误代码 ${account.error_code}`;
+  return '后端未返回具体异常信息';
+}
+
 function formatMoney(value?: number | null) {
   return `$${Number(value ?? 0).toFixed(4)}`;
 }
@@ -480,6 +487,16 @@ export default function AccountDetailScreen() {
 
           {account ? (
             <>
+              {(account.status === 'error' || account.error_message || account.error) ? (
+                <View style={{ alignItems: 'flex-start', backgroundColor: colors.errorBg, borderColor: colors.danger, borderRadius: 14, borderWidth: 1, flexDirection: 'row', gap: 10, padding: 13 }}>
+                  <AlertTriangle color={colors.errorText} size={19} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.errorText, fontSize: 14, fontWeight: '800' }}>异常原因</Text>
+                    <Text selectable style={{ color: colors.errorText, fontSize: 13, lineHeight: 20, marginTop: 5 }}>{getAccountErrorDetail(account)}</Text>
+                  </View>
+                </View>
+              ) : null}
+
               <Section title="今日用量" icon={Activity}>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                   <MetricTile label="请求" value={formatCompactNumber(todayQuery.data?.requests ?? 0)} />

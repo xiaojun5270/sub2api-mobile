@@ -164,8 +164,9 @@ export default function LoginScreen() {
                 try {
                   await saveAdminConfig(values);
                   queryClient.clear();
-                  await queryClient.fetchQuery({ queryKey: ['admin-settings'], queryFn: getAdminSettings });
-                  await queryClient.prefetchQuery({ queryKey: ['monitor-stats'], queryFn: getDashboardStats });
+                  const settingsRequest = queryClient.fetchQuery({ queryKey: ['admin-settings'], queryFn: getAdminSettings });
+                  void queryClient.prefetchQuery({ queryKey: ['monitor-stats'], queryFn: getDashboardStats });
+                  await settingsRequest;
                   router.replace('/monitor');
                 } catch (error) {
                   setConnectionState('error');

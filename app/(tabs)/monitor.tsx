@@ -24,6 +24,7 @@ import { BarChartCard } from '@/src/components/bar-chart-card';
 import { DonutChartCard } from '@/src/components/donut-chart-card';
 import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import { getAdminSettings, getDashboardModels, getDashboardSnapshot, getDashboardStats, getDashboardTrend, getOpsDashboardOverview, listAllAccounts } from '@/src/services/admin';
@@ -96,36 +97,8 @@ async function writeStoredMonitorRangeKey(value: RangeKey) {
   }
 }
 
-function hasAccountError(account: { status?: string; error_message?: string | null }) {
-  return Boolean(account.status === 'error' || account.error_message);
-}
-
-function hasAccountRateLimited(account: {
-  rate_limit_reset_at?: string | null;
-  extra?: Record<string, unknown>;
-}) {
-  if (account.rate_limit_reset_at) {
-    const resetTime = new Date(account.rate_limit_reset_at).getTime();
-    if (!Number.isNaN(resetTime) && resetTime > Date.now()) {
-      return true;
-    }
-  }
-
-  const modelLimits = account.extra?.model_rate_limits;
-  if (!modelLimits || typeof modelLimits !== 'object' || Array.isArray(modelLimits)) {
-    return false;
-  }
-
-  const now = Date.now();
-  return Object.values(modelLimits as Record<string, unknown>).some((info) => {
-    if (!info || typeof info !== 'object' || Array.isArray(info)) return false;
-
-    const resetAt = (info as { rate_limit_reset_at?: unknown }).rate_limit_reset_at;
-    if (typeof resetAt !== 'string' || !resetAt.trim()) return false;
-
-    const resetTime = new Date(resetAt).getTime();
-    return !Number.isNaN(resetTime) && resetTime > now;
-  });
+function hasAccountError(account: { status?: string; error?: string | null; error_message?: string | null }) {
+  return Boolean(account.status === 'error' || account.error_message || account.error);
 }
 
 function getDateRange(rangeKey: RangeKey) {
@@ -621,10 +594,11 @@ export default function MonitorScreen() {
     enabled: hasAccount,
     staleTime: 60_000,
   });
+  const coreStatsReady = Boolean(statsQuery.data);
   const opsOverviewQuery = useQuery({
     queryKey: ['monitor-ops-overview'],
     queryFn: () => getOpsDashboardOverview({ window: '24h' }),
-    enabled: hasAccount,
+    enabled: hasAccount && coreStatsReady,
     staleTime: 60_000,
   });
   const settingsQuery = useQuery({
@@ -634,22 +608,22 @@ export default function MonitorScreen() {
     staleTime: 120_000,
   });
   const accountsQuery = useQuery({
-    queryKey: ['monitor-accounts'],
+    queryKey: ['accounts', 'all'],
     queryFn: () => listAllAccounts({ page_size: 100 }),
-    enabled: hasAccount,
-    staleTime: 60_000,
+    enabled: hasAccount && coreStatsReady,
+    staleTime: 120_000,
   });
   const trendQuery = useQuery({
     queryKey: ['monitor-trend', rangeKey, range.start_date, range.end_date, range.granularity],
     queryFn: () => getDashboardTrend(range),
-    enabled: hasAccount && rangeKeyReady,
+    enabled: hasAccount && coreStatsReady && rangeKeyReady,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
   });
   const modelsQuery = useQuery({
     queryKey: ['monitor-models', rangeKey, range.start_date, range.end_date],
     queryFn: () => getDashboardModels(range),
-    enabled: hasAccount && rangeKeyReady,
+    enabled: hasAccount && coreStatsReady && rangeKeyReady,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
   });
@@ -662,7 +636,7 @@ export default function MonitorScreen() {
       include_model_stats: false,
       include_group_stats: true,
     }),
-    enabled: hasAccount && rangeKeyReady,
+    enabled: hasAccount && coreStatsReady && rangeKeyReady,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
   });
@@ -685,11 +659,11 @@ export default function MonitorScreen() {
   const trend = trendQuery.data?.trend ?? [];
   const topModels = (modelsQuery.data?.models ?? []).slice(0, 5);
   const groupUsageRows = useMemo(() => normalizeGroupUsageRows(snapshotQuery.data?.groups), [snapshotQuery.data?.groups]);
-  const errorMessage = getErrorMessage(statsQuery.error ?? settingsQuery.error ?? accountsQuery.error ?? trendQuery.error ?? modelsQuery.error);
+  const errorMessage = getErrorMessage(statsQuery.error);
   const currentPageErrorAccounts = accounts.filter(hasAccountError).length;
-  const currentPageLimitedAccounts = accounts.filter((item) => hasAccountRateLimited(item)).length;
+  const currentPageLimitedAccounts = accounts.filter((item) => isAccountRateLimited(item)).length;
   const currentPageBusyAccounts = accounts.filter((item) => {
-    if (hasAccountError(item) || hasAccountRateLimited(item)) return false;
+    if (hasAccountError(item) || isAccountRateLimited(item)) return false;
     return (item.current_concurrency ?? 0) > 0;
   }).length;
   const totalAccounts = stats?.total_accounts ?? accountsQuery.data?.total ?? accounts.length;
@@ -705,8 +679,8 @@ export default function MonitorScreen() {
   const currentTpm = stats?.tpm ?? optionalNumberFrom(opsOverviewRecord, ['tpm', 'tokens_per_minute', 'tokensPerMinute']);
   const rangeTitle = RANGE_TITLE_MAP[rangeKey];
   const usesTodayFallback = rangeKey === 'today' || rangeKey === '24h';
-  const isLoading = statsQuery.isLoading || settingsQuery.isLoading || accountsQuery.isLoading;
-  const hasError = Boolean(statsQuery.error || settingsQuery.error || accountsQuery.error || trendQuery.error || modelsQuery.error);
+  const isLoading = statsQuery.isLoading;
+  const hasError = Boolean(statsQuery.error && !statsQuery.data);
 
   const throughputPoints = useMemo(
     () => trend.map((item) => ({ label: getPointLabel(item.date, rangeKey), value: item.total_tokens })),
@@ -874,7 +848,7 @@ export default function MonitorScreen() {
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
                     <Text style={{ fontSize: 11, color: colors.subtext }}>限流</Text>
-                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(currentPageLimitedAccounts)}</Text>
+                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{accountsQuery.isPending ? '--' : formatNumber(currentPageLimitedAccounts)}</Text>
                   </View>
                 </View>
                 <Text style={{ marginTop: 10, fontSize: 12, color: colors.subtext }}>总数 / 健康 / 异常优先使用后端聚合字段；限流与繁忙基于当前页账号列表。点击进入账号清单。</Text>

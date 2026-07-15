@@ -34,6 +34,7 @@ import type { Edge } from 'react-native-safe-area-context';
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
+import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
 import { type AppTheme, useAppTheme } from '@/src/lib/theme';
 import {
@@ -280,12 +281,12 @@ function getDefaultAccountTestModel(account: AdminAccount, options: AccountModel
   return enabledOptions.find((option) => option.value.toLowerCase().includes('sonnet'))?.value ?? enabledOptions[0].value;
 }
 
-function getExtraNumber(account: AdminAccount, keys: string[]) {
-  return firstNumberValue(account.extra, keys);
-}
-
 function getAccountNumber(account: AdminAccount, keys: string[]) {
-  return firstNumberValue(account as unknown, keys) ?? getExtraNumber(account, keys);
+  for (const source of [account, account.extra, account.usage, account.quota]) {
+    const value = firstNumberValue(source, keys);
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 function getExtraString(account: AdminAccount, keys: string[]) {
@@ -913,7 +914,16 @@ function AccountQuotaPanel({
 }
 
 function getAccountError(account: AdminAccount) {
-  return Boolean(account.status === 'error' || account.error_message);
+  return Boolean(account.status === 'error' || account.error_message || account.error);
+}
+
+function getAccountErrorDetail(account: AdminAccount) {
+  const message = account.error_message?.trim()
+    || account.error?.trim()
+    || getAccountString(account, ['last_error', 'lastError', 'error_reason', 'errorReason']);
+  if (message) return message;
+  if (account.error_code !== undefined && account.error_code !== null) return `错误代码 ${account.error_code}`;
+  return '后端未返回具体异常信息';
 }
 
 function hasFutureTime(value?: string | null) {
@@ -922,34 +932,18 @@ function hasFutureTime(value?: string | null) {
   return !Number.isNaN(time) && time > Date.now();
 }
 
-function getAccountRateLimited(account: AdminAccount) {
-  const normalizedStatus = `${account.status ?? ''}`.toLowerCase();
-  const message = `${account.error_message ?? ''}`.toLowerCase();
-  const extraLimitedUntil = getExtraString(account, ['rate_limit_reset_at', 'rateLimitResetAt', 'temp_unschedulable_until', 'tempUnschedulableUntil']);
-
-  return (
-    ['rate_limited', 'rate-limited', 'rate_limit', 'limited', 'throttled', 'too_many_requests'].includes(normalizedStatus)
-    || hasFutureTime(account.rate_limit_reset_at)
-    || hasFutureTime(account.temp_unschedulable_until)
-    || hasFutureTime(extraLimitedUntil)
-    || message.includes('rate limit')
-    || message.includes('rate_limit')
-    || message.includes('429')
-    || message.includes('限流')
-  );
-}
-
 function getAccountVisualStatus(account: AdminAccount): AccountVisualStatus {
   const normalizedStatus = `${account.status ?? ''}`.toLowerCase();
   const isPausedStatus = ['inactive', 'disabled', 'paused', 'stop', 'stopped'].includes(normalizedStatus);
+  const extraPausedUntil = getExtraString(account, ['temp_unschedulable_until', 'tempUnschedulableUntil']);
 
-  if (getAccountRateLimited(account)) {
+  if (isAccountRateLimited(account)) {
     return { filterKey: 'limited', label: '限流', badgeTone: 'muted' };
   }
   if (getAccountError(account)) {
     return { filterKey: 'error', label: '异常', badgeTone: 'danger' };
   }
-  if (isPausedStatus || account.schedulable === false) {
+  if (isPausedStatus || account.schedulable === false || hasFutureTime(account.temp_unschedulable_until) || hasFutureTime(extraPausedUntil)) {
     return { filterKey: 'paused', label: '暂停', badgeTone: 'muted' };
   }
   return { filterKey: 'active', label: '正常', badgeTone: 'success' };
@@ -991,8 +985,9 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const queryClient = useQueryClient();
 
   const accountsQuery = useQuery({
-    queryKey: ['accounts', keyword],
-    queryFn: () => listAllAccounts({ search: keyword, page_size: 100 }),
+    queryKey: ['accounts', 'all'],
+    queryFn: () => listAllAccounts({ page_size: 100 }),
+    staleTime: 120_000,
   });
 
   const toggleMutation = useMutation({
@@ -1070,7 +1065,6 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     onSuccess: (result) => {
       if (!result) return;
       queryClient.invalidateQueries({ queryKey: ['accounts'] });
-      queryClient.invalidateQueries({ queryKey: ['monitor-accounts'] });
       queryClient.invalidateQueries({ queryKey: ['monitor-stats'] });
       const created = result.account_created ?? 0;
       const failed = result.account_failed ?? 0;
@@ -1080,12 +1074,21 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   });
 
   const items = accountsQuery.data?.items ?? [];
+  const inlineTotalStats = useMemo(() => {
+    const result: Record<number, AccountTotalSummary> = {};
+    items.forEach((account) => {
+      const stats = getAccountInlineTotalStats(account);
+      if (stats) result[account.id] = stats;
+    });
+    return result;
+  }, [items]);
   const accountIds = useMemo(() => items.map((account) => account.id), [items]);
   const accountIdsKey = accountIds.join(',');
   const todayStatsQuery = useQuery<Record<number, AccountTodayStats>>({
     queryKey: ['account-today-stats-batch', accountIdsKey],
     enabled: accountIds.length > 0,
     staleTime: 60_000,
+    placeholderData: (previousData) => previousData,
     queryFn: async () => {
       const results: Record<number, AccountTodayStats> = {};
 
@@ -1093,38 +1096,41 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         try {
           Object.assign(results, await getAccountTodayStatsBatch(accountIdBatch));
         } catch {
-          const entries = await Promise.all(
-            accountIdBatch.map(async (accountId) => {
-              const stats = await getAccountTodayStats(accountId).catch(() => ({
-                requests: 0,
-                tokens: 0,
-                cost: 0,
-                standard_cost: 0,
-                user_cost: 0,
-              }));
-              return [accountId, stats] as const;
-            })
-          );
-          Object.assign(results, Object.fromEntries(entries));
+          for (const fallbackBatch of chunkItems(accountIdBatch, 10)) {
+            const entries = await Promise.all(
+              fallbackBatch.map(async (accountId) => {
+                const stats = await getAccountTodayStats(accountId).catch(() => ({
+                  requests: 0,
+                  tokens: 0,
+                  cost: 0,
+                  standard_cost: 0,
+                  user_cost: 0,
+                }));
+                return [accountId, stats] as const;
+              })
+            );
+            Object.assign(results, Object.fromEntries(entries));
+          }
         }
       }
 
       return results;
     },
   });
-  const totalStatsQuery = useQuery({
-    queryKey: ['account-total-stats-batch', accountIdsKey],
-    enabled: accountIds.length > 0,
+  const totalStatsQueryKey = ['account-total-stats-batch', accountIdsKey] as const;
+  const todayStatsReady = Boolean(todayStatsQuery.data) || todayStatsQuery.isError;
+  const totalStatsQuery = useQuery<Record<number, AccountTotalSummary>>({
+    queryKey: totalStatsQueryKey,
+    enabled: accountIds.length > 0 && todayStatsReady,
     staleTime: 120_000,
+    placeholderData: (previousData) => ({ ...inlineTotalStats, ...previousData }),
     queryFn: async () => {
-      const results: Record<number, AccountTotalSummary> = {};
+      const results: Record<number, AccountTotalSummary> = { ...inlineTotalStats };
+      const missingAccounts = items.filter((account) => !results[account.id]);
 
-      for (const accountBatch of chunkItems(items, 25)) {
+      for (const accountBatch of chunkItems(missingAccounts, 8)) {
         const entries = await Promise.all(
           accountBatch.map(async (account) => {
-            const inlineStats = getAccountInlineTotalStats(account);
-            if (inlineStats) return [account.id, inlineStats] as const;
-
             const stats = await getAccountStats(account.id, { days: 30 }).catch(() => undefined);
             return [
               account.id,
@@ -1137,6 +1143,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
           })
         );
         Object.assign(results, Object.fromEntries(entries));
+        queryClient.setQueryData<Record<number, AccountTotalSummary>>(totalStatsQueryKey, { ...results });
       }
 
       return results;
@@ -1638,6 +1645,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const renderItem = useCallback(
     ({ item: account }: { item: (typeof filteredItems)[number] }) => {
       const isError = getAccountError(account);
+      const errorDetail = isError ? getAccountErrorDetail(account) : undefined;
       const visualStatus = getAccountVisualStatus(account);
       const statusText = visualStatus.label;
       const todayStats = todayByAccountId.get(account.id) ?? { requests: 0, tokens: 0, cost: 0, standardCost: 0, userCost: 0 };
@@ -1679,6 +1687,16 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
                 </View>
                 <Text style={{ color: colors.subtext, fontSize: 10 }}>最近使用 {formatTime(account.last_used_at || account.updated_at)}</Text>
               </View>
+
+              {errorDetail ? (
+                <View style={{ alignItems: 'flex-start', backgroundColor: colors.errorBg, borderRadius: 12, flexDirection: 'row', gap: 8, padding: 9 }}>
+                  <AlertCircle color={colors.errorText} size={15} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: colors.errorText, fontSize: 11, fontWeight: '800' }}>异常原因</Text>
+                    <Text numberOfLines={3} style={{ color: colors.errorText, fontSize: 11, lineHeight: 16, marginTop: 3 }}>{errorDetail}</Text>
+                  </View>
+                </View>
+              ) : null}
 
               <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -1914,8 +1932,14 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   );
 
   const emptyState = useMemo(
-    () => <ListCard title="暂无账号" meta={errorMessage || '连上后这里会展示账号列表。'} icon={KeyRound} />,
-    [errorMessage]
+    () => (
+      <ListCard
+        title={accountsQuery.isLoading ? '正在加载账号' : '暂无账号'}
+        meta={accountsQuery.isLoading ? '正在读取账号清单，请稍候。' : errorMessage || '连上后这里会展示账号列表。'}
+        icon={KeyRound}
+      />
+    ),
+    [accountsQuery.isLoading, errorMessage]
   );
 
   return (
@@ -1940,7 +1964,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={accountsQuery.isRefetching || todayStatsQuery.isRefetching || totalStatsQuery.isRefetching} onRefresh={() => {
+        refreshControl={<RefreshControl refreshing={accountsQuery.isRefetching || todayStatsQuery.isRefetching} onRefresh={() => {
           void accountsQuery.refetch();
           void todayStatsQuery.refetch();
           void totalStatsQuery.refetch();
