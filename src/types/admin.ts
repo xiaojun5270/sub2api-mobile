@@ -595,6 +595,37 @@ export type OpsMetricPoint = {
   [key: string]: string | number | boolean | null | undefined;
 };
 
+export type OpsAlertEvent = {
+  id: number | string;
+  rule_id: number;
+  severity: string;
+  status: string;
+  title?: string;
+  description?: string;
+  metric_value?: number;
+  threshold_value?: number;
+  dimensions?: Record<string, unknown> | null;
+  fired_at: string;
+  resolved_at?: string | null;
+  email_sent: boolean;
+  created_at: string;
+  [key: string]: unknown;
+};
+
+export type OpsAlertEventsParams = {
+  limit?: number;
+  status?: string;
+  severity?: string;
+  email_sent?: boolean;
+  time_range?: string;
+  start_time?: string;
+  end_time?: string;
+  before_fired_at?: string;
+  before_id?: number;
+  platform?: string;
+  group_id?: number;
+};
+
 export type OpsRecord = {
   id?: number | string;
   status?: string;

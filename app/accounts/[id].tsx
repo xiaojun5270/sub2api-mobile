@@ -22,6 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BarChartCard } from '@/src/components/bar-chart-card';
 import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { formatCompactNumber, formatDisplayTime, formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
@@ -452,6 +453,18 @@ export default function AccountDetailScreen() {
     color: typeof item === 'object' && item.enabled === false ? colors.disabled : colors.success,
     meta: typeof item === 'object' && item.enabled === false ? 'disabled' : 'enabled',
   }));
+  const isRefreshing = accountQuery.isRefetching || todayQuery.isRefetching || statsQuery.isRefetching || snapshotQuery.isRefetching || modelsQuery.isRefetching || usageQuery.isRefetching;
+
+  function refreshAll() {
+    void accountQuery.refetch();
+    void todayQuery.refetch();
+    void statsQuery.refetch();
+    void snapshotQuery.refetch();
+    void modelsQuery.refetch();
+    void usageQuery.refetch();
+  }
+
+  useAutoRefresh(refreshAll, { refreshing: isRefreshing });
 
   function confirmAction(action: AccountAction, title: string, message: string) {
     Alert.alert(title, message, [

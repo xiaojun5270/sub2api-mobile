@@ -1,12 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Calendar, Clock3, DatabaseZap, DollarSign, Filter, Gauge, KeyRound, Layers, RefreshCw, Trash2, UserRound, Zap } from 'lucide-react-native';
+import { AlertTriangle, Calendar, Clock3, DatabaseZap, DollarSign, Gauge, KeyRound, Layers, RefreshCw, Trash2, UserRound, Zap } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
-import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { formatCompactNumber, formatDisplayTime, formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import {
@@ -17,8 +16,6 @@ import {
   listUsageCleanupTasks,
 } from '@/src/services/admin';
 import type { AdminUsageListParams, AdminUsageRecord, CreateUsageCleanupTaskRequest, UsageCleanupTask } from '@/src/types/admin';
-
-type StreamFilter = 'all' | 'sync' | 'stream';
 
 function dateKey(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
@@ -34,12 +31,6 @@ function defaultDateRange() {
 function getErrorMessage(error: unknown) {
   if (error instanceof Error && error.message) return error.message;
   return '操作失败，请稍后重试。';
-}
-
-function toOptionalNumber(raw: string) {
-  if (!raw.trim()) return undefined;
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : undefined;
 }
 
 function numberValue(...values: unknown[]) {
@@ -93,67 +84,6 @@ function taskCancelable(task: UsageCleanupTask) {
   return ['pending', 'running'].includes(`${task.status || ''}`.toLowerCase());
 }
 
-function Field({
-  label,
-  value,
-  onChangeText,
-  placeholder,
-  keyboardType,
-}: {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder?: string;
-  keyboardType?: 'default' | 'number-pad';
-}) {
-  const colors = useAppTheme();
-
-  return (
-    <View style={{ flex: 1, minWidth: 136 }}>
-      <Text style={{ color: colors.subtext, fontSize: 11, marginBottom: 6 }}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.placeholder}
-        keyboardType={keyboardType}
-        autoCapitalize="none"
-        style={{
-          backgroundColor: colors.muted,
-          borderColor: colors.border,
-          borderRadius: 12,
-          borderWidth: 1,
-          color: colors.text,
-          paddingHorizontal: 12,
-          paddingVertical: 10,
-        }}
-      />
-    </View>
-  );
-}
-
-function FilterChip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  const colors = useAppTheme();
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        alignItems: 'center',
-        backgroundColor: active ? colors.primary : colors.mutedCard,
-        borderColor: active ? colors.primary : colors.border,
-        borderRadius: 999,
-        borderWidth: 1,
-        justifyContent: 'center',
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-      }}
-    >
-      <Text style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
-    </Pressable>
-  );
-}
-
 function StatTile({ label, value, icon: Icon, tone = 'default' }: { label: string; value: string; icon: LucideIcon; tone?: 'default' | 'success' | 'danger' }) {
   const colors = useAppTheme();
   const foreground = tone === 'success' ? colors.success : tone === 'danger' ? colors.danger : colors.primary;
@@ -189,39 +119,18 @@ export default function UsageRecordsScreen() {
   const queryClient = useQueryClient();
   const range = useMemo(defaultDateRange, []);
   const [page, setPage] = useState(1);
-  const [startDate, setStartDate] = useState(range.start);
-  const [endDate, setEndDate] = useState(range.end);
-  const [userId, setUserId] = useState('');
-  const [apiKeyId, setApiKeyId] = useState('');
-  const [accountId, setAccountId] = useState('');
-  const [groupId, setGroupId] = useState('');
-  const [model, setModel] = useState('');
-  const [requestType, setRequestType] = useState('');
-  const [billingType, setBillingType] = useState('');
-  const [billingMode, setBillingMode] = useState('');
-  const [streamFilter, setStreamFilter] = useState<StreamFilter>('all');
-  const debouncedModel = useDebouncedValue(model.trim(), 300);
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, []);
   const pageSize = 20;
 
   const filters = useMemo<AdminUsageListParams>(() => ({
     page,
     page_size: pageSize,
-    start_date: startDate,
-    end_date: endDate,
-    user_id: toOptionalNumber(userId),
-    api_key_id: toOptionalNumber(apiKeyId),
-    account_id: toOptionalNumber(accountId),
-    group_id: toOptionalNumber(groupId),
-    model: debouncedModel || undefined,
-    request_type: requestType.trim() || undefined,
-    billing_type: billingType.trim() || undefined,
-    billing_mode: billingMode.trim() || undefined,
-    stream: streamFilter === 'all' ? undefined : streamFilter === 'stream',
+    start_date: range.start,
+    end_date: range.end,
     sort_by: 'created_at',
     sort_order: 'desc',
     timezone,
-  }), [accountId, apiKeyId, billingMode, billingType, debouncedModel, endDate, groupId, page, requestType, startDate, streamFilter, timezone, userId]);
+  }), [page, range.end, range.start, timezone]);
 
   const usageQuery = useQuery({
     queryKey: ['admin-usage-records', filters],
@@ -261,21 +170,6 @@ export default function UsageRecordsScreen() {
   const userCost = numberValue(stats?.total_cost);
   const actualCost = numberValue(stats?.actual_cost, stats?.total_actual_cost);
 
-  function resetFilters() {
-    setPage(1);
-    setStartDate(range.start);
-    setEndDate(range.end);
-    setUserId('');
-    setApiKeyId('');
-    setAccountId('');
-    setGroupId('');
-    setModel('');
-    setRequestType('');
-    setBillingType('');
-    setBillingMode('');
-    setStreamFilter('all');
-  }
-
   function refreshAll() {
     void usageQuery.refetch();
     void statsQuery.refetch();
@@ -283,26 +177,13 @@ export default function UsageRecordsScreen() {
   }
 
   function confirmCreateCleanupTask() {
-    if (!startDate || !endDate) {
-      Alert.alert('缺少时间范围', '清理任务必须指定开始和结束日期。');
-      return;
-    }
-
     const body: CreateUsageCleanupTaskRequest = {
-      start_date: startDate,
-      end_date: endDate,
+      start_date: range.start,
+      end_date: range.end,
       timezone,
-      user_id: toOptionalNumber(userId),
-      api_key_id: toOptionalNumber(apiKeyId),
-      account_id: toOptionalNumber(accountId),
-      group_id: toOptionalNumber(groupId),
-      model: debouncedModel || undefined,
-      request_type: requestType.trim() || undefined,
-      stream: streamFilter === 'all' ? undefined : streamFilter === 'stream',
-      billing_type: billingType.trim() || undefined,
     };
 
-    Alert.alert('创建清理任务', `将按当前筛选条件清理 ${startDate} 至 ${endDate} 的使用记录。该操作会异步删除历史记录，请确认。`, [
+    Alert.alert('创建清理任务', `将清理当前时间范围（${range.start} 至 ${range.end}）内的使用记录。该操作会异步删除历史记录，请确认。`, [
       { text: '取消', style: 'cancel' },
       {
         text: '创建',
@@ -315,7 +196,7 @@ export default function UsageRecordsScreen() {
   return (
     <ScreenShell
       title="使用记录"
-      subtitle="管理端全站使用记录、统计、筛选与清理任务。"
+      subtitle="管理端全站使用记录、统计与清理任务。"
       icon={DatabaseZap}
       titleAside={<Text style={{ color: colors.subtext, fontSize: 11 }}>管理员视图</Text>}
       variant="minimal"
@@ -325,33 +206,6 @@ export default function UsageRecordsScreen() {
       bottomInsetClassName="pb-28"
       contentGapClassName="mt-2 gap-3"
     >
-      <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, gap: 10, padding: 12 }}>
-        <View style={{ alignItems: 'center', flexDirection: 'row', gap: 8 }}>
-          <Filter color={colors.primary} size={17} />
-          <Text style={{ color: colors.text, flex: 1, fontSize: 15, fontWeight: '800' }}>筛选条件</Text>
-          <Pressable onPress={resetFilters} style={{ backgroundColor: colors.mutedCard, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 }}>
-            <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>重置</Text>
-          </Pressable>
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          <Field label="开始日期" value={startDate} onChangeText={(value) => { setPage(1); setStartDate(value); }} placeholder="YYYY-MM-DD" />
-          <Field label="结束日期" value={endDate} onChangeText={(value) => { setPage(1); setEndDate(value); }} placeholder="YYYY-MM-DD" />
-          <Field label="用户 ID" value={userId} onChangeText={(value) => { setPage(1); setUserId(value); }} placeholder="可选" keyboardType="number-pad" />
-          <Field label="API Key ID" value={apiKeyId} onChangeText={(value) => { setPage(1); setApiKeyId(value); }} placeholder="可选" keyboardType="number-pad" />
-          <Field label="账号 ID" value={accountId} onChangeText={(value) => { setPage(1); setAccountId(value); }} placeholder="可选" keyboardType="number-pad" />
-          <Field label="分组 ID" value={groupId} onChangeText={(value) => { setPage(1); setGroupId(value); }} placeholder="可选" keyboardType="number-pad" />
-          <Field label="模型" value={model} onChangeText={(value) => { setPage(1); setModel(value); }} placeholder="如 gpt-4.1" />
-          <Field label="请求类型" value={requestType} onChangeText={(value) => { setPage(1); setRequestType(value); }} placeholder="sync/stream/ws/cyber" />
-          <Field label="计费类型" value={billingType} onChangeText={(value) => { setPage(1); setBillingType(value); }} placeholder="可选" />
-          <Field label="计费模式" value={billingMode} onChangeText={(value) => { setPage(1); setBillingMode(value); }} placeholder="可选" />
-        </View>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-          <FilterChip label="全部请求" active={streamFilter === 'all'} onPress={() => { setPage(1); setStreamFilter('all'); }} />
-          <FilterChip label="同步" active={streamFilter === 'sync'} onPress={() => { setPage(1); setStreamFilter('sync'); }} />
-          <FilterChip label="流式" active={streamFilter === 'stream'} onPress={() => { setPage(1); setStreamFilter('stream'); }} />
-        </View>
-      </View>
-
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <StatTile label="请求数" value={formatCompactNumber(totalRequests)} icon={Gauge} />
         <StatTile label="Token" value={formatTokenValue(totalTokens)} icon={Zap} />
@@ -408,7 +262,7 @@ export default function UsageRecordsScreen() {
 
       {usageQuery.isLoading ? <ListCard title="正在加载使用记录" meta="请稍候..." icon={DatabaseZap} /> : null}
       {!usageQuery.isLoading && !usageQuery.error && records.length === 0 ? (
-        <ListCard title="暂无使用记录" meta="当前筛选条件下没有记录。" icon={DatabaseZap} />
+        <ListCard title="暂无使用记录" meta="当前时间范围内没有记录。" icon={DatabaseZap} />
       ) : null}
 
       <View style={{ gap: 10 }}>

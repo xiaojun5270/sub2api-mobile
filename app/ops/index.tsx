@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack } from 'expo-router';
-import { Activity, AlertTriangle, BarChart3, BellRing, ChevronDown, Clock, Gauge, ListChecks, ServerCog, ShieldCheck, ShieldOff, TerminalSquare, Users } from 'lucide-react-native';
+import { Activity, AlertTriangle, BarChart3, BellRing, CheckCircle2, ChevronDown, Clock, Gauge, MailCheck, MailX, RefreshCw, ServerCog, ShieldCheck, ShieldOff, TerminalSquare, Users } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import { useMemo, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
@@ -22,7 +22,6 @@ import {
   getOpsMetricThresholds,
   getOpsOpenAiTokenStats,
   getOpsRealtimeTraffic,
-  getOpsRequests,
   getOpsRequestErrors,
   getOpsRuntimeAlert,
   getOpsSystemLogs,
@@ -32,11 +31,14 @@ import {
   getOpsUserConcurrency,
   updateOpsAlertEventStatus,
 } from '@/src/services/admin';
-import type { OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
+import type { OpsAlertEvent, OpsAlertEventsParams, OpsDashboardSnapshot, OpsMetricPoint, OpsRecord } from '@/src/types/admin';
 import Svg, { Path } from 'react-native-svg';
 
 type OpsTimeRange = '1h' | '24h' | '7d' | '30d';
 type OpsFilterMenu = 'platform' | 'group' | 'time' | null;
+type AlertTimeRange = '5m' | '30m' | '1h' | '6h' | '24h' | '7d' | '30d';
+type AlertFilterMenu = 'time' | 'severity' | 'status' | 'email' | null;
+type AlertCursor = Pick<OpsAlertEventsParams, 'before_fired_at' | 'before_id'>;
 
 type FilterOption = {
   value: string;
@@ -48,6 +50,35 @@ const OPS_TIME_RANGE_OPTIONS: Array<FilterOption & { value: OpsTimeRange }> = [
   { label: '近24小时', value: '24h' },
   { label: '近7天', value: '7d' },
   { label: '近30天', value: '30d' },
+];
+
+const ALERT_EVENTS_PAGE_SIZE = 10;
+const ALERT_TIME_RANGE_OPTIONS: Array<FilterOption & { value: AlertTimeRange }> = [
+  { label: '近5分钟', value: '5m' },
+  { label: '近30分钟', value: '30m' },
+  { label: '近1小时', value: '1h' },
+  { label: '近6小时', value: '6h' },
+  { label: '近24小时', value: '24h' },
+  { label: '近7天', value: '7d' },
+  { label: '近30天', value: '30d' },
+];
+const ALERT_SEVERITY_OPTIONS: FilterOption[] = [
+  { label: '全部级别', value: '' },
+  { label: 'P0', value: 'P0' },
+  { label: 'P1', value: 'P1' },
+  { label: 'P2', value: 'P2' },
+  { label: 'P3', value: 'P3' },
+];
+const ALERT_STATUS_OPTIONS: FilterOption[] = [
+  { label: '全部状态', value: '' },
+  { label: '触发中', value: 'firing' },
+  { label: '已恢复', value: 'resolved' },
+  { label: '手动恢复', value: 'manual_resolved' },
+];
+const ALERT_EMAIL_OPTIONS: FilterOption[] = [
+  { label: '全部邮件', value: '' },
+  { label: '已发送', value: 'true' },
+  { label: '已忽略', value: 'false' },
 ];
 
 function getErrorMessage(error: unknown) {
@@ -316,36 +347,54 @@ function formatHealth(value: unknown) {
 
 function formatAlertStatus(status: string, resolvedAt?: unknown) {
   const normalized = status.toLowerCase();
+  if (normalized === 'manual_resolved') return '手动恢复';
   if (normalized === 'resolved' || resolvedAt) return '已恢复';
   if (normalized === 'ignored' || normalized === 'muted') return '已忽略';
   if (normalized === 'open' || normalized === 'firing') return '触发中';
   return textOrDash(status);
 }
 
-function formatDurationBetween(start?: unknown, end?: unknown) {
-  const startText = typeof start === 'string' ? start : undefined;
-  const endText = typeof end === 'string' ? end : undefined;
-  if (!startText || !endText) return '-';
+function formatDurationMs(value: number) {
+  const seconds = Math.max(0, Math.floor(value / 1000));
+  if (seconds < 60) return `${seconds}s`;
 
-  const startTime = new Date(startText).getTime();
-  const endTime = new Date(endText).getTime();
-  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return '-';
-
-  const minutes = Math.max(Math.round((endTime - startTime) / 60000), 1);
+  const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
 
   const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+  if (hours < 24) return `${hours}h`;
+
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function formatAlertDuration(start?: unknown, end?: unknown, status = '') {
+  const startText = typeof start === 'string' ? start : undefined;
+  const endText = typeof end === 'string' ? end : undefined;
+  if (!startText) return '-';
+
+  const startTime = new Date(startText).getTime();
+  const endTime = endText ? new Date(endText).getTime() : Date.now();
+  if (Number.isNaN(startTime) || Number.isNaN(endTime) || endTime < startTime) return '-';
+
+  return `${formatAlertStatus(status, endText)} ${formatDurationMs(endTime - startTime)}`;
 }
 
 function formatDimensions(value: unknown) {
   if (!value) return '-';
   if (typeof value === 'string') return value.trim() || '-';
   if (isRecord(value)) {
-    const text = Object.entries(value)
+    const orderedKeys = ['platform', 'group_id', 'region'];
+    const entries = Object.entries(value).sort(([left], [right]) => {
+      const leftIndex = orderedKeys.indexOf(left);
+      const rightIndex = orderedKeys.indexOf(right);
+      if (leftIndex === -1 && rightIndex === -1) return left.localeCompare(right);
+      if (leftIndex === -1) return 1;
+      if (rightIndex === -1) return -1;
+      return leftIndex - rightIndex;
+    });
+    const text = entries
       .filter(([, entryValue]) => entryValue !== null && entryValue !== undefined && `${entryValue}`.trim())
-      .map(([key, entryValue]) => `${key}:${entryValue}`)
+      .map(([key, entryValue]) => `${key}=${entryValue}`)
       .join(' · ');
     return text || '-';
   }
@@ -355,6 +404,10 @@ function formatDimensions(value: unknown) {
 
 function getTimeRangeLabel(value: OpsTimeRange) {
   return OPS_TIME_RANGE_OPTIONS.find((option) => option.value === value)?.label ?? '近1小时';
+}
+
+function getOptionLabel(options: FilterOption[], value: string, fallback: string) {
+  return options.find((option) => option.value === value)?.label ?? fallback;
 }
 
 function getTokenStatsTimeRange(value: OpsTimeRange) {
@@ -479,6 +532,31 @@ function InfoTile({ label, value, tone = 'default' }: { label: string; value: st
     <View style={{ backgroundColor, borderRadius: 12, flex: 1, minWidth: 104, paddingHorizontal: 10, paddingVertical: 10 }}>
       <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
       <Text numberOfLines={1} style={{ color: valueColor, fontSize: 13, fontWeight: '800', marginTop: 5 }}>{value}</Text>
+    </View>
+  );
+}
+
+function AlertMetaItem({
+  label,
+  value,
+  icon: Icon,
+  tone = 'default',
+}: {
+  label: string;
+  value: string;
+  icon?: LucideIcon;
+  tone?: 'default' | 'danger' | 'success';
+}) {
+  const colors = useAppTheme();
+  const valueColor = tone === 'danger' ? colors.errorText : tone === 'success' ? colors.success : colors.text;
+
+  return (
+    <View style={{ flex: 1, minWidth: 128, paddingVertical: 4 }}>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 5 }}>
+        {Icon ? <Icon color={colors.subtext} size={12} /> : null}
+        <Text style={{ color: colors.subtext, fontSize: 10 }}>{label}</Text>
+      </View>
+      <Text numberOfLines={2} style={{ color: valueColor, fontSize: 12, fontWeight: '700', lineHeight: 17, marginTop: 4 }}>{value}</Text>
     </View>
   );
 }
@@ -721,6 +799,11 @@ export default function OpsScreen() {
   const [platformFilter, setPlatformFilter] = useState('');
   const [groupFilter, setGroupFilter] = useState('');
   const [activeFilterMenu, setActiveFilterMenu] = useState<OpsFilterMenu>(null);
+  const [alertTimeRange, setAlertTimeRange] = useState<AlertTimeRange>('24h');
+  const [alertSeverity, setAlertSeverity] = useState('');
+  const [alertStatus, setAlertStatus] = useState('');
+  const [alertEmail, setAlertEmail] = useState('');
+  const [activeAlertFilter, setActiveAlertFilter] = useState<AlertFilterMenu>(null);
   const selectedGroupId = parseGroupId(groupFilter);
 
   const opsWindowParams = useMemo(() => ({
@@ -762,6 +845,16 @@ export default function OpsScreen() {
     sort_order: 'desc',
   }), [platformFilter, selectedGroupId, timeRange]);
 
+  const alertEventParams = useMemo<OpsAlertEventsParams>(() => ({
+    email_sent: alertEmail === '' ? undefined : alertEmail === 'true',
+    group_id: selectedGroupId,
+    limit: ALERT_EVENTS_PAGE_SIZE,
+    platform: platformFilter || undefined,
+    severity: alertSeverity || undefined,
+    status: alertStatus || undefined,
+    time_range: alertTimeRange,
+  }), [alertEmail, alertSeverity, alertStatus, alertTimeRange, platformFilter, selectedGroupId]);
+
   const overviewQuery = useQuery({ queryKey: ['ops-overview', opsWindowParams], queryFn: () => getOpsDashboardOverview(opsWindowParams), staleTime: 30_000 });
   const snapshotQuery = useQuery({ queryKey: ['ops-dashboard-snapshot', opsWindowParams], queryFn: () => getOpsDashboardSnapshot(opsWindowParams), staleTime: 30_000 });
   const realtimeQuery = useQuery({ queryKey: ['ops-realtime', opsRealtimeParams], queryFn: () => getOpsRealtimeTraffic(opsRealtimeParams), staleTime: 15_000 });
@@ -773,7 +866,6 @@ export default function OpsScreen() {
   const errorTrendQuery = useQuery({ queryKey: ['ops-error-trend', opsTrendQueryKey], queryFn: () => getOpsErrorTrend(getOpsTrendParams(timeRange, platformFilter || undefined, selectedGroupId)), staleTime: 60_000 });
   const errorDistributionQuery = useQuery({ queryKey: ['ops-error-distribution', opsWindowParams], queryFn: () => getOpsErrorDistribution(opsWindowParams), staleTime: 60_000 });
   const latencyHistogramQuery = useQuery({ queryKey: ['ops-latency-histogram', opsWindowParams], queryFn: () => getOpsLatencyHistogram(opsWindowParams), staleTime: 60_000 });
-  const requestsQuery = useQuery({ queryKey: ['ops-requests', opsListParams], queryFn: () => getOpsRequests(opsListParams), staleTime: 30_000 });
   const requestErrorsQuery = useQuery({ queryKey: ['ops-request-errors', opsListParams], queryFn: () => getOpsRequestErrors({ ...opsListParams, view: 'errors' }), staleTime: 30_000 });
   const upstreamErrorsQuery = useQuery({ queryKey: ['ops-upstream-errors', opsListParams], queryFn: () => getOpsUpstreamErrors(opsListParams), staleTime: 30_000 });
   const errorsQuery = useQuery({ queryKey: ['ops-errors', opsListParams], queryFn: () => getOpsErrors(opsListParams), staleTime: 30_000 });
@@ -781,10 +873,23 @@ export default function OpsScreen() {
   const logsHealthQuery = useQuery({ queryKey: ['ops-logs-health'], queryFn: getOpsSystemLogsHealth, staleTime: 60_000 });
   const runtimeAlertQuery = useQuery({ queryKey: ['ops-runtime-alert'], queryFn: getOpsRuntimeAlert, staleTime: 30_000 });
   const metricThresholdsQuery = useQuery({ queryKey: ['ops-metric-thresholds'], queryFn: getOpsMetricThresholds, staleTime: 60_000 });
-  const alertEventsQuery = useQuery({ queryKey: ['ops-alert-events', opsListParams], queryFn: () => getOpsAlertEvents({ ...opsListParams, limit: 20 }), staleTime: 30_000 });
+  const alertEventsQuery = useInfiniteQuery({
+    queryKey: ['ops-alert-events', alertEventParams],
+    queryFn: ({ pageParam }) => getOpsAlertEvents({ ...alertEventParams, ...(pageParam ?? {}) }),
+    initialPageParam: undefined as AlertCursor | undefined,
+    getNextPageParam: (lastPage) => {
+      if (lastPage.length < ALERT_EVENTS_PAGE_SIZE) return undefined;
+      const lastEvent = lastPage[lastPage.length - 1];
+      const beforeId = Number(lastEvent?.id);
+      const beforeFiredAt = lastEvent?.fired_at || lastEvent?.created_at;
+      if (!beforeFiredAt || !Number.isFinite(beforeId) || beforeId <= 0) return undefined;
+      return { before_fired_at: beforeFiredAt, before_id: beforeId } satisfies AlertCursor;
+    },
+    staleTime: 30_000,
+  });
 
   const resolveAlertMutation = useMutation({
-    mutationFn: (id: number | string) => updateOpsAlertEventStatus(id, 'resolved'),
+    mutationFn: (id: number | string) => updateOpsAlertEventStatus(id, 'manual_resolved'),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-alert-events'] }),
   });
 
@@ -797,10 +902,12 @@ export default function OpsScreen() {
   const metricThresholds = metricThresholdsQuery.data;
   const logsHealth = logsHealthQuery.data;
   const rawSystemLogs = getItems(systemLogsQuery.data);
-  const rawAlertEvents = getItems(alertEventsQuery.data);
+  const rawAlertEvents = useMemo<OpsAlertEvent[]>(
+    () => alertEventsQuery.data?.pages.flat() ?? [],
+    [alertEventsQuery.data]
+  );
   const rawAccountAvailability = getItems(accountAvailabilityQuery.data);
   const rawUserConcurrency = getItems(userConcurrencyQuery.data);
-  const rawRequests = getItems(requestsQuery.data);
   const rawRequestErrors = getItems(requestErrorsQuery.data);
   const rawUpstreamErrors = getItems(upstreamErrorsQuery.data);
   const rawErrors = getItems(errorsQuery.data);
@@ -859,10 +966,6 @@ export default function OpsScreen() {
     () => filterByDimension(rawUserConcurrency, platformFilter, groupFilter),
     [groupFilter, platformFilter, rawUserConcurrency]
   );
-  const filteredRequests = useMemo(
-    () => filterByDimension(rawRequests, platformFilter, groupFilter),
-    [groupFilter, platformFilter, rawRequests]
-  );
   const filteredRequestErrors = useMemo(
     () => filterByDimension(rawRequestErrors, platformFilter, groupFilter),
     [groupFilter, platformFilter, rawRequestErrors]
@@ -882,7 +985,6 @@ export default function OpsScreen() {
       ...rawAccountAvailability,
       ...rawConcurrencyItems,
       ...rawUserConcurrency,
-      ...rawRequests,
       ...rawRequestErrors,
       ...rawUpstreamErrors,
       ...rawErrors,
@@ -892,7 +994,7 @@ export default function OpsScreen() {
       realtime,
       concurrency,
     ],
-    [concurrency, errorTrendSource, overview, rawAccountAvailability, rawAlertEvents, rawConcurrencyItems, rawErrors, rawRequestErrors, rawRequests, rawSystemLogs, rawUpstreamErrors, rawUserConcurrency, realtime, throughputSource]
+    [concurrency, errorTrendSource, overview, rawAccountAvailability, rawAlertEvents, rawConcurrencyItems, rawErrors, rawRequestErrors, rawSystemLogs, rawUpstreamErrors, rawUserConcurrency, realtime, throughputSource]
   );
   const platformOptions = useMemo(
     () => [
@@ -910,10 +1012,9 @@ export default function OpsScreen() {
   );
   const timeOptions = OPS_TIME_RANGE_OPTIONS.map(({ label, value }) => ({ label, value }));
   const systemLogs = filteredSystemLogs.slice(0, 8);
-  const alertEvents = filteredAlertEvents.slice(0, 8);
+  const alertEvents = filteredAlertEvents;
   const accountAvailabilityRows = filteredAccountAvailability.slice(0, 8);
   const userConcurrencyRows = filteredUserConcurrency.slice(0, 8);
-  const requestRows = filteredRequests.slice(0, 8);
   const requestErrorRows = filteredRequestErrors.slice(0, 6);
   const upstreamErrorRows = filteredUpstreamErrors.slice(0, 6);
   const genericErrorRows = filteredErrors.slice(0, 6);
@@ -957,7 +1058,7 @@ export default function OpsScreen() {
   const ttftAvg = firstNumber(ttftMetrics, ['avg_ms', 'avgMs', 'avg']) || firstNumber(overview, ['ttft_avg_ms', 'ttftAvgMs', 'time_to_first_token_avg_ms', 'timeToFirstTokenAvgMs']);
   const ttftMax = firstNumber(ttftMetrics, ['max_ms', 'maxMs', 'max']) || firstNumber(overview, ['ttft_max_ms', 'ttftMaxMs']);
   const alertCount = firstNumberValue(runtimeAlert, ['events_open', 'eventsOpen', 'open_alerts', 'openAlerts']) ?? firstNumber(overview, ['alert_count', 'alertCount', 'alerts', 'open_alerts', 'openAlerts']);
-  const totalAlertEvents = firstNumberValue(runtimeAlert, ['events_total', 'eventsTotal', 'total']) ?? firstNumber(alertEventsQuery.data, ['total']);
+  const totalAlertEvents = firstNumberValue(runtimeAlert, ['events_total', 'eventsTotal', 'total']) ?? rawAlertEvents.length;
   const currentConcurrency = firstNumber(realtime, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'inflight_requests', 'inflightRequests', 'concurrency']) || firstNumber(concurrency, ['current_concurrency', 'currentConcurrency', 'active_requests', 'activeRequests', 'total']);
   const queueSize = firstNumber(systemMetrics, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(overview, ['concurrency_queue_depth', 'concurrencyQueueDepth']) || firstNumber(realtime, ['queue_size', 'queueSize', 'queued_requests', 'queuedRequests', 'pending_requests', 'pendingRequests']) || firstNumber(concurrency, ['queue_size', 'queueSize', 'pending_requests', 'pendingRequests']);
   const tokenPerSecond = firstNumber(tpsMetrics, ['current', 'avg', 'value']) || firstNumber(overview, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(realtime, ['tps_current', 'tpsCurrent', 'tps', 'tokens_per_second', 'tokensPerSecond', 'token_per_second']) || firstNumber(tokenStats, ['tps', 'tokens_per_second', 'tokensPerSecond']);
@@ -1031,7 +1132,6 @@ export default function OpsScreen() {
     errorTrendQuery.refetch();
     errorDistributionQuery.refetch();
     latencyHistogramQuery.refetch();
-    requestsQuery.refetch();
     requestErrorsQuery.refetch();
     upstreamErrorsQuery.refetch();
     errorsQuery.refetch();
@@ -1042,7 +1142,7 @@ export default function OpsScreen() {
     alertEventsQuery.refetch();
   }
 
-  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || metricThresholdsQuery.isRefetching || alertEventsQuery.isRefetching || requestsQuery.isRefetching || requestErrorsQuery.isRefetching;
+  const refreshing = overviewQuery.isRefetching || snapshotQuery.isRefetching || realtimeQuery.isRefetching || concurrencyQuery.isRefetching || userConcurrencyQuery.isRefetching || accountAvailabilityQuery.isRefetching || systemLogsQuery.isRefetching || runtimeAlertQuery.isRefetching || metricThresholdsQuery.isRefetching || alertEventsQuery.isRefetching || requestErrorsQuery.isRefetching;
   const activeFilterOptions: FilterOption[] = activeFilterMenu === 'platform'
     ? platformOptions
     : activeFilterMenu === 'group'
@@ -1050,6 +1150,15 @@ export default function OpsScreen() {
       : activeFilterMenu === 'time'
         ? timeOptions
         : [];
+  const activeAlertFilterOptions: FilterOption[] = activeAlertFilter === 'time'
+    ? ALERT_TIME_RANGE_OPTIONS
+    : activeAlertFilter === 'severity'
+      ? ALERT_SEVERITY_OPTIONS
+      : activeAlertFilter === 'status'
+        ? ALERT_STATUS_OPTIONS
+        : activeAlertFilter === 'email'
+          ? ALERT_EMAIL_OPTIONS
+          : [];
   const healthTone: OpsTone = healthScore === undefined ? 'default' : healthScore >= 85 ? 'success' : healthScore < 60 ? 'danger' : 'warning';
   const isIdle = totalRequests <= 0 && qps <= 0 && tokenPerSecond <= 0 && currentConcurrency <= 0;
   const healthText = isIdle ? '待机' : healthScore === undefined ? '--' : formatCompactNumber(healthScore);
@@ -1118,6 +1227,48 @@ export default function OpsScreen() {
       >
         <Text style={{ color: highlighted ? colors.primary : colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{label}</Text>
         <ChevronDown color={highlighted ? colors.primary : colors.badgeDefaultText} size={13} />
+      </Pressable>
+    );
+  }
+
+  function selectAlertFilterOption(value: string) {
+    if (activeAlertFilter === 'time') setAlertTimeRange(value as AlertTimeRange);
+    if (activeAlertFilter === 'severity') setAlertSeverity(value);
+    if (activeAlertFilter === 'status') setAlertStatus(value);
+    if (activeAlertFilter === 'email') setAlertEmail(value);
+    setActiveAlertFilter(null);
+  }
+
+  function isAlertFilterOptionSelected(value: string) {
+    if (activeAlertFilter === 'time') return value === alertTimeRange;
+    if (activeAlertFilter === 'severity') return value === alertSeverity;
+    if (activeAlertFilter === 'status') return value === alertStatus;
+    if (activeAlertFilter === 'email') return value === alertEmail;
+    return false;
+  }
+
+  function renderAlertFilterChip(menu: Exclude<AlertFilterMenu, null>, label: string, selected: boolean) {
+    const active = activeAlertFilter === menu;
+    const highlighted = active || selected;
+
+    return (
+      <Pressable
+        key={menu}
+        onPress={() => setActiveAlertFilter((current) => (current === menu ? null : menu))}
+        style={{
+          alignItems: 'center',
+          backgroundColor: highlighted ? colors.successBg : colors.mutedCard,
+          borderColor: highlighted ? colors.primary : colors.border,
+          borderRadius: 999,
+          borderWidth: 1,
+          flexDirection: 'row',
+          gap: 5,
+          paddingHorizontal: 10,
+          paddingVertical: 7,
+        }}
+      >
+        <Text style={{ color: highlighted ? colors.primary : colors.badgeDefaultText, fontSize: 11, fontWeight: '700' }}>{label}</Text>
+        <ChevronDown color={highlighted ? colors.primary : colors.badgeDefaultText} size={12} />
       </Pressable>
     );
   }
@@ -1411,28 +1562,134 @@ export default function OpsScreen() {
         </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-          <SectionTitle title="请求明细" icon={ListChecks} />
-          <View style={{ gap: 10, marginTop: 12 }}>
-            {requestRows.map((item, index) => {
-              const title = textOrDash(firstTextValue(item, ['request_id', 'requestId', 'client_request_id', 'clientRequestId']), `请求 #${item.id ?? index + 1}`);
-              const status = textOrDash(item.status, firstTextValue(item, ['status_code', 'statusCode']));
-              const model = textOrDash(item.model, firstTextValue(item, ['requested_model', 'requestedModel', 'upstream_model', 'upstreamModel']));
-              const tokens = firstNumber(item, ['total_tokens', 'totalTokens', 'tokens']);
-              const cost = firstNumber(item, ['actual_cost', 'actualCost', 'total_cost', 'totalCost']);
-              const duration = firstNumber(item, ['duration_ms', 'durationMs', 'latency_ms', 'latencyMs']);
-              const isError = ['error', 'failed', 'failure'].includes(status.toLowerCase()) || firstNumber(item, ['status_code', 'statusCode']) >= 400;
+          <View style={{ alignItems: 'center', flexDirection: 'row', gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <SectionTitle title="告警事件" icon={BellRing} />
+              <Text style={{ color: colors.subtext, fontSize: 11, marginTop: 5 }}>最近的告警触发与恢复记录</Text>
+            </View>
+            <View style={{ backgroundColor: colors.badgeDefaultBg, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 }}>
+              <Text style={{ color: colors.badgeDefaultText, fontSize: 11, fontWeight: '800' }}>已加载 {alertEvents.length}</Text>
+            </View>
+            <Pressable
+              accessibilityLabel="刷新告警事件"
+              disabled={alertEventsQuery.isRefetching}
+              onPress={() => alertEventsQuery.refetch()}
+              style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 999, height: 32, justifyContent: 'center', opacity: alertEventsQuery.isRefetching ? 0.55 : 1, width: 32 }}
+            >
+              <RefreshCw color={colors.badgeDefaultText} size={15} />
+            </Pressable>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 12 }}>
+            {renderAlertFilterChip('time', getOptionLabel(ALERT_TIME_RANGE_OPTIONS, alertTimeRange, '近24小时'), true)}
+            {renderAlertFilterChip('severity', getOptionLabel(ALERT_SEVERITY_OPTIONS, alertSeverity, '全部级别'), Boolean(alertSeverity))}
+            {renderAlertFilterChip('status', getOptionLabel(ALERT_STATUS_OPTIONS, alertStatus, '全部状态'), Boolean(alertStatus))}
+            {renderAlertFilterChip('email', getOptionLabel(ALERT_EMAIL_OPTIONS, alertEmail, '全部邮件'), Boolean(alertEmail))}
+          </View>
+
+          {activeAlertFilter ? (
+            <View style={{ borderColor: colors.border, borderTopWidth: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 11, paddingTop: 11 }}>
+              {activeAlertFilterOptions.map((option) => {
+                const selected = isAlertFilterOptionSelected(option.value);
+                return (
+                  <Pressable
+                    key={`${activeAlertFilter}-${option.value || 'all'}`}
+                    onPress={() => selectAlertFilterOption(option.value)}
+                    style={{ backgroundColor: selected ? colors.primary : colors.mutedCard, borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7 }}
+                  >
+                    <Text style={{ color: selected ? colors.primaryText : colors.badgeDefaultText, fontSize: 11, fontWeight: '700' }}>{option.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
+
+          {alertEventsQuery.error && alertEvents.length === 0 ? (
+            <View style={{ backgroundColor: colors.errorBg, borderRadius: 12, marginTop: 12, padding: 11 }}>
+              <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>告警事件加载失败</Text>
+              <Text style={{ color: colors.errorText, fontSize: 11, lineHeight: 17, marginTop: 4 }}>{getErrorMessage(alertEventsQuery.error)}</Text>
+              <Pressable onPress={() => alertEventsQuery.refetch()} style={{ alignSelf: 'flex-start', marginTop: 7 }}>
+                <Text style={{ color: colors.errorText, fontSize: 11, fontWeight: '800' }}>重新加载</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {alertEventsQuery.isLoading ? <Text style={{ color: colors.subtext, marginTop: 14 }}>正在加载告警事件...</Text> : null}
+          {!alertEventsQuery.isLoading && !alertEventsQuery.error && alertEvents.length === 0 ? (
+            <Text style={{ color: colors.subtext, marginTop: 14 }}>当前条件下暂无告警事件。</Text>
+          ) : null}
+
+          <View style={{ marginTop: alertEvents.length > 0 ? 6 : 0 }}>
+            {alertEvents.map((item, index) => {
+              const severity = textOrDash(item.severity);
+              const status = textOrDash(item.status);
+              const title = textOrDash(item.title, '告警事件');
+              const description = textOrDash(item.description);
+              const normalizedStatus = status.toLowerCase();
+              const isResolved = ['resolved', 'manual_resolved'].includes(normalizedStatus) || Boolean(item.resolved_at);
+              const firedAt = item.fired_at || item.created_at;
+              const resolvedAt = item.resolved_at;
+              const displayStatus = formatAlertStatus(status, resolvedAt);
+              const dimensions = formatDimensions(item.dimensions);
+              const platform = platformValue(item) ?? '-';
+              const ruleId = textOrDash(item.rule_id);
+              const metricValue = firstNumberValue(item, ['metric_value', 'metricValue']);
+              const thresholdValue = firstNumberValue(item, ['threshold_value', 'thresholdValue']);
+              const severityIsCritical = severity.toUpperCase() === 'P0';
+              const severityIsWarning = ['P1', 'P2'].includes(severity.toUpperCase());
+              const severityBackground = severityIsCritical ? colors.errorBg : severityIsWarning ? colors.accentBg : colors.badgeDefaultBg;
+              const severityColor = severityIsCritical ? colors.errorText : severityIsWarning ? colors.accentText : colors.badgeDefaultText;
 
               return (
-                <RecordCard key={`${item.id ?? title}-${index}`} item={item} title={title} subtitle={`${model} · ${formatKnownTime(item.created_at, item.updated_at)}`} tone={isError ? 'danger' : 'success'}>
-                  <InfoTile label="状态" value={status} tone={isError ? 'danger' : 'success'} />
-                  <InfoTile label="Token" value={formatCompactNumber(tokens)} />
-                  <InfoTile label="成本" value={`$${cost.toFixed(4)}`} />
-                  <InfoTile label="耗时" value={formatLatency(duration)} />
-                </RecordCard>
+                <View key={`${item.id}-${index}`} style={{ borderColor: colors.rowBorder, borderTopWidth: index === 0 ? 0 : 1, paddingVertical: 14 }}>
+                  <View style={{ alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                    <View style={{ backgroundColor: severityBackground, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 }}>
+                      <Text style={{ color: severityColor, fontSize: 10, fontWeight: '800' }}>{severity}</Text>
+                    </View>
+                    <View style={{ backgroundColor: isResolved ? colors.successBg : colors.errorBg, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5 }}>
+                      <Text style={{ color: isResolved ? colors.success : colors.errorText, fontSize: 10, fontWeight: '800' }}>{displayStatus}</Text>
+                    </View>
+                    <Text style={{ color: colors.subtext, flex: 1, fontSize: 11, textAlign: 'right' }}>{formatKnownTime(firedAt)}</Text>
+                  </View>
+
+                  <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800', lineHeight: 20, marginTop: 9 }}>{title}</Text>
+                  {description !== '--' ? <Text style={{ color: colors.subtext, fontSize: 11, lineHeight: 17, marginTop: 4 }}>{description}</Text> : null}
+
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 12, marginTop: 9, rowGap: 3 }}>
+                    <AlertMetaItem label="平台" value={platform} />
+                    <AlertMetaItem label="规则 ID" value={ruleId === '--' ? '-' : `#${ruleId}`} />
+                    <AlertMetaItem label="持续时间" value={formatAlertDuration(firedAt, resolvedAt, status)} icon={Clock} tone={isResolved ? 'success' : 'danger'} />
+                    <AlertMetaItem label="维度" value={dimensions} />
+                    <AlertMetaItem label="当前值" value={metricValue === undefined ? '-' : formatCompactNumber(metricValue)} tone={isResolved ? 'default' : 'danger'} />
+                    <AlertMetaItem label="阈值" value={thresholdValue === undefined ? '-' : formatCompactNumber(thresholdValue)} />
+                    <AlertMetaItem label="邮件" value={item.email_sent ? '已发送' : '已忽略'} icon={item.email_sent ? MailCheck : MailX} tone={item.email_sent ? 'success' : 'default'} />
+                  </View>
+
+                  {!isResolved ? (
+                    <Pressable
+                      disabled={resolveAlertMutation.isPending}
+                      onPress={() => resolveAlertMutation.mutate(item.id)}
+                      style={{ alignItems: 'center', alignSelf: 'flex-start', backgroundColor: colors.successBg, borderRadius: 999, flexDirection: 'row', gap: 5, marginTop: 9, opacity: resolveAlertMutation.isPending ? 0.55 : 1, paddingHorizontal: 10, paddingVertical: 7 }}
+                    >
+                      <CheckCircle2 color={colors.success} size={13} />
+                      <Text style={{ color: colors.success, fontSize: 11, fontWeight: '800' }}>{resolveAlertMutation.isPending ? '处理中' : '手动恢复'}</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               );
             })}
-            {requestRows.length === 0 ? <EmptyText loading={requestsQuery.isLoading} empty="暂无请求明细。" /> : null}
           </View>
+
+          {resolveAlertMutation.error ? <Text style={{ color: colors.errorText, fontSize: 11, marginTop: 4 }}>{getErrorMessage(resolveAlertMutation.error)}</Text> : null}
+          {alertEventsQuery.hasNextPage ? (
+            <Pressable
+              disabled={alertEventsQuery.isFetchingNextPage}
+              onPress={() => alertEventsQuery.fetchNextPage()}
+              style={{ alignItems: 'center', backgroundColor: colors.mutedCard, borderRadius: 12, marginTop: 4, opacity: alertEventsQuery.isFetchingNextPage ? 0.55 : 1, paddingVertical: 10 }}
+            >
+              <Text style={{ color: colors.badgeDefaultText, fontSize: 12, fontWeight: '800' }}>{alertEventsQuery.isFetchingNextPage ? '加载中...' : '加载更多'}</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
@@ -1506,59 +1763,6 @@ export default function OpsScreen() {
           </View>
         </View>
 
-        <View style={{ backgroundColor: colors.card, borderColor: colors.border, borderRadius: 18, borderWidth: 1, padding: 14 }}>
-          <SectionTitle title="告警事件" icon={BellRing} />
-          <View style={{ gap: 10, marginTop: 12 }}>
-            {alertEventsQuery.isLoading ? <Text style={{ color: colors.subtext }}>正在加载告警...</Text> : null}
-            {alertEvents.map((item, index) => {
-              const severity = textOrDash(firstTextValue(item, ['severity', 'level']));
-              const status = textOrDash(item.status);
-              const title = textOrDash(firstTextValue(item, ['title']), item.message, item.error_message, '告警事件');
-              const description = textOrDash(firstTextValue(item, ['description', 'reason']));
-              const isResolved = status.toLowerCase() === 'resolved' || Boolean(item.resolved_at);
-              const firedAt = firstTextValue(item, ['fired_at', 'firedAt']) ?? item.created_at;
-              const resolvedAt = firstTextValue(item, ['resolved_at', 'resolvedAt']);
-              const displayStatus = formatAlertStatus(status, resolvedAt);
-              const dimensions = formatDimensions(isRecord(item) ? item.dimensions : undefined);
-              const emailSent = isRecord(item) && item.email_sent !== undefined ? (isTruthyValue(item.email_sent) ? '已发送' : '已忽略') : '-';
-
-              return (
-                <View key={`${item.id ?? index}`} style={{ backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                  <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'space-between' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }}>{title}</Text>
-                      <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>
-                        {formatKnownTime(firedAt)} · {severity} · {displayStatus}
-                      </Text>
-                      {description !== '--' ? (
-                        <Text style={{ color: colors.subtext, fontSize: 12, lineHeight: 18, marginTop: 5 }}>{description}</Text>
-                      ) : null}
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                        <InfoTile label="时间" value={formatKnownTime(firedAt)} />
-                        <InfoTile label="级别" value={severity} tone={['P0', 'P1'].includes(severity) ? 'danger' : 'default'} />
-                        <InfoTile label="平台" value={firstTextValue(item, ['platform', 'provider']) ?? '-'} />
-                        <InfoTile label="规则 ID" value={textOrDash(firstTextValue(item, ['rule_id', 'ruleId']))} />
-                        <InfoTile label="标题" value={title} />
-                        <InfoTile label="持续时间" value={formatDurationBetween(firedAt, resolvedAt)} />
-                        <InfoTile label="维度" value={dimensions} />
-                        <InfoTile label="邮件已发送" value={emailSent} />
-                      </View>
-                    </View>
-                    {item.id && !isResolved ? (
-                      <Pressable
-                        style={{ alignSelf: 'flex-start', backgroundColor: colors.successBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 }}
-                        onPress={() => resolveAlertMutation.mutate(item.id as number | string)}
-                      >
-                        <Text style={{ color: colors.success, fontSize: 11, fontWeight: '800' }}>解决</Text>
-                      </Pressable>
-                    ) : null}
-                  </View>
-                </View>
-              );
-            })}
-            {!alertEventsQuery.isLoading && alertEvents.length === 0 ? <Text style={{ color: colors.subtext }}>暂无告警事件。</Text> : null}
-          </View>
-        </View>
       </ScreenShell>
     </>
   );

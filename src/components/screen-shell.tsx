@@ -5,6 +5,7 @@ import type { Edge } from 'react-native-safe-area-context';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 
 import { IconBadge } from '@/src/components/icon-badge';
+import { DEFAULT_AUTO_REFRESH_INTERVAL_MS, useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { useAppTheme } from '@/src/lib/theme';
 
 type ScreenShellProps = PropsWithChildren<{
@@ -21,6 +22,7 @@ type ScreenShellProps = PropsWithChildren<{
   contentGapClassName?: string;
   refreshing?: boolean;
   onRefresh?: () => void | Promise<void>;
+  autoRefreshInterval?: number | false;
   safeAreaEdges?: Edge[];
 }>;
 
@@ -93,9 +95,15 @@ export function ScreenShell({
   contentGapClassName = 'mt-4 gap-4',
   refreshing = false,
   onRefresh,
+  autoRefreshInterval = DEFAULT_AUTO_REFRESH_INTERVAL_MS,
   safeAreaEdges = ['top', 'bottom'],
 }: ScreenShellProps) {
   const colors = useAppTheme();
+  useAutoRefresh(onRefresh, {
+    enabled: autoRefreshInterval !== false,
+    intervalMs: autoRefreshInterval === false ? DEFAULT_AUTO_REFRESH_INTERVAL_MS : autoRefreshInterval,
+    refreshing,
+  });
 
   if (!scroll) {
     return (

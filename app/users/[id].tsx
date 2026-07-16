@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { useAppTheme } from '@/src/lib/theme';
 import { getDashboardSnapshot, getUsageStats, getUser, listUserApiKeys, updateUserBalance, updateUserStatus } from '@/src/services/admin';
 import type { AdminApiKey, BalanceOperation } from '@/src/types/admin';
@@ -323,6 +324,17 @@ export default function UserDetailScreen() {
       return keyword ? haystack.includes(keyword) : true;
     });
   }, [apiKeys, searchText]);
+  const isRefreshing = userQuery.isRefetching || apiKeysQuery.isRefetching || usageStatsQuery.isRefetching || usageSnapshotQuery.isRefetching;
+
+  function refreshAll() {
+    void userQuery.refetch();
+    void apiKeysQuery.refetch();
+    void usageStatsQuery.refetch();
+    void usageSnapshotQuery.refetch();
+  }
+
+  useAutoRefresh(refreshAll, { refreshing: isRefreshing });
+
   const trendPoints = (usageSnapshotQuery.data?.trend ?? []).map((item) => ({
     label: rangeKey === '24h' ? item.date.slice(11, 13) : item.date.slice(5, 10),
     value: item.total_tokens,

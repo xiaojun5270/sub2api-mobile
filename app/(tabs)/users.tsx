@@ -7,6 +7,7 @@ import { FlatList, Pressable, RefreshControl, Text, TextInput, View } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
+import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { IconBadge } from '@/src/components/icon-badge';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
 import { queryClient } from '@/src/lib/query-client';
@@ -191,6 +192,16 @@ export default function UsersScreen() {
   );
 
   const errorMessage = getErrorMessage(usersQuery.error);
+  const isRefreshing = usersQuery.isRefetching || usageQueries.some((query) => query.isRefetching);
+
+  function refreshAll() {
+    void usersQuery.refetch();
+    usageQueries.forEach((query) => {
+      void query.refetch();
+    });
+  }
+
+  useAutoRefresh(refreshAll, { intervalMs: 60_000, refreshing: isRefreshing });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
@@ -270,7 +281,7 @@ export default function UsersScreen() {
             data={users}
             keyExtractor={(item) => `${item.id}`}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={usersQuery.isRefetching} onRefresh={() => void usersQuery.refetch()} tintColor={colors.primary} />}
+            refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
             contentContainerStyle={{ paddingBottom: 8, gap: 12, flexGrow: users.length === 0 ? 1 : 0 }}
             ListEmptyComponent={
               <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 16 }}>

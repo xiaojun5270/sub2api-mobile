@@ -1150,6 +1150,14 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     },
   });
 
+  const isRefreshing = accountsQuery.isRefetching || todayStatsQuery.isRefetching || totalStatsQuery.isRefetching;
+
+  function refreshAll() {
+    void accountsQuery.refetch();
+    void todayStatsQuery.refetch();
+    void totalStatsQuery.refetch();
+  }
+
   const todayByAccountId = useMemo(() => {
     const next = new Map<number, AccountTodaySummary>();
     items.forEach((account) => {
@@ -1953,6 +1961,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       subtitleLines={2}
       variant="minimal"
       scroll={false}
+      refreshing={isRefreshing}
+      onRefresh={refreshAll}
       safeAreaEdges={safeAreaEdges}
       bottomInsetClassName="pb-6"
       contentGapClassName="mt-2 gap-2"
@@ -1964,11 +1974,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={accountsQuery.isRefetching || todayStatsQuery.isRefetching} onRefresh={() => {
-          void accountsQuery.refetch();
-          void todayStatsQuery.refetch();
-          void totalStatsQuery.refetch();
-        }} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-2" />}

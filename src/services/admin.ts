@@ -25,6 +25,8 @@ import type {
   GroupListParams,
   GroupRequest,
   GroupUsageSummary,
+  OpsAlertEvent,
+  OpsAlertEventsParams,
   OpsDashboardOverview,
   OpsDashboardSnapshot,
   OpsMetricPoint,
@@ -1738,11 +1740,16 @@ export function cleanupOpsSystemLogs() {
   });
 }
 
-export function getOpsAlertEvents(params: OpsQueryParams = {}) {
-  return adminFetchWithOptionalQuery<PaginatedData<OpsRecord>>('/api/v1/admin/ops/alert-events', params);
+export async function getOpsAlertEvents(params: OpsAlertEventsParams = {}) {
+  const payload = await adminFetch<unknown>(`/api/v1/admin/ops/alert-events${buildQuery(params)}`);
+  return extractItems<OpsAlertEvent>(payload, ['items', 'events', 'alert_events', 'alertEvents']);
 }
 
-export function updateOpsAlertEventStatus(eventId: number | string, status: string) {
+export function getOpsAlertEvent(eventId: number | string) {
+  return adminFetch<OpsAlertEvent>(`/api/v1/admin/ops/alert-events/${eventId}`);
+}
+
+export function updateOpsAlertEventStatus(eventId: number | string, status: 'resolved' | 'manual_resolved') {
   return adminFetch(`/api/v1/admin/ops/alert-events/${eventId}/status`, {
     method: 'PUT',
     body: JSON.stringify({ status }),

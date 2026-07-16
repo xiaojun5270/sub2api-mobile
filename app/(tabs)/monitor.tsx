@@ -24,6 +24,7 @@ import { BarChartCard } from '@/src/components/bar-chart-card';
 import { DonutChartCard } from '@/src/components/donut-chart-card';
 import { IconBadge } from '@/src/components/icon-badge';
 import { LineTrendChart } from '@/src/components/line-trend-chart';
+import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
@@ -394,20 +395,30 @@ function StatCard({
         borderWidth: 1,
         elevation: 2,
         flex: 1,
-        minHeight: 126,
-        padding: 14,
+        minHeight: 80,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         shadowColor: colors.mode === 'dark' ? '#000000' : '#64748b',
-        shadowOffset: { width: 0, height: 4 },
+        shadowOffset: { width: 0, height: 3 },
         shadowOpacity: colors.mode === 'dark' ? 0.2 : 0.08,
-        shadowRadius: 10,
+        shadowRadius: 7,
       }}
     >
-      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 9 }}>
-        <IconBadge icon={icon} tone={tone} containerSize={36} size={17} />
-        <Text numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 12, fontWeight: '600' }}>{title}</Text>
+      <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7, minHeight: 28 }}>
+        <IconBadge icon={icon} tone={tone} containerSize={28} size={14} />
+        <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 11, fontWeight: '600' }}>{title}</Text>
+        {detail ? (
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            numberOfLines={1}
+            style={{ color: palette.detail, flexShrink: 1, fontSize: 10, fontWeight: '600', lineHeight: 13, maxWidth: '48%', textAlign: 'right' }}
+          >
+            {detail}
+          </Text>
+        ) : null}
       </View>
-      <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={{ color: colors.text, fontSize: 23, fontWeight: '800', lineHeight: 29, marginTop: 9 }}>{value}</Text>
-      {detail ? <Text numberOfLines={1} style={{ color: palette.detail, fontSize: 11, fontWeight: '600', lineHeight: 15, marginTop: 5 }}>{detail}</Text> : null}
+      <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={{ color: colors.text, fontSize: 20, fontWeight: '800', lineHeight: 24, marginTop: 4 }}>{value}</Text>
     </View>
   );
 }
@@ -698,6 +709,7 @@ export default function MonitorScreen() {
   const totalOutputTokens = useMemo(() => trend.reduce((sum, item) => sum + item.output_tokens, 0), [trend]);
   const totalCacheReadTokens = useMemo(() => trend.reduce((sum, item) => sum + item.cache_read_tokens, 0), [trend]);
   const isRefreshing = statsQuery.isRefetching || opsOverviewQuery.isRefetching || settingsQuery.isRefetching || accountsQuery.isRefetching || trendQuery.isRefetching || modelsQuery.isRefetching || snapshotQuery.isRefetching;
+  useAutoRefresh(refetchAll, { refreshing: isRefreshing });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
