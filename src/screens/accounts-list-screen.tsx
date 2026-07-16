@@ -33,6 +33,7 @@ import type { Edge } from 'react-native-safe-area-context';
 
 import { ListCard } from '@/src/components/list-card';
 import { ScreenShell } from '@/src/components/screen-shell';
+import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { useDebouncedValue } from '@/src/hooks/use-debounced-value';
 import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
@@ -1158,6 +1159,8 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     void totalStatsQuery.refetch();
   }
 
+  const { isAutoRefreshing } = useAutoRefresh(refreshAll, { refreshing: isRefreshing });
+
   const todayByAccountId = useMemo(() => {
     const next = new Map<number, AccountTodaySummary>();
     items.forEach((account) => {
@@ -1961,8 +1964,6 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       subtitleLines={2}
       variant="minimal"
       scroll={false}
-      refreshing={isRefreshing}
-      onRefresh={refreshAll}
       safeAreaEdges={safeAreaEdges}
       bottomInsetClassName="pb-6"
       contentGapClassName="mt-2 gap-2"
@@ -1974,7 +1975,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         renderItem={renderItem}
         keyExtractor={(item) => `${item.id}`}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing && !isAutoRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-2" />}

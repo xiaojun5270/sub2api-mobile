@@ -407,18 +407,13 @@ function StatCard({
       <View style={{ alignItems: 'center', flexDirection: 'row', gap: 7, minHeight: 28 }}>
         <IconBadge icon={icon} tone={tone} containerSize={28} size={14} />
         <Text adjustsFontSizeToFit minimumFontScale={0.82} numberOfLines={1} style={{ color: colors.subtext, flex: 1, fontSize: 11, fontWeight: '600' }}>{title}</Text>
-        {detail ? (
-          <Text
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-            numberOfLines={1}
-            style={{ color: palette.detail, flexShrink: 1, fontSize: 10, fontWeight: '600', lineHeight: 13, maxWidth: '48%', textAlign: 'right' }}
-          >
-            {detail}
-          </Text>
-        ) : null}
       </View>
-      <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={{ color: colors.text, fontSize: 20, fontWeight: '800', lineHeight: 24, marginTop: 4 }}>{value}</Text>
+      <Text adjustsFontSizeToFit minimumFontScale={0.78} numberOfLines={1} style={{ color: colors.text, fontSize: 17, fontWeight: '800', lineHeight: 21, marginTop: 2 }}>{value}</Text>
+      {detail ? (
+        <Text adjustsFontSizeToFit minimumFontScale={0.72} numberOfLines={1} style={{ color: palette.detail, fontSize: 10, fontWeight: '600', lineHeight: 12, marginTop: 1 }}>
+          {detail}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -709,7 +704,7 @@ export default function MonitorScreen() {
   const totalOutputTokens = useMemo(() => trend.reduce((sum, item) => sum + item.output_tokens, 0), [trend]);
   const totalCacheReadTokens = useMemo(() => trend.reduce((sum, item) => sum + item.cache_read_tokens, 0), [trend]);
   const isRefreshing = statsQuery.isRefetching || opsOverviewQuery.isRefetching || settingsQuery.isRefetching || accountsQuery.isRefetching || trendQuery.isRefetching || modelsQuery.isRefetching || snapshotQuery.isRefetching;
-  useAutoRefresh(refetchAll, { refreshing: isRefreshing });
+  const { isAutoRefreshing } = useAutoRefresh(refetchAll, { refreshing: isRefreshing });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
@@ -717,7 +712,7 @@ export default function MonitorScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: 110 }}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refetchAll()} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={isRefreshing && !isAutoRefreshing} onRefresh={() => void refetchAll()} tintColor={colors.primary} />}
       >
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
           <View style={{ flex: 1, flexDirection: 'row', gap: 12 }}>

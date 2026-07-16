@@ -201,7 +201,7 @@ export default function UsersScreen() {
     });
   }
 
-  useAutoRefresh(refreshAll, { intervalMs: 60_000, refreshing: isRefreshing });
+  const { isAutoRefreshing } = useAutoRefresh(refreshAll, { intervalMs: 60_000, refreshing: isRefreshing });
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
@@ -281,7 +281,7 @@ export default function UsersScreen() {
             data={users}
             keyExtractor={(item) => `${item.id}`}
             showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
+            refreshControl={<RefreshControl refreshing={isRefreshing && !isAutoRefreshing} onRefresh={refreshAll} tintColor={colors.primary} />}
             contentContainerStyle={{ paddingBottom: 8, gap: 12, flexGrow: users.length === 0 ? 1 : 0 }}
             ListEmptyComponent={
               <View style={{ backgroundColor: colors.card, borderRadius: 18, padding: 16 }}>

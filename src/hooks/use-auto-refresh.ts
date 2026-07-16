@@ -1,5 +1,5 @@
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 type RefreshCallback = (() => void | Promise<void>) | undefined;
@@ -20,12 +20,37 @@ export function useAutoRefresh(
     refreshing = false,
   }: AutoRefreshOptions = {}
 ) {
+  const [isAutoRefreshing, setIsAutoRefreshing] = useState(false);
   const callbackRef = useRef(onRefresh);
   const refreshingRef = useRef(refreshing);
   const hasFocusedRef = useRef(false);
+  const autoRefreshActiveRef = useRef(false);
+  const refreshObservedRef = useRef(false);
+  const settleTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hasRefreshCallback = Boolean(onRefresh);
   callbackRef.current = onRefresh;
   refreshingRef.current = refreshing;
+
+  const finishAutoRefresh = useCallback(() => {
+    autoRefreshActiveRef.current = false;
+    refreshObservedRef.current = false;
+    if (settleTimeoutRef.current) clearTimeout(settleTimeoutRef.current);
+    settleTimeoutRef.current = undefined;
+    setIsAutoRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefreshActiveRef.current) return;
+
+    if (refreshing) {
+      refreshObservedRef.current = true;
+      if (settleTimeoutRef.current) clearTimeout(settleTimeoutRef.current);
+      settleTimeoutRef.current = undefined;
+      return;
+    }
+
+    if (refreshObservedRef.current) finishAutoRefresh();
+  }, [finishAutoRefresh, refreshing]);
 
   useFocusEffect(
     useCallback(() => {
@@ -37,10 +62,18 @@ export function useAutoRefresh(
       const refresh = () => {
         if (refreshingRef.current || !callbackRef.current) return;
 
+        autoRefreshActiveRef.current = true;
+        refreshObservedRef.current = false;
+        setIsAutoRefreshing(true);
+        if (settleTimeoutRef.current) clearTimeout(settleTimeoutRef.current);
+        settleTimeoutRef.current = setTimeout(() => {
+          if (!refreshObservedRef.current) finishAutoRefresh();
+        }, 1_500);
+
         try {
           void Promise.resolve(callbackRef.current()).catch(() => undefined);
         } catch {
-          return;
+          finishAutoRefresh();
         }
       };
 
@@ -77,7 +110,10 @@ export function useAutoRefresh(
       return () => {
         stopInterval();
         appStateSubscription.remove();
+        finishAutoRefresh();
       };
-    }, [enabled, hasRefreshCallback, intervalMs])
+    }, [enabled, finishAutoRefresh, hasRefreshCallback, intervalMs])
   );
+
+  return { isAutoRefreshing };
 }

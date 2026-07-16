@@ -99,7 +99,7 @@ export function ScreenShell({
   safeAreaEdges = ['top', 'bottom'],
 }: ScreenShellProps) {
   const colors = useAppTheme();
-  useAutoRefresh(onRefresh, {
+  const { isAutoRefreshing } = useAutoRefresh(onRefresh, {
     enabled: autoRefreshInterval !== false,
     intervalMs: autoRefreshInterval === false ? DEFAULT_AUTO_REFRESH_INTERVAL_MS : autoRefreshInterval,
     refreshing,
@@ -121,7 +121,7 @@ export function ScreenShell({
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} /> : undefined}
+        refreshControl={onRefresh ? <RefreshControl refreshing={refreshing && !isAutoRefreshing} onRefresh={onRefresh} tintColor={colors.primary} /> : undefined}
       >
         <View className={`${horizontalInsetClassName} ${bottomInsetClassName}`}>
           <ScreenHeader title={title} subtitle={subtitle} icon={icon} titleAside={titleAside} right={right} subtitleLines={subtitleLines} variant={variant} />
