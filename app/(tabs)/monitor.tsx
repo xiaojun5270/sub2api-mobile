@@ -692,8 +692,7 @@ export default function MonitorScreen() {
   const totalAccounts = stats?.total_accounts ?? accountsQuery.data?.total ?? accounts.length;
   const aggregatedErrorAccounts = stats?.error_accounts ?? 0;
   const errorAccounts = Math.max(aggregatedErrorAccounts, currentPageErrorAccounts);
-  const currentPageNormalAccounts = accounts.filter(isAccountNormal).length;
-  const normalAccounts = stats?.normal_accounts ?? currentPageNormalAccounts;
+  const normalAccounts = accounts.filter(isAccountNormal).length;
   const latestTrendPoints = trend.slice(-6).reverse();
   const selectedTokenTotal = trend.reduce((sum, item) => sum + item.total_tokens, 0);
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
@@ -865,7 +864,7 @@ export default function MonitorScreen() {
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
                     <Text style={{ fontSize: 11, color: colors.subtext }}>正常</Text>
-                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(normalAccounts)}</Text>
+                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{accountsQuery.isPending ? '--' : formatNumber(normalAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.dangerBg, borderRadius: 14, padding: 12 }}>
                     <Text style={{ fontSize: 11, color: colors.danger }}>异常</Text>
@@ -876,7 +875,7 @@ export default function MonitorScreen() {
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{accountsQuery.isPending ? '--' : formatNumber(currentPageLimitedAccounts)}</Text>
                   </View>
                 </View>
-                <Text style={{ marginTop: 10, fontSize: 12, color: colors.subtext }}>总数 / 正常 / 异常优先使用后端聚合字段；限流与繁忙基于当前页账号列表。点击进入账号清单。</Text>
+                <Text style={{ marginTop: 10, fontSize: 12, color: colors.subtext }}>正常、限流与繁忙基于完整账号清单状态；总数与异常使用后端汇总。点击进入账号清单。</Text>
               </Pressable>
             </Section>
 
