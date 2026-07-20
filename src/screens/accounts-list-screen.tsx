@@ -6,7 +6,6 @@ import { router } from 'expo-router';
 import {
   Activity,
   AlertCircle,
-  ArrowDownUp,
   CircleCheck,
   Clock3,
   Cpu,
@@ -16,6 +15,7 @@ import {
   Hash,
   KeyRound,
   Pencil,
+  Plus,
   Power,
   RefreshCw,
   RotateCcw,
@@ -39,7 +39,6 @@ import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatCompactNumber, formatTokenValue } from '@/src/lib/formatters';
 import { type AppTheme, useAppTheme } from '@/src/lib/theme';
 import {
-  batchClearAccountErrors,
   batchRefreshAccounts,
   deleteAccount,
   exportAccountsData,
@@ -60,7 +59,6 @@ import {
 import type { AccountTodayStats, AdminAccount } from '@/src/types/admin';
 
 type AccountStatusFilter = 'all' | 'active' | 'paused' | 'error' | 'limited';
-type UsageSort = 'usage-desc' | 'usage-asc';
 type AccountVisualStatus = {
   filterKey: AccountStatusFilter;
   label: '正常' | '暂停' | '异常' | '限流';
@@ -958,7 +956,6 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   const colors = useAppTheme();
   const [searchText, setSearchText] = useState('');
   const [filter, setFilter] = useState<AccountStatusFilter>('all');
-  const [usageSort, setUsageSort] = useState<UsageSort>('usage-desc');
   const [testingAccountId, setTestingAccountId] = useState<number | null>(null);
   const [testFeedbackByAccountId, setTestFeedbackByAccountId] = useState<Record<number, string>>({});
   const [expandedModelAccountId, setExpandedModelAccountId] = useState<number | null>(null);
@@ -1040,9 +1037,23 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
   });
 
-  const batchClearErrorMutation = useMutation({
-    mutationFn: (accountIds: number[]) => batchClearAccountErrors(accountIds),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['accounts'] }),
+  const batchDeleteErrorMutation = useMutation({
+    mutationFn: async (accountIds: number[]) => {
+      const results = await Promise.allSettled(accountIds.map((accountId) => deleteAccount(accountId)));
+      return {
+        deleted: results.filter((result) => result.status === 'fulfilled').length,
+        failed: results.filter((result) => result.status === 'rejected').length,
+      };
+    },
+    onSuccess: ({ deleted, failed }) => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['monitor-stats'] });
+      void queryClient.invalidateQueries({ queryKey: ['manage-dashboard-stats'] });
+      Alert.alert(
+        failed > 0 ? '部分删除完成' : '删除完成',
+        failed > 0 ? `成功删除 ${deleted} 个异常账号，${failed} 个删除失败。` : `已删除 ${deleted} 个异常账号。`
+      );
+    },
   });
 
   const exportDataMutation = useMutation({
@@ -1210,38 +1221,33 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       return true;
     });
 
-    const sorted = [...statusMatched].sort((left, right) => {
-      const requestsLeft = todayByAccountId.get(left.id)?.requests ?? 0;
-      const requestsRight = todayByAccountId.get(right.id)?.requests ?? 0;
-      if (requestsLeft === requestsRight) {
-        const tokensLeft = todayByAccountId.get(left.id)?.tokens ?? 0;
-        const tokensRight = todayByAccountId.get(right.id)?.tokens ?? 0;
-        return tokensLeft - tokensRight;
-      }
-      if (usageSort === 'usage-asc') return requestsLeft - requestsRight;
-      return requestsRight - requestsLeft;
-    });
-
-    return sorted;
-  }, [filter, items, keyword, todayByAccountId, usageSort]);
+    return statusMatched;
+  }, [filter, items, keyword]);
+  const errorAccountIds = useMemo(
+    () => items.filter((item) => getAccountVisualStatus(item).filterKey === 'error').map((item) => item.id),
+    [items]
+  );
   const errorMessage = accountsQuery.error instanceof Error ? accountsQuery.error.message : '';
 
-  function confirmBatch(action: 'refresh' | 'clear-error') {
-    const accountIds = filteredItems.map((item) => item.id);
+  function confirmBatch(action: 'refresh' | 'delete-errors') {
+    const accountIds = action === 'refresh' ? filteredItems.map((item) => item.id) : errorAccountIds;
     if (accountIds.length === 0) return;
 
-    const title = action === 'refresh' ? '批量刷新账号' : '批量清除错误';
-    const message = `确认对当前筛选的 ${accountIds.length} 个账号执行该操作吗？`;
+    const title = action === 'refresh' ? '批量刷新账号' : '批量删除异常账号';
+    const message = action === 'refresh'
+      ? `确认刷新当前筛选的 ${accountIds.length} 个账号吗？`
+      : `确认删除 ${accountIds.length} 个异常账号吗？删除后无法恢复。`;
 
     Alert.alert(title, message, [
       { text: '取消', style: 'cancel' },
       {
         text: '确认',
+        style: action === 'delete-errors' ? 'destructive' : 'default',
         onPress: () => {
           if (action === 'refresh') {
             batchRefreshMutation.mutate(accountIds);
           } else {
-            batchClearErrorMutation.mutate(accountIds);
+            batchDeleteErrorMutation.mutate(accountIds);
           }
         },
       },
@@ -1526,35 +1532,26 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
           </View>
 
           <View className="mt-3 flex-row gap-2">
-            {([
-              { key: 'usage-desc', label: '请求高→低' },
-              { key: 'usage-asc', label: '请求低→高' },
-            ] as Array<{ key: UsageSort; label: string }>).map((item) => {
-              const active = usageSort === item.key;
-              return (
-                <Pressable
-                  key={item.key}
-                  onPress={() => setUsageSort(item.key)}
-                  style={{
-                    alignItems: 'center',
-                    backgroundColor: active ? colors.dark : colors.mutedCard,
-                    borderColor: active ? colors.dark : colors.border,
-                    borderRadius: 999,
-                    borderWidth: 1,
-                    flex: 1,
-                    flexDirection: 'row',
-                    gap: 6,
-                    justifyContent: 'center',
-                    minWidth: 0,
-                    paddingHorizontal: 8,
-                    paddingVertical: 10,
-                  }}
-                >
-                  <ArrowDownUp color={active ? colors.primaryText : colors.badgeDefaultText} size={13} />
-                  <Text adjustsFontSizeToFit numberOfLines={1} style={{ color: active ? colors.primaryText : colors.badgeDefaultText, fontSize: 12, fontWeight: '700' }}>{item.label}</Text>
-                </Pressable>
-              );
-            })}
+            <Pressable
+              onPress={() => router.push('/accounts/create')}
+              style={{
+                alignItems: 'center',
+                backgroundColor: colors.primary,
+                borderColor: colors.primary,
+                borderRadius: 999,
+                borderWidth: 1,
+                flex: 1,
+                flexDirection: 'row',
+                gap: 6,
+                justifyContent: 'center',
+                minWidth: 0,
+                paddingHorizontal: 8,
+                paddingVertical: 10,
+              }}
+            >
+              <Plus color={colors.primaryText} size={14} />
+              <Text style={{ color: colors.primaryText, fontSize: 12, fontWeight: '800' }}>添加账号</Text>
+            </Pressable>
             <Pressable
               onPress={() => setFilter('limited')}
               style={{
@@ -1591,13 +1588,13 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
               </Text>
             </Pressable>
             <Pressable
-              disabled={filteredItems.length === 0 || batchClearErrorMutation.isPending}
-              onPress={() => confirmBatch('clear-error')}
-              style={{ alignItems: 'center', backgroundColor: colors.errorBg, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: filteredItems.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
+              disabled={errorAccountIds.length === 0 || batchDeleteErrorMutation.isPending}
+              onPress={() => confirmBatch('delete-errors')}
+              style={{ alignItems: 'center', backgroundColor: colors.errorBg, borderRadius: 999, flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center', opacity: errorAccountIds.length === 0 ? 0.6 : 1, paddingHorizontal: 12, paddingVertical: 11 }}
             >
-              <ShieldOff color={colors.errorText} size={13} />
+              <Trash2 color={colors.errorText} size={13} />
               <Text style={{ color: colors.errorText, fontSize: 12, fontWeight: '800' }}>
-                {batchClearErrorMutation.isPending ? '清理中...' : '批量清错'}
+                {batchDeleteErrorMutation.isPending ? '删除中...' : '批量错误删除'}
               </Text>
             </Pressable>
           </View>
@@ -1650,7 +1647,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         </View>
       </View>
     ),
-    [batchClearErrorMutation.isPending, batchRefreshMutation.isPending, colors, exportDataMutation.isPending, filter, filteredItems, importDataMutation.isPending, summary.active, summary.errors, summary.limited, summary.paused, summary.total, toolsMessage, toolsOpen, usageSort]
+    [batchDeleteErrorMutation.isPending, batchRefreshMutation.isPending, colors, errorAccountIds, exportDataMutation.isPending, filter, filteredItems, importDataMutation.isPending, summary.active, summary.errors, summary.limited, summary.paused, summary.total, toolsMessage, toolsOpen]
   );
 
   const renderItem = useCallback(
@@ -1956,7 +1953,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
   return (
     <ScreenShell
       title="账号清单"
-      subtitle="查看名称、平台&类型、请求次数、消费金额、token消耗，并支持筛选与排序。"
+      subtitle="查看名称、平台&类型、请求次数、消费金额、token消耗，并支持筛选与管理。"
       icon={KeyRound}
       titleAside={(
         <Text style={{ color: colors.subtext, fontSize: 11 }}>更接近网页后台的账号视图。</Text>

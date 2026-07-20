@@ -30,6 +30,7 @@ import { formatTokenValue } from '@/src/lib/formatters';
 import { useAppTheme } from '@/src/lib/theme';
 import { getAdminSettings, getDashboardModels, getDashboardSnapshot, getDashboardStats, getDashboardTrend, getOpsDashboardOverview, listAllAccounts } from '@/src/services/admin';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
+import type { AdminAccount } from '@/src/types/admin';
 
 const { useSnapshot } = require('valtio/react');
 
@@ -100,6 +101,22 @@ async function writeStoredMonitorRangeKey(value: RangeKey) {
 
 function hasAccountError(account: { status?: string; error?: string | null; error_message?: string | null }) {
   return Boolean(account.status === 'error' || account.error_message || account.error);
+}
+
+function isAccountNormal(account: AdminAccount) {
+  if (hasAccountError(account) || isAccountRateLimited(account)) return false;
+
+  const status = `${account.status ?? ''}`.toLowerCase();
+  if (['inactive', 'disabled', 'paused', 'stop', 'stopped'].includes(status) || account.schedulable === false) return false;
+
+  const extraPause = account.extra?.temp_unschedulable_until ?? account.extra?.tempUnschedulableUntil;
+  const hasFuturePause = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim()) return false;
+    const timestamp = new Date(value).getTime();
+    return Number.isFinite(timestamp) && timestamp > Date.now();
+  };
+
+  return !hasFuturePause(account.temp_unschedulable_until) && !hasFuturePause(extraPause);
 }
 
 function getDateRange(rangeKey: RangeKey) {
@@ -675,7 +692,8 @@ export default function MonitorScreen() {
   const totalAccounts = stats?.total_accounts ?? accountsQuery.data?.total ?? accounts.length;
   const aggregatedErrorAccounts = stats?.error_accounts ?? 0;
   const errorAccounts = Math.max(aggregatedErrorAccounts, currentPageErrorAccounts);
-  const healthyAccounts = stats?.normal_accounts ?? Math.max(totalAccounts - errorAccounts, 0);
+  const currentPageNormalAccounts = accounts.filter(isAccountNormal).length;
+  const normalAccounts = stats?.normal_accounts ?? currentPageNormalAccounts;
   const latestTrendPoints = trend.slice(-6).reverse();
   const selectedTokenTotal = trend.reduce((sum, item) => sum + item.total_tokens, 0);
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
@@ -828,7 +846,7 @@ export default function MonitorScreen() {
 
             <Section
               title="账号概览"
-              subtitle="总数、健康、异常和限流状态一览"
+              subtitle="总数、正常、异常和限流状态一览"
               icon={ShieldCheck}
               right={(
                 <Pressable
@@ -846,8 +864,8 @@ export default function MonitorScreen() {
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(totalAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.mutedCard, borderRadius: 14, padding: 12 }}>
-                    <Text style={{ fontSize: 11, color: colors.subtext }}>健康</Text>
-                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(healthyAccounts)}</Text>
+                    <Text style={{ fontSize: 11, color: colors.subtext }}>正常</Text>
+                    <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{formatNumber(normalAccounts)}</Text>
                   </View>
                   <View style={{ flex: 1, backgroundColor: colors.dangerBg, borderRadius: 14, padding: 12 }}>
                     <Text style={{ fontSize: 11, color: colors.danger }}>异常</Text>
@@ -858,7 +876,7 @@ export default function MonitorScreen() {
                     <Text style={{ marginTop: 6, fontSize: 18, fontWeight: '700', color: colors.text }}>{accountsQuery.isPending ? '--' : formatNumber(currentPageLimitedAccounts)}</Text>
                   </View>
                 </View>
-                <Text style={{ marginTop: 10, fontSize: 12, color: colors.subtext }}>总数 / 健康 / 异常优先使用后端聚合字段；限流与繁忙基于当前页账号列表。点击进入账号清单。</Text>
+                <Text style={{ marginTop: 10, fontSize: 12, color: colors.subtext }}>总数 / 正常 / 异常优先使用后端聚合字段；限流与繁忙基于当前页账号列表。点击进入账号清单。</Text>
               </Pressable>
             </Section>
 
@@ -887,13 +905,13 @@ export default function MonitorScreen() {
             />
 
             <DonutChartCard
-              title="账号健康"
-              subtitle="健康、繁忙、限流、异常分布"
+              title="账号状态"
+              subtitle="正常、繁忙、限流、异常分布"
               centerLabel="总账号"
               centerValue={formatNumber(totalAccounts)}
               icon={PieChart}
               segments={[
-                { label: '健康', value: healthyAccounts, color: colors.success },
+                { label: '正常', value: normalAccounts, color: colors.success },
                 { label: '繁忙', value: currentPageBusyAccounts, color: '#f59e0b' },
                 { label: '限流', value: currentPageLimitedAccounts, color: '#64748b' },
                 { label: '异常', value: errorAccounts, color: '#f97316' },
