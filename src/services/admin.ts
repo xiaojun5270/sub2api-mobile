@@ -1219,6 +1219,78 @@ export function applyAccountOAuthCredentials(
   });
 }
 
+export type AccountAuthMethod = 'oauth' | 'setup-token';
+
+export function generateAccountAuthUrl(method: AccountAuthMethod, proxyId?: number | null) {
+  const path = method === 'oauth'
+    ? '/api/v1/admin/accounts/generate-auth-url'
+    : '/api/v1/admin/accounts/generate-setup-token-url';
+
+  return adminFetch<{ auth_url?: string; session_id?: string; [key: string]: unknown }>(path, {
+    method: 'POST',
+    body: JSON.stringify(proxyId ? { proxy_id: proxyId } : {}),
+  });
+}
+
+export function exchangeAccountAuthCode(
+  method: AccountAuthMethod,
+  body: { session_id?: string; code: string; proxy_id?: number | null }
+) {
+  const path = method === 'oauth'
+    ? '/api/v1/admin/accounts/exchange-code'
+    : '/api/v1/admin/accounts/exchange-setup-token-code';
+
+  return adminFetch<Record<string, unknown>>(path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function exchangeAccountCookieAuth(
+  method: AccountAuthMethod,
+  sessionKey: string,
+  proxyId?: number | null
+) {
+  const path = method === 'oauth'
+    ? '/api/v1/admin/accounts/cookie-auth'
+    : '/api/v1/admin/accounts/setup-token-cookie-auth';
+
+  return adminFetch<Record<string, unknown>>(path, {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: '',
+      code: sessionKey,
+      ...(proxyId ? { proxy_id: proxyId } : {}),
+    }),
+  });
+}
+
+export function generateOpenAiAuthUrl(proxyId?: number | null, redirectUri?: string) {
+  return adminFetch<{ auth_url?: string; session_id?: string; [key: string]: unknown }>(
+    '/api/v1/admin/openai/generate-auth-url',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        ...(proxyId ? { proxy_id: proxyId } : {}),
+        ...(redirectUri?.trim() ? { redirect_uri: redirectUri.trim() } : {}),
+      }),
+    }
+  );
+}
+
+export function exchangeOpenAiAuthCode(body: {
+  session_id: string;
+  code: string;
+  state: string;
+  redirect_uri?: string;
+  proxy_id?: number | null;
+}) {
+  return adminFetch<Record<string, unknown>>('/api/v1/admin/openai/exchange-code', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export function getAccountTempUnschedulable(accountId: number) {
   return adminFetch<Record<string, unknown>>(`/api/v1/admin/accounts/${accountId}/temp-unschedulable`);
 }
