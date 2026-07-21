@@ -164,18 +164,24 @@ function getUrlParameter(value: string, key: string) {
   const trimmed = value.trim();
   if (!trimmed) return '';
   try {
-    const url = trimmed.includes('?')
-      ? new URL(trimmed)
-      : new URL(`http://localhost/callback?${trimmed.replace(/^\?/, '')}`);
-    return url.searchParams.get(key)?.trim() ?? '';
+    const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed);
+    const candidate = trimmed.includes('?')
+      ? hasScheme
+        ? trimmed
+        : `http://${trimmed.replace(/^\/+/, '')}`
+      : `http://localhost/callback?${trimmed.replace(/^\?/, '')}`;
+    const parsed = new URL(candidate).searchParams.get(key)?.trim();
+    if (parsed) return parsed;
   } catch {
-    const match = trimmed.match(new RegExp(`[?&]${key}=([^&#]+)`));
-    if (!match?.[1]) return '';
-    try {
-      return decodeURIComponent(match[1]).trim();
-    } catch {
-      return match[1].trim();
-    }
+    // Fall through to regex parsing for partial or malformed callback URLs.
+  }
+
+  const match = trimmed.match(new RegExp(`[?&]${key}=([^&#]+)`));
+  if (!match?.[1]) return '';
+  try {
+    return decodeURIComponent(match[1]).trim();
+  } catch {
+    return match[1].trim();
   }
 }
 
@@ -533,6 +539,15 @@ function getErrorMessage(error: unknown) {
         return '服务返回格式异常，请确认后端接口可用。';
       case 'REQUEST_FAILED':
         return '请求失败，请检查服务地址、Token 和网络。';
+      case 'OPENAI_OAUTH_TOKEN_EXCHANGE_FAILED':
+        return '授权码兑换失败。请重新生成授权链接，重新授权后粘贴新的回调地址。';
+      case 'OPENAI_OAUTH_SESSION_NOT_FOUND':
+        return '授权会话已过期，请重新生成授权链接。';
+      case 'OPENAI_OAUTH_STATE_REQUIRED':
+      case 'OPENAI_OAUTH_INVALID_STATE':
+        return '授权 state 不匹配，请重新生成授权链接并再次授权。';
+      case 'OPENAI_OAUTH_TOKEN_REFRESH_FAILED':
+        return 'Refresh Token 验证失败，请确认 Token 类型和有效期。';
       default:
         return error.message;
     }
@@ -646,6 +661,17 @@ export default function CreateAdminAccountScreen() {
     setAuthState('');
     setAuthCode('');
     setSessionKey('');
+  }
+
+  function updateAuthorizationInput(value: string) {
+    if (!value.includes('code=')) {
+      setAuthCode(value);
+      return;
+    }
+
+    const parsed = parseAuthorizationInput(value, authState);
+    if (parsed.state) setAuthState(parsed.state);
+    setAuthCode(parsed.code || value);
   }
 
   function selectPlatform(nextPlatform: PlatformId) {
@@ -1138,7 +1164,7 @@ export default function CreateAdminAccountScreen() {
                       <FormField
                         label="授权链接或 Code"
                         multiline
-                        onChangeText={setAuthCode}
+                        onChangeText={updateAuthorizationInput}
                         placeholder="粘贴完整回调链接，或仅粘贴 code 参数"
                         required
                         value={authCode}
