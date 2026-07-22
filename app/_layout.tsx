@@ -8,6 +8,7 @@ import { useEffect } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import { HomeWidgetSync } from '@/src/components/home-widget-sync';
 import { queryClient } from '@/src/lib/query-client';
 import { useAppTheme } from '@/src/lib/theme';
 import { markPerformance } from '@/src/lib/performance';
@@ -75,50 +76,53 @@ export default function RootLayout() {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
-          <Stack initialRouteName="(tabs)" screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="login" />
-            <Stack.Screen
-              name="users/[id]"
-              options={getStackHeaderOptions('用户详情', '/users')}
-            />
-            <Stack.Screen
-              name="users/create-account"
-              options={getStackHeaderOptions('添加账号', '/users')}
-            />
-            <Stack.Screen
-              name="users/create-user"
-              options={getStackHeaderOptions('添加用户', '/users')}
-            />
-            <Stack.Screen
-              name="accounts/create"
-              options={getStackHeaderOptions('添加账号', '/manage')}
-            />
-            <Stack.Screen
-              name="accounts/overview"
-              options={getStackHeaderOptions('账号清单', '/manage')}
-            />
-            <Stack.Screen
-              name="accounts/[id]"
-              options={getStackHeaderOptions('账号详情', '/manage')}
-            />
-            <Stack.Screen
-              name="api-keys/index"
-              options={getStackHeaderOptions('API 密钥管理', '/manage')}
-            />
-            <Stack.Screen
-              name="groups/index"
-              options={getStackHeaderOptions('分组管理', '/manage')}
-            />
-            <Stack.Screen
-              name="usage-records/index"
-              options={getStackHeaderOptions('使用记录', '/manage')}
-            />
-            <Stack.Screen
-              name="ops/index"
-              options={getStackHeaderOptions('运维监控', '/manage')}
-            />
-          </Stack>
+          <>
+            <HomeWidgetSync />
+            <Stack initialRouteName="(tabs)" screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="login" />
+              <Stack.Screen
+                name="users/[id]"
+                options={getStackHeaderOptions('用户详情', '/users')}
+              />
+              <Stack.Screen
+                name="users/create-account"
+                options={getStackHeaderOptions('添加账号', '/users')}
+              />
+              <Stack.Screen
+                name="users/create-user"
+                options={getStackHeaderOptions('添加用户', '/users')}
+              />
+              <Stack.Screen
+                name="accounts/create"
+                options={getStackHeaderOptions('添加账号', '/manage')}
+              />
+              <Stack.Screen
+                name="accounts/overview"
+                options={getStackHeaderOptions('账号清单', '/manage')}
+              />
+              <Stack.Screen
+                name="accounts/[id]"
+                options={getStackHeaderOptions('账号详情', '/manage')}
+              />
+              <Stack.Screen
+                name="api-keys/index"
+                options={getStackHeaderOptions('API 密钥管理', '/manage')}
+              />
+              <Stack.Screen
+                name="groups/index"
+                options={getStackHeaderOptions('分组管理', '/manage')}
+              />
+              <Stack.Screen
+                name="usage-records/index"
+                options={getStackHeaderOptions('使用记录', '/manage')}
+              />
+              <Stack.Screen
+                name="ops/index"
+                options={getStackHeaderOptions('运维监控', '/manage')}
+              />
+            </Stack>
+          </>
         )}
       </QueryClientProvider>
     </GestureHandlerRootView>

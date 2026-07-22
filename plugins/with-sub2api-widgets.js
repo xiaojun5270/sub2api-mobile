@@ -159,6 +159,7 @@ function withSub2ApiIosFiles(config) {
     const appGroup = getIosAppGroupIdentifier(config);
 
     writeFile(path.join(root, projectName, 'Sub2ApiWidgetData.m'), iosNativeModuleTemplate(appGroup));
+    writeFile(path.join(root, projectName, 'Sub2ApiWidgetReloader.swift'), iosWidgetReloaderSwiftTemplate());
     writeFile(path.join(root, IOS_WIDGET_TARGET, `${IOS_WIDGET_TARGET}-Info.plist`), iosWidgetInfoPlistTemplate());
     writeFile(path.join(root, IOS_WIDGET_TARGET, `${IOS_WIDGET_TARGET}.entitlements`), iosWidgetEntitlementsTemplate(appGroup));
     writeFile(path.join(root, IOS_WIDGET_TARGET, `${IOS_WIDGET_TARGET}.swift`), iosWidgetSwiftTemplate(appGroup));
@@ -224,6 +225,7 @@ function withSub2ApiXcodeProject(config) {
 
     if (appTarget?.uuid) {
       addSourceFileOnce(project, `${projectName}/Sub2ApiWidgetData.m`, appTarget.uuid, projectName);
+      addSourceFileOnce(project, `${projectName}/Sub2ApiWidgetReloader.swift`, appTarget.uuid, projectName);
     }
 
     let widgetTargetUuid = findTargetUuid(project, IOS_WIDGET_TARGET);
@@ -267,7 +269,9 @@ function withSub2ApiXcodeProject(config) {
 
     if (appTarget?.uuid) {
       setTargetBuildSettings(project, appTarget.uuid, {
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: 'YES',
         CODE_SIGN_ENTITLEMENTS: `${projectName}/${projectName}.entitlements`,
+        SWIFT_VERSION: '5.0',
       });
     }
 
@@ -823,10 +827,35 @@ RCT_REMAP_METHOD(saveSnapshot,
 
   [defaults setObject:json forKey:@"${SNAPSHOT_KEY}"];
   [defaults synchronize];
+
+  Class reloader = NSClassFromString(@"Sub2ApiWidgetReloader");
+  SEL selector = NSSelectorFromString(@"reload");
+  if (reloader != nil && [reloader respondsToSelector:selector]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    [reloader performSelector:selector];
+#pragma clang diagnostic pop
+  }
+
   resolve([NSNull null]);
 }
 
 @end
+`;
+}
+
+function iosWidgetReloaderSwiftTemplate() {
+  return `import Foundation
+import WidgetKit
+
+@objc(Sub2ApiWidgetReloader)
+class Sub2ApiWidgetReloader: NSObject {
+  @objc static func reload() {
+    if #available(iOS 14.0, *) {
+      WidgetCenter.shared.reloadAllTimelines()
+    }
+  }
+}
 `;
 }
 
