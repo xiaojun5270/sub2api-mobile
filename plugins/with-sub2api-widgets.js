@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const {
+  IOSConfig,
   withAndroidManifest,
   withDangerousMod,
   withEntitlementsPlist,
@@ -201,9 +202,15 @@ function setTargetBuildSettings(project, targetUuid, settings) {
   });
 }
 
-function addSourceFileOnce(project, filePath, targetUuid) {
+function addSourceFileOnce(project, filePath, targetUuid, groupName) {
   if (!project.hasFile(filePath)) {
-    project.addSourceFile(filePath, { target: targetUuid });
+    IOSConfig.XcodeUtils.ensureGroupRecursively(project, groupName);
+    IOSConfig.XcodeUtils.addBuildSourceFileToGroup({
+      filepath: filePath,
+      groupName,
+      project,
+      targetUuid,
+    });
   }
 }
 
@@ -216,7 +223,7 @@ function withSub2ApiXcodeProject(config) {
     const appTarget = project.getTarget('com.apple.product-type.application') || project.getFirstTarget();
 
     if (appTarget?.uuid) {
-      addSourceFileOnce(project, `${projectName}/Sub2ApiWidgetData.m`, appTarget.uuid);
+      addSourceFileOnce(project, `${projectName}/Sub2ApiWidgetData.m`, appTarget.uuid, projectName);
     }
 
     let widgetTargetUuid = findTargetUuid(project, IOS_WIDGET_TARGET);
@@ -233,7 +240,7 @@ function withSub2ApiXcodeProject(config) {
     ensureBuildPhase(project, widgetTargetUuid, 'PBXSourcesBuildPhase', 'Sources');
     ensureBuildPhase(project, widgetTargetUuid, 'PBXFrameworksBuildPhase', 'Frameworks');
     ensureBuildPhase(project, widgetTargetUuid, 'PBXResourcesBuildPhase', 'Resources');
-    addSourceFileOnce(project, `${IOS_WIDGET_TARGET}/${IOS_WIDGET_TARGET}.swift`, widgetTargetUuid);
+    addSourceFileOnce(project, `${IOS_WIDGET_TARGET}/${IOS_WIDGET_TARGET}.swift`, widgetTargetUuid, IOS_WIDGET_TARGET);
 
     if (!project.hasFile('WidgetKit.framework')) {
       project.addFramework('WidgetKit.framework', { target: widgetTargetUuid });
