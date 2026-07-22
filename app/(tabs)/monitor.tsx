@@ -27,6 +27,7 @@ import { LineTrendChart } from '@/src/components/line-trend-chart';
 import { useAutoRefresh } from '@/src/hooks/use-auto-refresh';
 import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatTokenValue } from '@/src/lib/formatters';
+import { saveHomeWidgetSnapshot } from '@/src/lib/home-widget';
 import { useAppTheme } from '@/src/lib/theme';
 import { getAdminSettings, getDashboardModels, getDashboardSnapshot, getDashboardStats, getDashboardTrend, getOpsDashboardOverview, listAllAccounts } from '@/src/services/admin';
 import { adminConfigState, hasAuthenticatedAdminSession } from '@/src/store/admin-config';
@@ -163,6 +164,14 @@ function formatCompactNumber(value?: number) {
 function formatTokenDisplay(value?: number) {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--';
   return formatTokenValue(value);
+}
+
+function formatWidgetUpdatedAt(value = new Date()) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(value);
 }
 
 function getPointLabel(value: string, rangeKey: RangeKey) {
@@ -722,6 +731,70 @@ export default function MonitorScreen() {
   const totalCacheReadTokens = useMemo(() => trend.reduce((sum, item) => sum + item.cache_read_tokens, 0), [trend]);
   const isRefreshing = statsQuery.isRefetching || opsOverviewQuery.isRefetching || settingsQuery.isRefetching || accountsQuery.isRefetching || trendQuery.isRefetching || modelsQuery.isRefetching || snapshotQuery.isRefetching;
   const { isAutoRefreshing } = useAutoRefresh(refetchAll, { refreshing: isRefreshing });
+
+  useEffect(() => {
+    if (!hasAccount || !stats || hasError) return;
+
+    const displayedTokens = usesTodayFallback ? selectedTokenTotal || stats.today_tokens : selectedTokenTotal;
+    const displayedOutputTokens = usesTodayFallback ? selectedOutputTotal || stats.today_output_tokens : selectedOutputTotal;
+    const displayedCost = usesTodayFallback ? selectedCostTotal || stats.today_cost : selectedCostTotal;
+    const widgetNormalAccounts = accountsQuery.isPending ? stats.normal_accounts ?? normalAccounts : normalAccounts;
+    const maxGroupTokens = Math.max(...groupUsageRows.map((item) => item.tokens), 0);
+
+    void saveHomeWidgetSnapshot({
+      version: 1,
+      title: siteName,
+      rangeLabel: rangeTitle,
+      updatedAt: new Date().toISOString(),
+      updatedAtLabel: formatWidgetUpdatedAt(),
+      summary: {
+        requests: {
+          label: '今日请求',
+          value: formatNumber(stats.today_requests),
+          detail: `累计 ${formatNumber(stats.total_requests)}`,
+        },
+        tokens: {
+          label: `${rangeTitle} Token`,
+          value: formatTokenDisplay(displayedTokens),
+          detail: `输出 ${formatTokenDisplay(displayedOutputTokens)}`,
+        },
+        cost: {
+          label: `${rangeTitle} 成本`,
+          value: formatMoney(displayedCost),
+          detail: `TPM ${formatNumber(stats.tpm)}`,
+        },
+        accounts: {
+          label: '账号状态',
+          value: `${formatNumber(widgetNormalAccounts)}/${formatNumber(totalAccounts)}`,
+          detail: `异常 ${formatNumber(errorAccounts)} · 限流 ${formatNumber(currentPageLimitedAccounts)}`,
+        },
+      },
+      groups: groupUsageRows.slice(0, 6).map((item) => ({
+        id: item.id,
+        name: item.name,
+        requests: formatCompactNumber(item.requests),
+        tokens: formatTokenDisplay(item.tokens),
+        cost: formatMoney(item.actualCost),
+        percent: maxGroupTokens > 0 ? Math.round((item.tokens / maxGroupTokens) * 100) : 0,
+      })),
+    });
+  }, [
+    accountsQuery.isPending,
+    currentPageLimitedAccounts,
+    errorAccounts,
+    groupUsageRows,
+    hasAccount,
+    hasError,
+    normalAccounts,
+    rangeTitle,
+    selectedCostTotal,
+    selectedOutputTotal,
+    selectedTokenTotal,
+    siteName,
+    stats,
+    totalAccounts,
+    usesTodayFallback,
+  ]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
