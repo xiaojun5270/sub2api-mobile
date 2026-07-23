@@ -156,7 +156,7 @@ export default function CreateAccountScreen() {
     <>
       <Stack.Screen options={{ title: '添加账号' }} />
       <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.page }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           <Section title="基础配置">
             <Text style={{ marginBottom: 6, fontSize: 12, color: colors.subtext }}>账号名称</Text>
             <TextInput

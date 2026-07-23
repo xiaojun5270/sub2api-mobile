@@ -1966,6 +1966,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
       contentGapClassName="mt-2 gap-2"
     >
       <FlatList
+        automaticallyAdjustKeyboardInsets
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 6, flexGrow: 1 }}
         data={filteredItems}
@@ -1976,6 +1977,7 @@ export function AccountsListScreen({ safeAreaEdges }: AccountsListScreenProps) {
         ListHeaderComponent={listHeader}
         ListEmptyComponent={emptyState}
         ItemSeparatorComponent={() => <View className="h-2" />}
+        keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         initialNumToRender={8}
         maxToRenderPerBatch={8}

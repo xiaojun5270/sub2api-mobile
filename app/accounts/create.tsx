@@ -973,7 +973,9 @@ export default function CreateAdminAccountScreen() {
       <Stack.Screen options={{ title: '添加账号' }} />
       <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.page, flex: 1 }}>
         <ScrollView
+          automaticallyAdjustKeyboardInsets
           contentContainerStyle={{ padding: 14, paddingBottom: 36 }}
+          keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           style={{ flex: 1 }}

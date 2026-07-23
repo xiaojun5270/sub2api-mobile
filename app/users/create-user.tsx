@@ -108,7 +108,7 @@ export default function CreateUserScreen() {
     <>
       <Stack.Screen options={{ title: '添加用户 (/admin/users)' }} />
       <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.page }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           <View
             style={{
               backgroundColor: colors.card,

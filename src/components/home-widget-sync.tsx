@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
 
 import { isAccountRateLimited } from '@/src/lib/account-status';
 import { formatTokenValue } from '@/src/lib/formatters';
@@ -201,14 +203,29 @@ export function HomeWidgetSync() {
   const config = useSnapshot(adminConfigState);
   const enabled = config.hydrated && hasAuthenticatedAdminSession(config);
 
-  useQuery({
+  const { refetch } = useQuery({
     queryKey: ['home-widget-sync', config.activeAccountId, config.baseUrl],
     queryFn: syncHomeWidgetSnapshot,
     enabled,
     refetchInterval: 5 * 60_000,
+    refetchIntervalInBackground: true,
+    refetchOnMount: 'always',
+    refetchOnReconnect: 'always',
     retry: 1,
     staleTime: 60_000,
   });
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void refetch();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [enabled, refetch]);
 
   return null;
 }

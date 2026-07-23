@@ -119,7 +119,10 @@ export function ScreenShell({
   return (
     <SafeAreaView edges={safeAreaEdges} style={{ flex: 1, backgroundColor: colors.page }}>
       <ScrollView
+        automaticallyAdjustKeyboardInsets
         className="flex-1"
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         refreshControl={onRefresh ? <RefreshControl refreshing={refreshing && !isAutoRefreshing} onRefresh={onRefresh} tintColor={colors.primary} /> : undefined}
       >

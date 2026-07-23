@@ -30,6 +30,7 @@
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./icons/android/playstore-icon.png"
       },
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false
     },
     "web": {

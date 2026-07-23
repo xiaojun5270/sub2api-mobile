@@ -390,7 +390,7 @@ export default function UserDetailScreen() {
     <>
       <Stack.Screen options={{ title: user?.email || '用户详情' }} />
       <SafeAreaView edges={['bottom']} style={{ flex: 1, backgroundColor: colors.page }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
           {userQuery.isLoading ? (
             <Section title="状态">
               <Text style={{ color: colors.subtext }}>正在加载用户详情...</Text>

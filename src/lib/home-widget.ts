@@ -36,14 +36,19 @@ type WidgetDataModule = {
   saveSnapshot?: (json: string) => Promise<void>;
 };
 
-const widgetDataModule = NativeModules.Sub2ApiWidgetData as WidgetDataModule | undefined;
+function getWidgetDataModule() {
+  return NativeModules.Sub2ApiWidgetData as WidgetDataModule | undefined;
+}
 
 export async function saveHomeWidgetSnapshot(snapshot: HomeWidgetSnapshot) {
-  if (Platform.OS === 'web' || !widgetDataModule?.saveSnapshot) return;
+  const widgetDataModule = getWidgetDataModule();
+  if (Platform.OS === 'web' || !widgetDataModule?.saveSnapshot) return false;
 
   try {
     await widgetDataModule.saveSnapshot(JSON.stringify(snapshot));
+    return true;
   } catch {
     // Widgets are optional native surfaces; the app should keep working if unavailable.
+    return false;
   }
 }

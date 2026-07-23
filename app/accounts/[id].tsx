@@ -484,7 +484,7 @@ export default function AccountDetailScreen() {
     <>
       <Stack.Screen options={{ title: account?.name || '账号详情' }} />
       <SafeAreaView edges={['bottom']} style={{ backgroundColor: colors.page, flex: 1 }}>
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <ScrollView automaticallyAdjustKeyboardInsets keyboardDismissMode="interactive" keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ gap: 12, padding: 16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
           {accountQuery.isLoading ? (
             <Section title="账号详情" icon={KeyRound}>
               <Text style={{ color: colors.subtext }}>正在加载账号...</Text>
