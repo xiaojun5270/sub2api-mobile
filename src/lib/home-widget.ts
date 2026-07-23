@@ -42,13 +42,24 @@ function getWidgetDataModule() {
 
 export async function saveHomeWidgetSnapshot(snapshot: HomeWidgetSnapshot) {
   const widgetDataModule = getWidgetDataModule();
-  if (Platform.OS === 'web' || !widgetDataModule?.saveSnapshot) return false;
+  if (Platform.OS === 'web') return true;
+  if (!widgetDataModule?.saveSnapshot) {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.warn('[home-widget] Sub2ApiWidgetData native module is unavailable.');
+    }
+
+    return false;
+  }
 
   try {
     await widgetDataModule.saveSnapshot(JSON.stringify(snapshot));
     return true;
-  } catch {
+  } catch (error) {
     // Widgets are optional native surfaces; the app should keep working if unavailable.
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.warn('[home-widget] Failed to save widget snapshot.', error);
+    }
+
     return false;
   }
 }

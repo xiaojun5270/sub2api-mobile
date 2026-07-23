@@ -65,7 +65,12 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.page }}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingVertical: 24 }} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingVertical: 24 }}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={{ flex: 1, justifyContent: 'center', gap: 20 }}>
           <View style={{ gap: 8 }}>
             <Text style={{ fontSize: 34, fontWeight: '800', color: colors.text }}>管理员入口</Text>

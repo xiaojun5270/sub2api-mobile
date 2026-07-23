@@ -297,13 +297,17 @@ class Sub2ApiWidgetDataModule(
   @ReactMethod
   fun saveSnapshot(json: String, promise: Promise) {
     try {
-      reactContext
+      val committed = reactContext
         .getSharedPreferences("${ANDROID_PREFS_NAME}", Context.MODE_PRIVATE)
         .edit()
         .putString("${SNAPSHOT_KEY}", json)
-        .apply()
+        .commit()
 
-      Sub2ApiWidgetUpdater.updateAll(reactContext)
+      if (!committed) {
+        throw IllegalStateException("Unable to save Sub2API widget snapshot.")
+      }
+
+      Sub2ApiWidgetUpdater.updateAll(reactContext.applicationContext)
       promise.resolve(null)
     } catch (error: Exception) {
       promise.reject("ERR_SUB2API_WIDGET_DATA", error.message, error)

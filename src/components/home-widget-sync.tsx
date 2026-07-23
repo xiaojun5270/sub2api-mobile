@@ -133,34 +133,39 @@ function formatWidgetUpdatedAt(value = new Date()) {
 
 async function syncHomeWidgetSnapshot() {
   const range = getTodayRange();
-  const [settings, stats, trendResult, snapshotResult, accountsResult] = await Promise.all([
-    getAdminSettings().catch(() => undefined),
+  const [settingsResult, statsResult, trendResult, snapshotResult, accountsResult] = await Promise.allSettled([
+    getAdminSettings(),
     getDashboardStats(),
-    getDashboardTrend(range).catch(() => undefined),
+    getDashboardTrend(range),
     getDashboardSnapshot({
       ...range,
       include_stats: false,
       include_trend: false,
       include_model_stats: false,
       include_group_stats: true,
-    }).catch(() => undefined),
-    listAllAccounts({ page_size: 100 }).catch(() => undefined),
+    }),
+    listAllAccounts({ page_size: 100 }),
   ]);
 
-  const trend = trendResult?.trend ?? [];
-  const accounts = accountsResult?.items ?? [];
-  const groupUsageRows = normalizeGroupUsageRows(snapshotResult?.groups);
+  const settings = settingsResult.status === 'fulfilled' ? settingsResult.value : undefined;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : undefined;
+  const trendData = trendResult.status === 'fulfilled' ? trendResult.value : undefined;
+  const snapshotData = snapshotResult.status === 'fulfilled' ? snapshotResult.value : undefined;
+  const accountsData = accountsResult.status === 'fulfilled' ? accountsResult.value : undefined;
+  const trend = trendData?.trend ?? [];
+  const accounts = accountsData?.items ?? [];
+  const groupUsageRows = normalizeGroupUsageRows(snapshotData?.groups);
   const selectedTokenTotal = trend.reduce((sum, item) => sum + item.total_tokens, 0);
   const selectedCostTotal = trend.reduce((sum, item) => sum + item.cost, 0);
   const selectedOutputTotal = trend.reduce((sum, item) => sum + item.output_tokens, 0);
-  const totalAccounts = stats.total_accounts ?? accountsResult?.total ?? accounts.length;
+  const totalAccounts = stats?.total_accounts ?? accountsData?.total ?? accounts.length;
   const currentPageErrorAccounts = accounts.filter(hasAccountError).length;
   const currentPageLimitedAccounts = accounts.filter((item) => isAccountRateLimited(item)).length;
-  const errorAccounts = Math.max(stats.error_accounts ?? 0, currentPageErrorAccounts);
-  const normalAccounts = accounts.length > 0 ? accounts.filter(isAccountNormal).length : stats.normal_accounts ?? 0;
+  const errorAccounts = Math.max(stats?.error_accounts ?? 0, currentPageErrorAccounts);
+  const normalAccounts = accounts.length > 0 ? accounts.filter(isAccountNormal).length : stats?.normal_accounts ?? 0;
   const maxGroupTokens = Math.max(...groupUsageRows.map((item) => item.tokens), 0);
 
-  await saveHomeWidgetSnapshot({
+  const saved = await saveHomeWidgetSnapshot({
     version: 1,
     title: settings?.site_name?.trim() || 'Sub2API',
     rangeLabel: '今日',
@@ -169,18 +174,18 @@ async function syncHomeWidgetSnapshot() {
     summary: {
       requests: {
         label: '今日请求',
-        value: formatNumber(stats.today_requests),
-        detail: `累计 ${formatNumber(stats.total_requests)}`,
+        value: formatNumber(stats?.today_requests),
+        detail: `累计 ${formatNumber(stats?.total_requests)}`,
       },
       tokens: {
         label: '今日 Token',
-        value: formatTokenValue(selectedTokenTotal || stats.today_tokens),
-        detail: `输出 ${formatTokenValue(selectedOutputTotal || stats.today_output_tokens || 0)}`,
+        value: formatTokenValue(selectedTokenTotal || stats?.today_tokens || 0),
+        detail: `输出 ${formatTokenValue(selectedOutputTotal || stats?.today_output_tokens || 0)}`,
       },
       cost: {
         label: '今日成本',
-        value: formatMoney(selectedCostTotal || stats.today_cost),
-        detail: `TPM ${formatNumber(stats.tpm)}`,
+        value: formatMoney(selectedCostTotal || stats?.today_cost),
+        detail: `TPM ${formatNumber(stats?.tpm)}`,
       },
       accounts: {
         label: '账号状态',
@@ -197,6 +202,10 @@ async function syncHomeWidgetSnapshot() {
       percent: maxGroupTokens > 0 ? Math.round((item.tokens / maxGroupTokens) * 100) : 0,
     })),
   });
+
+  if (!saved) {
+    throw new Error('HOME_WIDGET_SAVE_FAILED');
+  }
 }
 
 export function HomeWidgetSync() {
@@ -204,19 +213,29 @@ export function HomeWidgetSync() {
   const enabled = config.hydrated && hasAuthenticatedAdminSession(config);
 
   const { refetch } = useQuery({
-    queryKey: ['home-widget-sync', config.activeAccountId, config.baseUrl],
+    queryKey: ['home-widget-sync', config.activeAccountId, config.baseUrl, config.adminApiKey.length],
     queryFn: syncHomeWidgetSnapshot,
     enabled,
-    refetchInterval: 5 * 60_000,
+    networkMode: 'always',
+    refetchInterval: 60_000,
     refetchIntervalInBackground: true,
     refetchOnMount: 'always',
     refetchOnReconnect: 'always',
     retry: 1,
-    staleTime: 60_000,
+    staleTime: 15_000,
   });
 
   useEffect(() => {
     if (!enabled) return undefined;
+
+    const timers = [
+      setTimeout(() => {
+        void refetch();
+      }, 250),
+      setTimeout(() => {
+        void refetch();
+      }, 2_000),
+    ];
 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -224,7 +243,10 @@ export function HomeWidgetSync() {
       }
     });
 
-    return () => subscription.remove();
+    return () => {
+      timers.forEach(clearTimeout);
+      subscription.remove();
+    };
   }, [enabled, refetch]);
 
   return null;
