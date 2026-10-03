@@ -65,6 +65,9 @@ struct DashboardStats: Decodable, Sendable {
     let todayCacheReadTokens: Double?
     let rpm: Double?
     let tpm: Double?
+    let avgResponseSeconds: Double?
+    let avgResponseTimeMs: Double?
+    let averageDurationMs: Double?
 
     enum CodingKeys: String, CodingKey {
         case totalUsers = "total_users"
@@ -85,6 +88,9 @@ struct DashboardStats: Decodable, Sendable {
         case todayOutputTokens = "today_output_tokens"
         case todayCacheReadTokens = "today_cache_read_tokens"
         case rpm, tpm
+        case avgResponseSeconds = "avg_response_seconds"
+        case avgResponseTimeMs = "avg_response_time_ms"
+        case averageDurationMs = "average_duration_ms"
     }
 }
 
@@ -99,6 +105,9 @@ struct TrendPoint: Decodable, Identifiable, Sendable {
     let totalTokens: Double?
     let cost: Double?
     let actualCost: Double?
+    let avgDurationMs: Double?
+    let averageDurationMs: Double?
+    let avgLatencyMs: Double?
 
     enum CodingKeys: String, CodingKey {
         case date, requests, cost
@@ -108,6 +117,9 @@ struct TrendPoint: Decodable, Identifiable, Sendable {
         case cacheReadTokens = "cache_read_tokens"
         case totalTokens = "total_tokens"
         case actualCost = "actual_cost"
+        case avgDurationMs = "avg_duration_ms"
+        case averageDurationMs = "average_duration_ms"
+        case avgLatencyMs = "avg_latency_ms"
     }
 }
 
@@ -203,6 +215,8 @@ struct AdminAccount: Decodable, Identifiable, Hashable, Sendable {
     let tempUnschedulableUntil: String?
     let quota: JSONValue?
     let usage: JSONValue?
+    let extra: JSONValue?
+    let credentials: JSONValue?
     let expiresAt: String?
     let updatedAt: String?
     let lastUsedAt: String?
@@ -225,7 +239,7 @@ struct AdminAccount: Decodable, Identifiable, Hashable, Sendable {
         case privacyMode = "privacy_mode"
         case shadow
         case tempUnschedulableUntil = "temp_unschedulable_until"
-        case quota, usage
+        case quota, usage, extra, credentials
         case expiresAt = "expires_at"
         case updatedAt = "updated_at"
         case lastUsedAt = "last_used_at"

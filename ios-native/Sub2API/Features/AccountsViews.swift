@@ -26,6 +26,7 @@ struct AccountsView: View {
     @State private var modelPickerAccount: AdminAccount?
     @State private var selectedModelByAccount: [Int: String] = [:]
     @State private var detailAccount: AdminAccount?
+    @State private var totalMetricsLoading: Set<Int> = []
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -61,8 +62,9 @@ struct AccountsView: View {
                         AccountSummaryCard(
                             account: account,
                             metrics: metricsByAccount[account.id] ?? .empty,
-                            quota: quotaByAccount[account.id] ?? account.quota ?? account.usage,
+                            quota: accountQuotaPayload(account),
                             selectedModel: selectedModelByAccount[account.id],
+                            onLoadMetrics: { await loadTotalMetrics(account) },
                             onOpen: { detailAccount = account },
                             onQueryQuota: { Task { await queryQuota(account) } },
                             onCountQuota: { Task { await showQuotaCount(account) } },
@@ -170,10 +172,12 @@ struct AccountsView: View {
         do {
             accounts = try await service.accounts().items
             let ids = accounts.map(\.id)
-            async let today: JSONValue? = try? await service.accountTodayBatch(ids)
-            async let totals: JSONValue? = try? await service.accountUsageBatch(ids)
-            let batch = await (today, totals)
-            metricsByAccount = mergeMetrics(today: batch.0, totals: batch.1)
+            if ids.isEmpty {
+                metricsByAccount = [:]
+                quotaByAccount = [:]
+            } else {
+                metricsByAccount = await loadTodayMetrics(ids: ids, service: service)
+            }
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
         isLoading = false
@@ -200,32 +204,147 @@ struct AccountsView: View {
 
     private func queryQuota(_ account: AdminAccount) async {
         guard let service = try? store.adminService() else { return }; isWorking = true
-        do { quotaByAccount[account.id] = try await service.quota(account); message = "\(account.name) 额度已更新" } catch { message = "额度查询失败：\(error.localizedDescription)" }
+        do {
+            switch quotaMode(account) {
+            case .openai, .grok:
+                quotaByAccount[account.id] = try await service.quota(account)
+                message = "\(account.name) 额度已更新"
+            case .generic:
+                message = "\(account.name) 使用普通额度配置，无独立查询接口"
+            case .unsupported:
+                message = "当前账号类型没有额度查询接口"
+            }
+        } catch { message = "额度查询失败：\(error.localizedDescription)" }
         isWorking = false
     }
 
     private func showQuotaCount(_ account: AdminAccount) async {
         if quotaByAccount[account.id] == nil { await queryQuota(account) }
-        let value = quotaByAccount[account.id] ?? account.quota ?? account.usage
-        message = value.map { "\(account.name) 次数/额度：\($0.displayText)" } ?? "未获取到次数信息"
+        let value = quotaByAccount[account.id]
+        switch quotaMode(account) {
+        case .openai:
+            let resetCredits = value?.objectValue?["rate_limit_reset_credits"]?.objectValue
+            let count = resetCredits?.number("available_count", "availableCount", "count", "remaining")
+            let resetAt = value?.objectValue?.text("reset_at", "resetAt")
+            message = "\(account.name) 可重置次数：\(count.map { NumberFormatters.compact($0) } ?? "--")" + (resetAt.map { " · 重置时间 \($0)" } ?? "")
+        case .grok:
+            let snapshot = value?.objectValue?["snapshot"]?.objectValue
+            let retry = snapshot?.number("retry_after_seconds", "retryAfterSeconds")
+            let status = snapshot?.text("entitlement_status", "entitlementStatus") ?? "--"
+            message = "\(account.name) 权益：\(status) · 等待 \(retry.map { formatDuration($0) } ?? "--")"
+        case .generic, .unsupported:
+            message = "当前账号类型没有次数查询接口"
+        }
     }
 
     private func resetQuota(_ account: AdminAccount) async {
         guard let service = try? store.adminService() else { return }; isWorking = true
         do {
-            if account.platform.lowercased() == "openai" { quotaByAccount[account.id] = try await service.resetOpenAIQuota(account.id) }
-            else { _ = try await service.accountAction(account.id, action: .resetQuota) }
-            message = "\(account.name) 额度已重置"
-            await queryQuota(account)
+            switch quotaMode(account) {
+            case .openai:
+                if quotaByAccount[account.id] == nil { quotaByAccount[account.id] = try await service.quota(account) }
+                let credits = quotaByAccount[account.id]?.objectValue?["rate_limit_reset_credits"]?.objectValue
+                if let available = credits?.number("available_count", "availableCount", "count", "remaining"), available <= 0 {
+                    message = "当前没有可用重置次数"
+                } else {
+                    quotaByAccount[account.id] = try await service.resetOpenAIQuota(account.id)
+                    message = "\(account.name) 额度已重置"
+                }
+            case .grok:
+                message = "Grok 账号支持额度查询，但不支持重置"
+            case .generic:
+                _ = try await service.accountAction(account.id, action: .resetQuota)
+                message = "\(account.name) 普通额度已重置"
+            case .unsupported:
+                message = "当前账号类型没有额度重置接口"
+            }
         } catch { message = "重置失败：\(error.localizedDescription)" }
         isWorking = false
     }
 
-    private func mergeMetrics(today: JSONValue?, totals: JSONValue?) -> [Int: AccountCardMetrics] {
+    private func accountQuotaPayload(_ account: AdminAccount) -> JSONValue? {
+        var merged: [String: JSONValue] = [:]
+        for source in [account.credentials, account.extra, account.quota, account.usage, quotaByAccount[account.id]] {
+            if let object = source?.objectValue { merged.merge(object) { _, new in new } }
+        }
+        return merged.isEmpty ? nil : .object(merged)
+    }
+
+    private func quotaMode(_ account: AdminAccount) -> AccountQuotaMode {
+        let platform = account.platform.lowercased()
+        let type = account.type.lowercased()
+        if platform.contains("grok") || platform.contains("xai") { return .grok }
+        if platform.contains("openai") && type == "oauth" { return .openai }
+        if hasQuotaConfig(account) { return .generic }
+        return .unsupported
+    }
+
+    private func hasQuotaConfig(_ account: AdminAccount) -> Bool {
+        let extra = account.extra?.objectValue ?? [:]
+        return ["quota_limit", "quota_daily_limit", "quota_weekly_limit"].contains { (extra[$0]?.doubleValue ?? 0) > 0 }
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        return hours > 0 ? "\(hours)h \(minutes)m" : "\(max(minutes, 1))m"
+    }
+
+    private func mergeTodayMetrics(_ today: JSONValue?) -> [Int: AccountCardMetrics] {
         var result: [Int: AccountCardMetrics] = [:]
         for (id, row) in metricRows(today) { result[id, default: .empty].applyToday(row) }
-        for (id, row) in metricRows(totals) { result[id, default: .empty].applyTotal(row) }
         return result
+    }
+
+    private func loadTodayMetrics(ids: [Int], service: AdminService) async -> [Int: AccountCardMetrics] {
+        var result: [Int: AccountCardMetrics] = [:]
+        for start in stride(from: 0, to: ids.count, by: 100) {
+            let end = min(start + 100, ids.count)
+            let batch = Array(ids[start..<end])
+            do {
+                let response = try await service.accountTodayBatch(batch)
+                for (id, row) in metricRows(response) { result[id, default: .empty].applyToday(row) }
+            } catch {
+                for fallbackStart in stride(from: 0, to: batch.count, by: 10) {
+                    let fallbackEnd = min(fallbackStart + 10, batch.count)
+                    let fallbackBatch = Array(batch[fallbackStart..<fallbackEnd])
+                    await withTaskGroup(of: (Int, AccountTodayStats?).self) { group in
+                        for id in fallbackBatch { group.addTask { (id, try? await service.accountToday(id)) } }
+                        for await (id, stats) in group {
+                            guard let stats else { continue }
+                            var metrics = result[id] ?? .empty
+                            metrics.todayRequests = stats.requests ?? 0
+                            metrics.todayTokens = stats.tokens ?? 0
+                            metrics.todayActualCost = stats.cost ?? 0
+                            metrics.todayUserCost = stats.userCost ?? stats.cost ?? 0
+                            result[id] = metrics
+                        }
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private func loadTotalMetrics(_ account: AdminAccount) async {
+        if metricsByAccount[account.id]?.totalLoaded == true || totalMetricsLoading.contains(account.id) { return }
+        guard let service = try? store.adminService() else { return }
+        totalMetricsLoading.insert(account.id)
+        defer { totalMetricsLoading.remove(account.id) }
+        do {
+            let stats = try await service.accountStats(account.id, days: 30)
+            var metrics = metricsByAccount[account.id] ?? .empty
+            metrics.totalRequests = stats.totalRequests ?? stats.requestCount ?? 0
+            metrics.totalTokens = stats.totalTokens ?? 0
+            metrics.totalCost = stats.totalAccountCost ?? stats.totalActualCost ?? stats.actualCost ?? stats.totalCost ?? 0
+            metrics.totalLoaded = true
+            metricsByAccount[account.id] = metrics
+        } catch {
+            var metrics = metricsByAccount[account.id] ?? .empty
+            metrics.totalLoaded = true
+            metricsByAccount[account.id] = metrics
+        }
     }
 
     private func metricRows(_ value: JSONValue?) -> [(Int, [String: JSONValue])] {
@@ -235,9 +354,17 @@ struct AccountsView: View {
         for key in ["items", "stats", "accounts", "records", "rows", "data"] {
             let rows = object.rows(key)
             if !rows.isEmpty { return rows.compactMap { row in let id = Int(row.number("account_id", "accountId", "id") ?? 0); return id > 0 ? (id, row) : nil } }
+            if let nested = object[key]?.objectValue {
+                let mapped = nested.compactMap { idText, child -> (Int, [String: JSONValue])? in
+                    guard let id = Int(idText), let row = child.objectValue else { return nil }
+                    return (id, row)
+                }
+                if !mapped.isEmpty { return mapped }
+            }
         }
         return object.compactMap { key, child in guard let id = Int(key), let row = child.objectValue else { return nil }; return (id, row) }
     }
+
 
     private func delete(_ account: AdminAccount) async {
         guard let service = try? store.adminService() else { return }; deletingAccount = nil; isWorking = true
@@ -279,6 +406,7 @@ private struct AccountCardMetrics: Sendable {
     var totalRequests = 0.0
     var totalTokens = 0.0
     var totalCost = 0.0
+    var totalLoaded = false
     static let empty = AccountCardMetrics()
 
     mutating func applyToday(_ row: [String: JSONValue]) {
@@ -292,6 +420,7 @@ private struct AccountCardMetrics: Sendable {
         totalRequests = row.number("total_requests", "requests", "request_count") ?? 0
         totalTokens = row.number("total_tokens", "tokens") ?? 0
         totalCost = row.number("total_account_cost", "total_actual_cost", "total_cost", "actual_cost", "cost") ?? 0
+        totalLoaded = true
     }
 }
 
@@ -300,6 +429,7 @@ private struct AccountSummaryCard: View {
     let metrics: AccountCardMetrics
     let quota: JSONValue?
     let selectedModel: String?
+    let onLoadMetrics: () async -> Void
     let onOpen: () -> Void
     let onQueryQuota: () -> Void
     let onCountQuota: () -> Void
@@ -370,6 +500,7 @@ private struct AccountSummaryCard: View {
         }
         .padding(8)
         .glassPanel(cornerRadius: 18)
+        .task { await onLoadMetrics() }
     }
 
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
@@ -407,25 +538,27 @@ private struct AccountSummaryCard: View {
             .buttonStyle(.plain).foregroundStyle(color).background(fill, in: Capsule())
     }
 
-    private var quotaUpdatedAt: String? { findString(in: quota, matching: ["updated_at", "updatedAt", "queried_at", "queriedAt"]) ?? account.updatedAt }
+    private var quotaUpdatedAt: String? { findString(in: quota, matching: ["codex_usage_updated_at", "usage_updated_at", "updated_at", "updatedAt", "queried_at", "queriedAt"]) ?? account.updatedAt }
 
     private func quotaWindow(label: String, token: String) -> QuotaWindow {
-        let percent = findNumber(in: quota, keyContains: [token, "percent"])
-            ?? findNumber(in: quota, keyContains: [token, "usage"])
-            ?? 0
-        let remaining = findString(in: quota, matching: ["\(token)_remaining", "remaining_\(token)", "\(token)_reset_at", "reset_at"])
-            ?? (token == "5h" ? "剩余 5h" : "剩余 --")
-        return QuotaWindow(label: label, percent: percent <= 1 ? percent * 100 : percent, remaining: remaining)
+        let compact = token == "5h" ? "5h" : "7d"
+        let percentKeys = ["codex_\(token)_used_percent", "codex_\(token)_usage_percent", "codex_\(token)_used_percentage", "codex_\(token)_usage_percentage", "codex_\(token)_usage_pct", "codex_\(token)_percent", "codex\(compact)UsedPercent", "codex\(compact)UsagePercent", "codex\(compact)UsedPercentage", "codex\(compact)UsagePercentage", "codex\(compact)UsagePct", "usage_\(token)_percent", "usage_\(token)_percentage", "usage\(compact)Percent", "usage\(compact)Percentage", "rate_limit_\(token)_percent", "rate_limit_\(token)_percentage", "rateLimit\(compact)Percent", "rateLimit\(compact)Percentage"]
+        let usageKeys = ["codex_\(token)_usage", "codex_\(token)_used", "codex\(compact)Usage", "codex\(compact)Used", "usage_\(token)", "usage\(compact)", "used_\(token)", "used\(compact)"] + (token == "5h" ? ["usage_5_hours"] : ["usage_week", "weekly_usage"])
+        let limitKeys = ["codex_\(token)_limit", "codex_\(token)_quota", "codex\(compact)Limit", "codex\(compact)Quota", "rate_limit_\(token)", "rateLimit\(compact)", "limit_\(token)", "quota_\(token)"] + (token == "7d" ? ["weekly_limit"] : [])
+        let rawPercent = findNumber(in: quota, matching: percentKeys)
+        let used = findNumber(in: quota, matching: usageKeys)
+        let limit = findNumber(in: quota, matching: limitKeys)
+        let percent = rawPercent.map { min(max($0, 0), 100) }
+            ?? ((used != nil && (limit ?? 0) > 1 && (used ?? 0) >= 0) ? min(max((used ?? 0) / (limit ?? 1) * 100, 0), 100) : 0)
+        let resetSecondsKeys = ["codex_\(token)_reset_after_seconds", "codex_\(token)_resetAfterSeconds", "codex\(compact)ResetAfterSeconds", "reset_after_seconds_\(token)", "resetAfterSeconds\(compact)", "rate_limit_\(token)_reset_after_seconds", "rateLimit\(compact)ResetAfterSeconds"]
+        let resetAtKeys = ["codex_\(token)_reset_at", "codex_\(token)_resetAt", "codex\(compact)ResetAt", "reset_at_\(token)", "resetAt\(compact)", "rate_limit_\(token)_reset_at", "rateLimit\(compact)ResetAt"]
+        let resetValue = findValue(in: quota, matching: resetSecondsKeys) ?? findValue(in: quota, matching: resetAtKeys)
+        let remaining = formatRemaining(resetValue, fallback: "--")
+        return QuotaWindow(label: label, percent: percent, remaining: remaining)
     }
 
-    private func findNumber(in value: JSONValue?, keyContains tokens: [String]) -> Double? {
-        guard let value else { return nil }
-        if let object = value.objectValue {
-            for (key, child) in object where tokens.allSatisfy({ key.lowercased().contains($0.lowercased()) }) { if let number = child.doubleValue { return number } }
-            for child in object.values { if let number = findNumber(in: child, keyContains: tokens) { return number } }
-        }
-        if let array = value.arrayValue { for child in array { if let number = findNumber(in: child, keyContains: tokens) { return number } } }
-        return nil
+    private func findNumber(in value: JSONValue?, matching keys: [String]) -> Double? {
+        findValue(in: value, matching: keys)?.doubleValue
     }
 
     private func findString(in value: JSONValue?, matching keys: [String]) -> String? {
@@ -437,13 +570,61 @@ private struct AccountSummaryCard: View {
         return nil
     }
 
+    private func findValue(in value: JSONValue?, matching keys: [String]) -> JSONValue? {
+        guard let value else { return nil }
+        if let object = value.objectValue {
+            for key in keys { if let child = object[key], child != .null { return child } }
+            for (objectKey, child) in object where keys.contains(where: { objectKey.lowercased().contains($0.lowercased()) }) {
+                if child != .null { return child }
+            }
+            for child in object.values { if let found = findValue(in: child, matching: keys) { return found } }
+        }
+        if let array = value.arrayValue { for child in array { if let found = findValue(in: child, matching: keys) { return found } } }
+        return nil
+    }
+
+    private func formatRemaining(_ value: JSONValue?, fallback: String) -> String {
+        guard let value else { return fallback }
+        if let number = value.doubleValue {
+            let seconds: Double
+            if number > 10_000_000_000 { seconds = number / 1_000 - Date().timeIntervalSince1970 }
+            else if number > 1_000_000_000 { seconds = number - Date().timeIntervalSince1970 }
+            else { seconds = number }
+            guard seconds > 0 else { return "即将重置" }
+            let days = Int(seconds) / 86_400
+            let hours = (Int(seconds) % 86_400) / 3_600
+            let minutes = (Int(seconds) % 3_600) / 60
+            if days > 0 { return "剩余 \(days)d \(hours)h" }
+            if hours > 0 { return "剩余 \(hours)h \(minutes)m" }
+            return "剩余 \(max(minutes, 1))m"
+        }
+        guard let text = value.stringValue, !text.isEmpty else { return fallback }
+        let formatter = ISO8601DateFormatter()
+        if let date = formatter.date(from: text) {
+            return formatRemaining(.number(date.timeIntervalSinceNow), fallback: fallback)
+        }
+        return text.lowercased().hasPrefix("剩余") ? text : "剩余 \(text)"
+    }
+
     private func shortTime(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "--" }
+        if let timestamp = Double(value), timestamp > 1_000_000_000 {
+            let seconds = timestamp > 10_000_000_000 ? timestamp / 1_000 : timestamp
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            return formatter.string(from: Date(timeIntervalSince1970: seconds))
+        }
+        if let date = ISO8601DateFormatter().date(from: value) {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            return formatter.string(from: date)
+        }
         return value.replacingOccurrences(of: "T", with: " ").prefix(16).description
     }
 }
 
 private struct QuotaWindow { let label: String; let percent: Double; let remaining: String }
+private enum AccountQuotaMode { case openai, grok, generic, unsupported }
 
 private struct AccountModelPickerView: View {
     @Environment(\.dismiss) private var dismiss

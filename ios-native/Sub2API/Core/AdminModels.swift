@@ -77,6 +77,74 @@ extension Dictionary where Key == String, Value == JSONValue {
     }
 }
 
+extension UsageSummary {
+    init(json: JSONValue) {
+        let object = json.objectValue ?? [:]
+        let directRequests = object.number("total_requests", "totalRequests")
+        let directTokens = object.number("total_tokens", "totalTokens")
+        let directCost = object.number("total_account_cost", "totalAccountCost", "total_actual_cost", "totalActualCost", "total_cost", "totalCost")
+
+        if directRequests != nil || directTokens != nil || directCost != nil {
+            totalRequests = directRequests ?? object.number("requests", "request_count", "requestCount")
+            requestCount = object.number("request_count", "requestCount", "total_requests", "totalRequests")
+            inputTokens = object.number("input_tokens", "inputTokens", "total_input_tokens", "totalInputTokens")
+            outputTokens = object.number("output_tokens", "outputTokens", "total_output_tokens", "totalOutputTokens")
+            totalTokens = directTokens ?? object.number("tokens", "token_consumed", "tokenConsumed")
+            totalCost = directCost ?? object.number("cost", "actual_cost", "actualCost")
+            actualCost = object.number("actual_cost", "actualCost", "total_actual_cost", "totalActualCost")
+            avgDurationMs = object.number("avg_duration_ms", "avgDurationMs")
+            avgFirstTokenMs = object.number("avg_first_token_ms", "avgFirstTokenMs")
+            totalActualCost = object.number("total_actual_cost", "totalActualCost", "actual_cost", "actualCost")
+            totalAccountCost = object.number("total_account_cost", "totalAccountCost")
+            averageDurationMs = object.number("average_duration_ms", "averageDurationMs", "avg_duration_ms", "avgDurationMs")
+            return
+        }
+
+        let rows = Self.extractUsageRows(json)
+        var requests = 0.0, tokens = 0.0, input = 0.0, output = 0.0, cost = 0.0, duration = 0.0, durationCount = 0.0
+        for row in rows {
+            let rowInput = row.number("input_tokens", "inputTokens") ?? 0
+            let rowOutput = row.number("output_tokens", "outputTokens") ?? 0
+            let cacheCreation = row.number("cache_creation_tokens", "cacheCreationTokens") ?? 0
+            let cacheRead = row.number("cache_read_tokens", "cacheReadTokens") ?? 0
+            requests += row.number("total_requests", "totalRequests", "requests", "request_count", "requestCount", "success_count", "successCount") ?? 0
+            tokens += row.number("total_tokens", "totalTokens", "tokens", "token_consumed", "tokenConsumed") ?? rowInput + rowOutput + cacheCreation + cacheRead
+            input += rowInput
+            output += rowOutput
+            cost += row.number("total_account_cost", "totalAccountCost", "total_actual_cost", "totalActualCost", "total_cost", "totalCost", "actual_cost", "actualCost", "cost") ?? 0
+            if let rowDuration = row.number("duration_ms", "durationMs", "average_duration_ms", "averageDurationMs", "avg_duration_ms", "avgDurationMs") {
+                duration += rowDuration
+                durationCount += 1
+            }
+        }
+        totalRequests = requests
+        requestCount = requests
+        inputTokens = input
+        outputTokens = output
+        totalTokens = tokens
+        totalCost = cost
+        actualCost = cost
+        avgDurationMs = durationCount > 0 ? duration / durationCount : nil
+        avgFirstTokenMs = nil
+        totalActualCost = cost
+        totalAccountCost = cost
+        averageDurationMs = durationCount > 0 ? duration / durationCount : nil
+    }
+
+    private static func extractUsageRows(_ value: JSONValue) -> [[String: JSONValue]] {
+        if let array = value.arrayValue { return array.compactMap(\.objectValue) }
+        guard let object = value.objectValue else { return [] }
+        for key in ["stats", "items", "data", "usage", "usage_logs", "usageLogs", "records", "rows"] {
+            if let array = object[key]?.arrayValue { return array.compactMap(\.objectValue) }
+            if let child = object[key] {
+                let nested = extractUsageRows(child)
+                if !nested.isEmpty { return nested }
+            }
+        }
+        return []
+    }
+}
+
 struct DashboardModelStats: Decodable, Sendable {
     let models: [ModelStat]
 }

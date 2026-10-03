@@ -9,6 +9,8 @@ struct AdminService: Sendable {
         try await api.get("/api/v1/admin/dashboard/stats")
     }
 
+    func adminSettings() async throws -> AdminSettings { try await api.get("/api/v1/admin/settings") }
+
     func dashboardTrend(start: String, end: String, granularity: String, filters: [String: String] = [:]) async throws -> DashboardTrend {
         try await api.get("/api/v1/admin/dashboard/trend", query: query([
             "start_date": start, "end_date": end, "granularity": granularity
@@ -73,7 +75,24 @@ struct AdminService: Sendable {
     // MARK: Accounts
 
     func accounts(search: String = "", filters: [String: String] = [:]) async throws -> Page<AdminAccount> {
-        var values = ["page": "1", "page_size": "100", "search": search, "timezone": TimeZone.current.identifier]
+        let firstPage = try await accountsPage(page: 1, search: search, filters: filters)
+        let pageCount = max(firstPage.pages, Int(ceil(Double(firstPage.total) / Double(max(firstPage.pageSize, 1)))))
+        guard pageCount > 1 else { return firstPage }
+
+        var allItems = firstPage.items
+        try await withThrowingTaskGroup(of: Page<AdminAccount>.self) { group in
+            for page in 2...pageCount {
+                group.addTask { try await self.accountsPage(page: page, search: search, filters: filters) }
+            }
+            for try await result in group { allItems.append(contentsOf: result.items) }
+        }
+        var seenIDs: Set<Int> = []
+        let uniqueItems = allItems.filter { seenIDs.insert($0.id).inserted }
+        return Page(items: uniqueItems, total: max(firstPage.total, uniqueItems.count), page: 1, pageSize: max(uniqueItems.count, 1), pages: 1)
+    }
+
+    private func accountsPage(page: Int, search: String, filters: [String: String]) async throws -> Page<AdminAccount> {
+        var values = ["page": String(page), "page_size": "100", "search": search, "timezone": TimeZone.current.identifier]
         values.merge(filters) { _, new in new }
         return try await api.listPage("/api/v1/admin/accounts", query: query(values), itemKeys: ["accounts", "items", "data"])
     }
@@ -88,11 +107,11 @@ struct AdminService: Sendable {
         let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) })]
         return try await api.send("/api/v1/admin/accounts/today-stats/batch", method: .post, body: body)
     }
-    func accountUsageBatch(_ ids: [Int], force: Bool = false) async throws -> JSONValue {
-        let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) }), "force": .bool(force)]
-        return try await api.send("/api/v1/admin/accounts/usage/batch", method: .post, body: body)
+    func accountStats(_ id: Int, days: Int) async throws -> UsageSummary {
+        let raw: JSONValue = try await api.get("/api/v1/admin/accounts/\(id)/stats", query: query(["days": String(days)]))
+        let payload = raw.objectValue?["summary"] ?? raw
+        return UsageSummary(json: payload)
     }
-    func accountStats(_ id: Int, days: Int) async throws -> UsageSummary { try await api.get("/api/v1/admin/accounts/\(id)/stats", query: query(["days": String(days)])) }
     func accountUsage(_ id: Int) async throws -> Page<OpsRecord> { try await api.listPage("/api/v1/admin/accounts/\(id)/usage", itemKeys: ["items", "usage", "records"] ) }
     func accountModels(_ id: Int) async throws -> [AccountModel] {
         let page: Page<AccountModel> = try await api.listPage("/api/v1/admin/accounts/\(id)/models", itemKeys: ["models", "items", "data"])
