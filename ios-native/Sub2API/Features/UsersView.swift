@@ -1,8 +1,12 @@
+import Charts
 import SwiftUI
+import UIKit
 
 struct UsersView: View {
     @EnvironmentObject private var store: AppStore
     @State private var users: [AdminUser] = []
+    @State private var usageByUser: [Int: UsageSummary] = [:]
+    @State private var sortAscending = false
     @State private var searchText = ""
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -18,6 +22,7 @@ struct UsersView: View {
                     tint: AppPalette.blue,
                     action: { showsCreateUser = true }
                 )
+                HStack { Text("按最近使用时间排序").font(.caption).foregroundStyle(.secondary); Spacer(); Button { sortAscending.toggle(); sortUsers() } label: { Label(sortAscending ? "最早优先" : "最近优先", systemImage: "arrow.up.arrow.down") }.font(.caption).buttonStyle(.bordered) }
 
                 if isLoading && users.isEmpty {
                     LoadingView(label: "正在加载用户")
@@ -28,7 +33,7 @@ struct UsersView: View {
                 } else {
                     ForEach(users) { user in
                         NavigationLink(value: user) {
-                            UserRow(user: user)
+                            UserRow(user: user, usage: usageByUser[user.id])
                         }
                         .buttonStyle(.plain)
                     }
@@ -55,28 +60,29 @@ struct UsersView: View {
     }
 
     private func load() async {
-        guard let client = try? store.client() else { return }
+        guard let service = try? store.adminService() else { return }
         isLoading = true
         errorMessage = nil
         do {
-            let page: Page<AdminUser> = try await client.get(
-                "/api/v1/admin/users",
-                query: [
-                    URLQueryItem(name: "page", value: "1"),
-                    URLQueryItem(name: "page_size", value: "50"),
-                    URLQueryItem(name: "search", value: searchText.trimmingCharacters(in: .whitespacesAndNewlines))
-                ]
-            )
-            users = page.items.sorted { ($0.lastUsedAt ?? $0.updatedAt ?? "") > ($1.lastUsedAt ?? $1.updatedAt ?? "") }
+            users = try await service.users(search: searchText, pageSize: 50).items
+            sortUsers()
+            let dates = TimeRange.week.startEnd
+            usageByUser = await withTaskGroup(of: (Int, UsageSummary?).self) { group in
+                for user in users { group.addTask { (user.id, try? await service.usageStats(start: dates.0, end: dates.1, filters: ["user_id": String(user.id)])) } }
+                var result: [Int: UsageSummary] = [:]; for await (id, usage) in group { result[id] = usage }; return result
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
     }
+
+    private func sortUsers() { users.sort { left, right in let a = left.lastUsedAt ?? left.updatedAt ?? left.createdAt ?? ""; let b = right.lastUsedAt ?? right.updatedAt ?? right.createdAt ?? ""; return sortAscending ? a < b : a > b } }
 }
 
 private struct UserRow: View {
     let user: AdminUser
+    let usage: UsageSummary?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -93,7 +99,9 @@ private struct UserRow: View {
                     .lineLimit(1)
                 HStack(spacing: 10) {
                     Label(NumberFormatters.currency(user.balance), systemImage: "creditcard")
-                    Label("\(user.currentConcurrency ?? 0)/\(user.concurrency ?? 0)", systemImage: "bolt.horizontal")
+                    Label(NumberFormatters.currency(usage?.totalAccountCost ?? usage?.totalActualCost ?? usage?.totalCost), systemImage: "dollarsign.circle")
+                    Label(NumberFormatters.compact(usage?.totalTokens), systemImage: "cpu")
+                    Label(NumberFormatters.compact(usage?.totalRequests), systemImage: "arrow.up.arrow.down")
                 }
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -114,6 +122,8 @@ private struct UserDetailView: View {
     @State var user: AdminUser
     @State private var usage: UsageSummary?
     @State private var keys: [AdminAPIKey] = []
+    @State private var trend: [TrendPoint] = []
+    @State private var range: TimeRange = .month
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showsBalance = false
@@ -156,6 +166,13 @@ private struct UserDetailView: View {
                     }
                 }
 
+                Picker("范围", selection: $range) { ForEach(TimeRange.allCases) { Text($0.label).tag($0) } }.pickerStyle(.segmented)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Token 趋势").font(.headline)
+                    if trend.isEmpty { Text("暂无趋势数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 130) }
+                    else { Chart(trend) { LineMark(x: .value("时间", $0.date), y: .value("Token", $0.totalTokens ?? 0)).foregroundStyle(AppPalette.blue).interpolationMethod(.catmullRom) }.chartYAxis(.hidden).frame(height: 170) }
+                }.padding(16).glassPanel()
+
                 VStack(alignment: .leading, spacing: 12) {
                     Text("API 密钥").font(.headline)
                     if isLoading { ProgressView() }
@@ -169,12 +186,16 @@ private struct UserDetailView: View {
                             }
                             Spacer()
                             StatusPill(text: StatusStyle.generic(key.status).0, color: StatusStyle.generic(key.status).1)
+                            Button { UIPasteboard.general.string = key.customKey ?? key.key } label: { Image(systemName: "doc.on.doc") }.buttonStyle(.plain)
                         }
+                        HStack { Text("额度 \(NumberFormatters.compact(key.quotaUsed)) / \(NumberFormatters.compact(key.quota))"); Spacer(); Text("最后使用 \(key.lastUsedAt ?? "--")") }.font(.caption2).foregroundStyle(.secondary)
                         if key.id != keys.last?.id { Divider() }
                     }
                 }
                 .padding(16)
                 .glassPanel()
+
+                NavigationLink { APIKeysView() } label: { Label("打开 API 密钥管理", systemImage: "key.horizontal").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).tint(AppPalette.blue)
 
                 if let errorMessage { InlineErrorView(message: errorMessage) { Task { await load() } } }
             }
@@ -187,30 +208,33 @@ private struct UserDetailView: View {
             BalanceEditorView(user: user)
         }
         .appPage()
-        .task { await load() }
+        .task(id: range) { await load() }
     }
 
     private func load() async {
-        guard let client = try? store.client() else { return }
+        guard let service = try? store.adminService() else { return }
         isLoading = true
         do {
-            async let nextUser: AdminUser = client.get("/api/v1/admin/users/\(user.id)")
-            async let nextUsage: UsageSummary = client.get("/api/v1/admin/users/\(user.id)/usage", query: [URLQueryItem(name: "period", value: "month")])
-            async let nextKeys: Page<AdminAPIKey> = client.listPage("/api/v1/admin/users/\(user.id)/api-keys", itemKeys: ["api_keys", "apiKeys", "keys", "items"])
-            let result = try await (nextUser, nextUsage, nextKeys)
+            let dates = range.startEnd
+            async let nextUser = service.user(user.id)
+            async let nextUsage = service.usageStats(start: dates.0, end: dates.1, filters: ["user_id": String(user.id)])
+            async let nextSnapshot = service.dashboardSnapshot(start: dates.0, end: dates.1, granularity: range.granularity, filters: ["user_id": String(user.id), "include_stats": "false", "include_trend": "true"])
+            async let nextKeys = service.userAPIKeys(user.id)
+            let result = try await (nextUser, nextUsage, nextSnapshot, nextKeys)
             user = result.0
             usage = result.1
-            keys = result.2.items
+            trend = result.2.trend ?? []
+            keys = result.3.items
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
         isLoading = false
     }
 
     private func toggleStatus() async {
-        guard let client = try? store.client() else { return }
-        struct Body: Encodable, Sendable { let status: String }
+        guard let service = try? store.adminService() else { return }
+        if user.role?.lowercased() == "admin" { errorMessage = "管理员用户不支持禁用。"; return }
         do {
-            user = try await client.send("/api/v1/admin/users/\(user.id)", method: .put, body: Body(status: user.status == "disabled" ? "active" : "disabled"))
+            user = try await service.updateUserStatus(user.id, status: user.status == "disabled" ? "active" : "disabled")
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -226,8 +250,12 @@ private struct CreateUserView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var username = ""
+    @State private var notes = ""
     @State private var role = "user"
+    @State private var status = "active"
     @State private var balance = "0"
+    @State private var concurrency = ""
+    @State private var extraJSON = ""
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -238,11 +266,15 @@ private struct CreateUserView: View {
                     TextField("邮箱", text: $email).keyboardType(.emailAddress).textInputAutocapitalization(.never)
                     SecureField("初始密码", text: $password)
                     TextField("用户名（可选）", text: $username)
+                    TextField("备注（可选）", text: $notes)
                 }
                 Section("权限与余额") {
                     Picker("角色", selection: $role) { Text("用户").tag("user"); Text("管理员").tag("admin") }
+                    Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("disabled") }
                     TextField("初始余额", text: $balance).keyboardType(.decimalPad)
+                    TextField("并发", text: $concurrency).keyboardType(.numberPad)
                 }
+                Section("高级参数") { TextEditor(text: $extraJSON).frame(minHeight: 100).font(.caption.monospaced()); Text("可选 JSON 对象，会与表单字段合并。").font(.caption).foregroundStyle(.secondary) }
                 if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
             }
             .navigationTitle("添加用户")
@@ -255,12 +287,14 @@ private struct CreateUserView: View {
     }
 
     private func save() {
-        guard let client = try? store.client() else { return }
-        struct Body: Encodable, Sendable { let email: String; let password: String; let username: String?; let role: String; let status: String; let balance: Double }
+        guard let service = try? store.adminService() else { return }
         isSaving = true
         Task {
             do {
-                let _: AdminUser = try await client.send("/api/v1/admin/users", method: .post, body: Body(email: email, password: password, username: username.isEmpty ? nil : username, role: role, status: "active", balance: Double(balance) ?? 0))
+                var body = try FormParsing.jsonObject(extraJSON)
+                body["email"] = .string(email); body["password"] = .string(password); body["role"] = .string(role); body["status"] = .string(status); body["balance"] = .number(Double(balance) ?? 0)
+                if let value = username.nilIfBlank { body["username"] = .string(value) }; if let value = notes.nilIfBlank { body["notes"] = .string(value) }; if let value = Int(concurrency) { body["concurrency"] = .number(Double(value)) }
+                let _: AdminUser = try await service.createUser(body)
                 dismiss()
             } catch { errorMessage = error.localizedDescription }
             isSaving = false
@@ -297,16 +331,10 @@ private struct BalanceEditorView: View {
     }
 
     private func save() {
-        guard let client = try? store.client(), let value = Double(amount) else { return }
-        struct Body: Encodable, Sendable { let balance: Double; let operation: String; let notes: String? }
+        guard let service = try? store.adminService(), let value = Double(amount) else { return }
         Task {
             do {
-                let _: AdminUser = try await client.send(
-                    "/api/v1/admin/users/\(user.id)/balance",
-                    method: .post,
-                    body: Body(balance: value, operation: operation, notes: notes.isEmpty ? nil : notes),
-                    idempotencyKey: "user-balance-\(user.id)-\(UUID().uuidString)"
-                )
+                let _: AdminUser = try await service.updateUserBalance(user.id, amount: value, operation: operation, notes: notes.nilIfBlank)
                 dismiss()
             } catch { errorMessage = error.localizedDescription }
         }

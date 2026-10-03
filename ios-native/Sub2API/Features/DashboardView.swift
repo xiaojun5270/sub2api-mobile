@@ -8,6 +8,9 @@ struct DashboardView: View {
     @State private var usage: UsageSummary?
     @State private var trend: [TrendPoint] = []
     @State private var accounts: [AdminAccount] = []
+    @State private var models: [ModelStat] = []
+    @State private var groups: [SnapshotGroup] = []
+    @State private var ops: OpsOverview?
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -31,6 +34,8 @@ struct DashboardView: View {
                     accountOverview
                     trendCard
                     throughputCard
+                    modelCard
+                    groupCard
                 }
             }
             .padding(.horizontal, 16)
@@ -172,43 +177,65 @@ struct DashboardView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            Divider()
+            HStack {
+                Label("错误率 \(NumberFormatters.percent(ops?.errorRate))", systemImage: "exclamationmark.triangle")
+                Spacer()
+                Label("P95 \(String(format: "%.0fms", ops?.p95LatencyMs ?? 0))", systemImage: "timer")
+                Spacer()
+                Label("告警 \(NumberFormatters.compact(ops?.alertCount))", systemImage: "bell")
+            }.font(.caption).foregroundStyle(.secondary)
         }
         .padding(16)
         .glassPanel()
     }
 
+    private var modelCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("模型使用分布").font(.headline)
+            if models.isEmpty { Text("暂无模型数据").font(.footnote).foregroundStyle(.secondary) }
+            else { Chart(models.prefix(8)) { model in BarMark(x: .value("请求", model.requests ?? 0), y: .value("模型", model.model)).foregroundStyle(AppPalette.blue) }.frame(height: CGFloat(max(180, min(models.count, 8) * 32))).chartXAxis(.hidden) }
+            ForEach(models.prefix(8)) { model in HStack { Text(model.model).font(.caption).lineLimit(1); Spacer(); Text("\(NumberFormatters.compact(model.requests)) 请求 · \(NumberFormatters.compact(model.totalTokens)) Token · \(NumberFormatters.currency(model.actualCost ?? model.cost))").font(.caption2).foregroundStyle(.secondary) } }
+        }.padding(16).glassPanel()
+    }
+
+    private var groupCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("分组使用分布").font(.headline)
+            if groups.isEmpty { Text("暂无分组使用数据").font(.footnote).foregroundStyle(.secondary) }
+            ForEach(Array(groups.prefix(12).enumerated()), id: \.offset) { _, group in
+                HStack(spacing: 8) {
+                    Text(group.groupName ?? group.name ?? "未分组").font(.caption.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(NumberFormatters.compact(group.totalRequests ?? group.requests)).font(.caption2.monospacedDigit()).frame(width: 48, alignment: .trailing)
+                    Text(NumberFormatters.compact(group.totalTokens ?? group.tokens)).font(.caption2.monospacedDigit()).frame(width: 54, alignment: .trailing)
+                    Text(NumberFormatters.currency(group.totalActualCost ?? group.actualCost ?? group.totalCost ?? group.cost)).font(.caption2.monospacedDigit()).frame(width: 60, alignment: .trailing)
+                }
+                if group.id != groups.prefix(12).last?.id { Divider() }
+            }
+        }.padding(16).glassPanel()
+    }
+
     private func load() async {
-        guard let client = try? store.client() else { return }
+        guard let service = try? store.adminService() else { return }
         isLoading = true
         errorMessage = nil
         do {
             let dateRange = range.queryRange
-            async let nextStats: DashboardStats = client.get("/api/v1/admin/dashboard/stats")
-            async let nextUsage: UsageSummary = client.get(
-                "/api/v1/admin/usage/stats",
-                query: [
-                    URLQueryItem(name: "start_date", value: dateRange.start),
-                    URLQueryItem(name: "end_date", value: dateRange.end)
-                ]
-            )
-            async let nextTrend: DashboardTrend = client.get(
-                "/api/v1/admin/dashboard/trend",
-                query: [
-                    URLQueryItem(name: "start_date", value: dateRange.start),
-                    URLQueryItem(name: "end_date", value: dateRange.end),
-                    URLQueryItem(name: "granularity", value: range == .day ? "hour" : "day")
-                ]
-            )
-            async let nextAccounts: Page<AdminAccount> = client.listPage(
-                "/api/v1/admin/accounts",
-                query: [URLQueryItem(name: "page", value: "1"), URLQueryItem(name: "page_size", value: "100")],
-                itemKeys: ["accounts", "items", "data"]
-            )
-            let result = try await (nextStats, nextUsage, nextTrend, nextAccounts)
+            async let nextStats = service.dashboardStats()
+            async let nextUsage = service.usageStats(start: dateRange.start, end: dateRange.end)
+            async let nextTrend = service.dashboardTrend(start: dateRange.start, end: dateRange.end, granularity: range == .day ? "hour" : "day")
+            async let nextModels = service.dashboardModels(start: dateRange.start, end: dateRange.end)
+            async let nextSnapshot = service.dashboardSnapshot(start: dateRange.start, end: dateRange.end, granularity: range == .day ? "hour" : "day", filters: ["include_stats": "false", "include_trend": "false", "include_model_stats": "false", "include_group_stats": "true"])
+            async let nextAccounts = service.accounts()
+            async let nextOps: OpsOverview? = try? await service.opsOverview(filters: ["window": "24h"])
+            let result = try await (nextStats, nextUsage, nextTrend, nextModels, nextSnapshot, nextAccounts, nextOps)
             stats = result.0
             usage = result.1
             trend = result.2.trend
-            accounts = result.3.items
+            models = result.3.models
+            groups = result.4.groups ?? []
+            accounts = result.5.items
+            ops = result.6
         } catch {
             errorMessage = error.localizedDescription
         }

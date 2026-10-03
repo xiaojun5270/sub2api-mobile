@@ -20,6 +20,14 @@
 		B0010000000000000000000C /* ServersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0010000000000000000000C /* ServersView.swift */; };
 		B0010000000000000000000D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F0010000000000000000000D /* Assets.xcassets */; };
 		B0010000000000000000000E /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000010 /* PrivacyInfo.xcprivacy */; };
+		B0010000000000000000000F /* AdminModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000011 /* AdminModels.swift */; };
+		B00100000000000000000010 /* AdminService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000012 /* AdminService.swift */; };
+		B00100000000000000000011 /* FeatureSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000013 /* FeatureSupport.swift */; };
+		B00100000000000000000012 /* AccountsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000014 /* AccountsViews.swift */; };
+		B00100000000000000000013 /* APIKeysViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000015 /* APIKeysViews.swift */; };
+		B00100000000000000000014 /* GroupsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000016 /* GroupsViews.swift */; };
+		B00100000000000000000015 /* UsageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000017 /* UsageViews.swift */; };
+		B00100000000000000000016 /* OpsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000018 /* OpsViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +47,14 @@
 		F0010000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F0010000000000000000000F /* Sub2API.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sub2API.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F00100000000000000000010 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F00100000000000000000011 /* AdminModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminModels.swift; sourceTree = "<group>"; };
+		F00100000000000000000012 /* AdminService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminService.swift; sourceTree = "<group>"; };
+		F00100000000000000000013 /* FeatureSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSupport.swift; sourceTree = "<group>"; };
+		F00100000000000000000014 /* AccountsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsViews.swift; sourceTree = "<group>"; };
+		F00100000000000000000015 /* APIKeysViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIKeysViews.swift; sourceTree = "<group>"; };
+		F00100000000000000000016 /* GroupsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupsViews.swift; sourceTree = "<group>"; };
+		F00100000000000000000017 /* UsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViews.swift; sourceTree = "<group>"; };
+		F00100000000000000000018 /* OpsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpsViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -80,6 +96,8 @@
 				F00100000000000000000003 /* APIClient.swift */,
 				F00100000000000000000004 /* KeychainStore.swift */,
 				F00100000000000000000005 /* AppStore.swift */,
+				F00100000000000000000011 /* AdminModels.swift */,
+				F00100000000000000000012 /* AdminService.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -89,6 +107,7 @@
 			children = (
 				F00100000000000000000006 /* GlassUI.swift */,
 				F00100000000000000000007 /* RootView.swift */,
+				F00100000000000000000013 /* FeatureSupport.swift */,
 			);
 			path = UI;
 			sourceTree = "<group>";
@@ -101,6 +120,11 @@
 				F0010000000000000000000A /* UsersView.swift */,
 				F0010000000000000000000B /* ManagementView.swift */,
 				F0010000000000000000000C /* ServersView.swift */,
+				F00100000000000000000014 /* AccountsViews.swift */,
+				F00100000000000000000015 /* APIKeysViews.swift */,
+				F00100000000000000000016 /* GroupsViews.swift */,
+				F00100000000000000000017 /* UsageViews.swift */,
+				F00100000000000000000018 /* OpsViews.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -182,6 +206,14 @@
 				B0010000000000000000000A /* UsersView.swift in Sources */,
 				B0010000000000000000000B /* ManagementView.swift in Sources */,
 				B0010000000000000000000C /* ServersView.swift in Sources */,
+				B0010000000000000000000F /* AdminModels.swift in Sources */,
+				B00100000000000000000010 /* AdminService.swift in Sources */,
+				B00100000000000000000011 /* FeatureSupport.swift in Sources */,
+				B00100000000000000000012 /* AccountsViews.swift in Sources */,
+				B00100000000000000000013 /* APIKeysViews.swift in Sources */,
+				B00100000000000000000014 /* GroupsViews.swift in Sources */,
+				B00100000000000000000015 /* UsageViews.swift in Sources */,
+				B00100000000000000000016 /* OpsViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
