@@ -14,6 +14,7 @@ struct DashboardView: View {
     @State private var profile: JSONValue?
     @State private var userRanking: JSONValue?
     @State private var granularity = "auto"
+    @State private var groupMetric = "tokens"
     @State private var isLoading = true
     @State private var errorMessage: String?
 
@@ -40,12 +41,12 @@ struct DashboardView: View {
                     InlineErrorView(message: errorMessage) { Task { await load() } }
                 } else {
                     summaryGrid
+                    groupCard
                     webConsoleSummary
                     accountOverview
                     trendCard
                     throughputCard
                     modelCard
-                    groupCard
                     rankingCard
                 }
             }
@@ -269,19 +270,126 @@ struct DashboardView: View {
     }
 
     private var groupCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("分组使用分布").font(.headline)
-            if groups.isEmpty { Text("暂无分组使用数据").font(.footnote).foregroundStyle(.secondary) }
-            ForEach(Array(groups.prefix(12).enumerated()), id: \.offset) { _, group in
-                HStack(spacing: 8) {
-                    Text(group.groupName ?? group.name ?? "未分组").font(.caption.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                    Text(NumberFormatters.compact(group.totalRequests ?? group.requests)).font(.caption2.monospacedDigit()).frame(width: 48, alignment: .trailing)
-                    Text(NumberFormatters.compact(group.totalTokens ?? group.tokens)).font(.caption2.monospacedDigit()).frame(width: 54, alignment: .trailing)
-                    Text(NumberFormatters.currency(group.totalActualCost ?? group.actualCost ?? group.totalCost ?? group.cost)).font(.caption2.monospacedDigit()).frame(width: 60, alignment: .trailing)
+        let sortedGroups = groups.sorted { groupDistributionValue($0) > groupDistributionValue($1) }
+        let visibleGroups = Array(sortedGroups.prefix(12))
+        let total = visibleGroups.reduce(0) { $0 + groupDistributionValue($1) }
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "chart.pie.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(AppPalette.blue)
+                    .frame(width: 34, height: 34)
+                    .background(AppPalette.blue.opacity(0.1), in: Circle())
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("分组使用分布").font(.headline)
+                    Text("今日分组请求、Token 与费用分布")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                if group.id != groups.prefix(12).last?.id { Divider() }
+                Spacer(minLength: 6)
+                Picker("分组指标", selection: $groupMetric) {
+                    Text("按 Token").tag("tokens")
+                    Text("按实际消耗").tag("cost")
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+                .controlSize(.small)
             }
-        }.padding(16).glassPanel()
+
+            if visibleGroups.isEmpty || total <= 0 {
+                ZStack {
+                    Circle().stroke(.secondary.opacity(0.12), lineWidth: 16)
+                    VStack(spacing: 2) {
+                        Text(groupMetric == "tokens" ? "Token" : "实际消耗").font(.caption2).foregroundStyle(.secondary)
+                        Text("--").font(.title3.bold())
+                    }
+                }
+                .frame(width: 160, height: 160)
+                .frame(maxWidth: .infinity)
+            } else {
+                ZStack {
+                    Chart(Array(visibleGroups.enumerated()), id: \.offset) { index, group in
+                        SectorMark(
+                            angle: .value("占比", groupDistributionValue(group)),
+                            innerRadius: .ratio(0.67),
+                            angularInset: 1.2
+                        )
+                        .cornerRadius(2)
+                        .foregroundStyle(groupColor(index))
+                    }
+                    .chartLegend(.hidden)
+                    VStack(spacing: 2) {
+                        Text(groupMetric == "tokens" ? "Token" : "实际消耗")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        Text(groupMetric == "tokens" ? NumberFormatters.compact(total) : NumberFormatters.currency(total))
+                            .font(.system(.title3, design: .rounded, weight: .bold))
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(width: 90)
+                }
+                .frame(height: 184)
+                .padding(.horizontal, 42)
+            }
+
+            VStack(spacing: 0) {
+                HStack(spacing: 6) {
+                    Text("分组").frame(maxWidth: .infinity, alignment: .leading)
+                    Text("请求").frame(width: 42, alignment: .trailing)
+                    Text("Token").frame(width: 52, alignment: .trailing)
+                    Text("实际").frame(width: 56, alignment: .trailing)
+                    Text("标准").frame(width: 56, alignment: .trailing)
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 7)
+
+                ForEach(Array(visibleGroups.enumerated()), id: \.offset) { index, group in
+                    HStack(spacing: 6) {
+                        HStack(spacing: 6) {
+                            Circle().fill(groupColor(index)).frame(width: 7, height: 7)
+                            Text(group.groupName ?? group.name ?? "未分组")
+                                .font(.caption.weight(.semibold)).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(NumberFormatters.compact(group.totalRequests ?? group.requests))
+                            .frame(width: 42, alignment: .trailing)
+                        Text(NumberFormatters.compact(group.totalTokens ?? group.tokens))
+                            .frame(width: 52, alignment: .trailing)
+                        Text(NumberFormatters.currency(group.totalActualCost ?? group.actualCost ?? group.totalCost ?? group.cost))
+                            .foregroundStyle(AppPalette.teal).fontWeight(.bold)
+                            .frame(width: 56, alignment: .trailing)
+                        Text(NumberFormatters.currency(group.standardCost ?? group.totalCost ?? group.cost))
+                            .frame(width: 56, alignment: .trailing)
+                    }
+                    .font(.caption2.monospacedDigit())
+                    .padding(.vertical, 8)
+                    if index < visibleGroups.count - 1 { Divider() }
+                }
+            }
+        }
+        .padding(14)
+        .glassPanel(cornerRadius: 18)
+    }
+
+    private func groupDistributionValue(_ group: SnapshotGroup) -> Double {
+        if groupMetric == "cost" {
+            return group.totalActualCost ?? group.actualCost ?? group.totalCost ?? group.cost ?? 0
+        }
+        return group.totalTokens ?? group.tokens ?? 0
+    }
+
+    private func groupColor(_ index: Int) -> Color {
+        let colors: [Color] = [
+            Color(red: 0.18, green: 0.49, blue: 0.95),
+            Color(red: 0.04, green: 0.70, blue: 0.49),
+            Color(red: 0.98, green: 0.58, blue: 0.05),
+            Color(red: 0.49, green: 0.32, blue: 0.91),
+            Color(red: 0.03, green: 0.65, blue: 0.75),
+            Color(red: 0.93, green: 0.27, blue: 0.49),
+            Color(red: 0.34, green: 0.67, blue: 0.20),
+            Color(red: 0.12, green: 0.42, blue: 0.76)
+        ]
+        return colors[index % colors.count]
     }
 
     private var rankingCard: some View {

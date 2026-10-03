@@ -317,38 +317,30 @@ private struct AccountSummaryCard: View {
     private var sevenDay: QuotaWindow { quotaWindow(label: "7D", token: "7d") }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             Button(action: onOpen) {
-                VStack(spacing: 8) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "key.fill").font(.caption).foregroundStyle(AppPalette.blue)
-                            .frame(width: 26, height: 26).background(AppPalette.blue.opacity(0.09), in: Circle())
-                        Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
-                        Text("#\(account.id) · \(account.platform) · \(account.type)")
-                            .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
-                        Spacer(minLength: 4)
-                        StatusPill(text: style.0, color: style.1)
-                    }
-                    HStack {
-                        Label("状态：\(style.0)", systemImage: "shield")
-                        Spacer()
-                        Text("最近使用 \(shortTime(account.lastUsedAt ?? account.updatedAt))")
-                    }
-                    .font(.caption2).foregroundStyle(.secondary)
+                HStack(spacing: 7) {
+                    Image(systemName: "key.fill").font(.caption2).foregroundStyle(AppPalette.blue)
+                        .frame(width: 24, height: 24).background(AppPalette.blue.opacity(0.09), in: Circle())
+                    Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                    Text("\(account.platform) · \(account.type)")
+                        .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+                    Spacer(minLength: 4)
+                    StatusPill(text: style.0, color: style.1)
                 }
             }
             .buttonStyle(.plain)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3), spacing: 7) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
                 metric("今日请求", NumberFormatters.compact(metrics.todayRequests) + " req", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", NumberFormatters.compact(metrics.todayTokens), "cpu", .cyan)
                 metric("今日额度", "A \(NumberFormatters.currency(metrics.todayActualCost))\nU \(NumberFormatters.currency(metrics.todayUserCost))", "dollarsign", .orange)
-                metric("总请求", NumberFormatters.compact(metrics.totalRequests) + " req", "number", .indigo)
+                metric("总请求", NumberFormatters.compact(metrics.totalRequests) + " req", nil, .indigo)
                 metric("总 Token", NumberFormatters.compact(metrics.totalTokens), "cpu.fill", .mint)
                 metric("总额度", NumberFormatters.currency(metrics.totalCost), "wallet.pass", AppPalette.teal)
             }
 
-            VStack(spacing: 8) {
+            VStack(spacing: 5) {
                 HStack {
                     Label("额度窗口", systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
                     Spacer()
@@ -356,51 +348,62 @@ private struct AccountSummaryCard: View {
                 }
                 quotaRow(fiveHour)
                 quotaRow(sevenDay)
-                HStack(spacing: 7) {
+                HStack(spacing: 5) {
                     cardButton("查询", "magnifyingglass", .primary, onQueryQuota)
-                    cardButton("次数", "number", .primary, onCountQuota)
+                    cardButton("次数", nil, .primary, onCountQuota)
                     cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
                 }
             }
-            .padding(10)
-            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
+            .padding(8)
+            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
 
-            HStack(spacing: 7) {
+            HStack(spacing: 5) {
                 cardButton("编辑", "pencil", .primary, onEdit)
                 cardButton(disabled ? "启用" : "禁用", "power", .primary, onToggleEnabled)
                 cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", .primary, onToggleScheduling)
                 cardButton("删除", "trash", .red, onDelete)
             }
-            HStack(spacing: 7) {
+            HStack(spacing: 5) {
                 cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
                 cardButton(selectedModel ?? "选择模型", "cpu", .primary, onSelectModel, fill: .primary.opacity(0.045))
             }
         }
-        .padding(10)
+        .padding(8)
         .glassPanel(cornerRadius: 18)
     }
 
-    private func metric(_ label: String, _ value: String, _ symbol: String, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label(label, systemImage: symbol).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+    private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if let symbol { Label(label, systemImage: symbol) }
+                else { Text(label) }
+            }
+            .font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
             Text(value).font(.system(.headline, design: .rounded, weight: .bold)).foregroundStyle(.primary)
                 .lineLimit(2).minimumScaleFactor(0.68)
         }
-        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
-        .padding(9)
-        .background(color.opacity(0.075), in: RoundedRectangle(cornerRadius: 13))
-        .overlay(RoundedRectangle(cornerRadius: 13).stroke(color.opacity(0.18), lineWidth: 0.7))
+        .padding(7)
+        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+        .background(color.opacity(0.075), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.18), lineWidth: 0.7))
     }
 
     private func quotaRow(_ window: QuotaWindow) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 2) {
             HStack { Text(window.label).font(.caption.weight(.bold)); Spacer(); Text("\(Int(window.percent.rounded()))% · \(window.remaining)").font(.caption2).foregroundStyle(.secondary) }
             ProgressView(value: min(max(window.percent / 100, 0), 1)).tint(window.percent >= 90 ? .red : AppPalette.teal)
         }
     }
 
-    private func cardButton(_ title: String, _ symbol: String, _ color: Color, _ action: @escaping () -> Void, fill: Color = .primary.opacity(0.035)) -> some View {
-        Button(action: action) { Label(title, systemImage: symbol).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity).padding(.vertical, 7) }
+    private func cardButton(_ title: String, _ symbol: String?, _ color: Color, _ action: @escaping () -> Void, fill: Color = .primary.opacity(0.035)) -> some View {
+        Button(action: action) {
+            Group {
+                if let symbol { Label(title, systemImage: symbol) }
+                else { Text(title) }
+            }
+            .font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, minHeight: 30)
+        }
             .buttonStyle(.plain).foregroundStyle(color).background(fill, in: Capsule())
     }
 
