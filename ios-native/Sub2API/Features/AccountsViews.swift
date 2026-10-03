@@ -35,24 +35,48 @@ struct AccountsView: View {
     private var types: [String] { ["all"] + Array(Set(accounts.map(\.type))).sorted() }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
+        List {
+            Section {
                 summary
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
+                    .listRowSeparator(.hidden)
                 filterBar
-                if let message { Text(message).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(12).glassPanel(cornerRadius: 14) }
-                if isLoading && accounts.isEmpty { LoadingView(label: "正在加载账号") }
-                else if let errorMessage, accounts.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
-                else if filtered.isEmpty { EmptyContentView(symbol: "shield.slash", title: "暂无账号", message: "当前筛选条件下没有匹配账号。") }
-                else {
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
+                if let message {
+                    Text(message).font(.footnote).foregroundStyle(.secondary)
+                        .listRowBackground(Color.primary.opacity(0.035))
+                }
+            }
+
+            Section {
+                if isLoading && accounts.isEmpty {
+                    HStack { Spacer(); ProgressView(); Text("正在加载账号").font(.footnote).foregroundStyle(.secondary); Spacer() }
+                        .padding(.vertical, 28)
+                } else if let errorMessage, accounts.isEmpty {
+                    InlineErrorView(message: errorMessage) { Task { await load() } }
+                        .listRowSeparator(.hidden)
+                } else if filtered.isEmpty {
+                    ContentUnavailableView("暂无账号", systemImage: "shield.slash", description: Text("当前筛选条件下没有匹配账号。"))
+                        .listRowSeparator(.hidden)
+                } else {
                     ForEach(filtered) { account in
                         NavigationLink { AccountDetailView(initialAccount: account) } label: { AccountRow(account: account) }
-                            .buttonStyle(.plain)
                             .contextMenu { accountMenu(account) }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button { editingAccount = account } label: { Label("编辑", systemImage: "pencil") }.tint(AppPalette.blue)
+                                Button { Task { await test(account) } } label: { Label("测试", systemImage: "checkmark.circle") }.tint(AppPalette.teal)
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { deletingAccount = account } label: { Label("删除", systemImage: "trash") }
+                                Button { Task { await toggle(account) } } label: { Label(account.schedulable == false ? "恢复" : "暂停", systemImage: "pause.circle") }.tint(AppPalette.orange)
+                            }
                     }
                 }
             }
-            .padding(16)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .searchable(text: $searchText, prompt: "名称、ID、平台或分组")
         .refreshable { await load() }
         .navigationTitle("账号管理")
@@ -89,13 +113,14 @@ struct AccountsView: View {
         let paused = accounts.filter { StatusStyle.account($0).0 == "暂停" }.count
         let errors = accounts.filter { StatusStyle.account($0).0 == "异常" }.count
         let limited = accounts.filter { StatusStyle.account($0).0 == "限流" }.count
-        return HStack(spacing: 8) {
+        return HStack(spacing: 0) {
             compactMetric("全部", accounts.count, .primary)
             compactMetric("正常", active, .green)
             compactMetric("暂停", paused, .secondary)
             compactMetric("异常", errors, AppPalette.orange)
             compactMetric("限流", limited, AppPalette.purple)
-        }.padding(12).glassPanel(cornerRadius: 18)
+        }
+        .padding(.vertical, 6)
     }
 
     private func compactMetric(_ label: String, _ value: Int, _ color: Color) -> some View {
@@ -182,21 +207,28 @@ private struct AccountRow: View {
     let account: AdminAccount
     var body: some View {
         let style = StatusStyle.account(account)
-        HStack(spacing: 12) {
-            Image(systemName: platformSymbol).font(.title3).foregroundStyle(platformColor).frame(width: 42, height: 42).background(platformColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 13))
+        HStack(spacing: 10) {
+            Circle().fill(style.1).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 4) {
-                Text(account.name).font(.subheadline.bold()).lineLimit(1)
-                Text("#\(account.id) · \(account.platform) · \(account.type)").font(.caption).foregroundStyle(.secondary)
-                HStack(spacing: 10) {
-                    Label("\(account.currentConcurrency ?? 0)/\(account.concurrency ?? 0)", systemImage: "bolt.horizontal")
-                    if let group = account.groupName ?? account.groups?.first?.name { Label(group, systemImage: "folder") }
-                }.font(.caption2).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(account.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Text("#\(account.id)").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                }
+                Text("\(account.platform) · \(account.type)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 4); StatusPill(text: style.0, color: style.1); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-        }.padding(14).contentShape(Rectangle()).glassPanel(cornerRadius: 18, interactive: true)
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(style.0).font(.caption.weight(.semibold)).foregroundStyle(style.1)
+                Label("\(account.currentConcurrency ?? 0)/\(account.concurrency ?? 0)", systemImage: "bolt.horizontal")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                if let group = account.groupName ?? account.groups?.first?.name {
+                    Text(group).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
-    private var platformSymbol: String { switch account.platform.lowercased() { case "openai": "brain.head.profile"; case "anthropic": "sparkles"; case "gemini", "antigravity": "diamond.fill"; case "grok": "bolt.fill"; default: "server.rack" } }
-    private var platformColor: Color { switch account.platform.lowercased() { case "openai": AppPalette.teal; case "anthropic": AppPalette.orange; case "gemini", "antigravity": AppPalette.blue; case "grok": AppPalette.purple; default: .secondary } }
 }
 
 struct AccountDetailView: View {
