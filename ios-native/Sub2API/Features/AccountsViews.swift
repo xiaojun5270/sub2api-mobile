@@ -290,7 +290,7 @@ struct AccountDetailView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("模型（\(models.count)）").font(.headline)
             if models.isEmpty { Text("暂无模型").font(.footnote).foregroundStyle(.secondary) }
-            ForEach(models.prefix(20)) { model in HStack { Image(systemName: model.enabled == false ? "circle" : "checkmark.circle.fill").foregroundStyle(model.enabled == false ? .secondary : .green); Text(model.displayName ?? model.model ?? model.name ?? model.id).font(.subheadline); Spacer(); Text(model.source ?? "").font(.caption2).foregroundStyle(.secondary) } }
+            ForEach(models.prefix(20)) { model in HStack { Image(systemName: model.enabled == false ? "circle" : "checkmark.circle.fill").foregroundStyle(model.enabled == false ? Color.secondary : Color.green); Text(model.displayName ?? model.model ?? model.name ?? model.id).font(.subheadline); Spacer(); Text(model.source ?? "").font(.caption2).foregroundStyle(.secondary) } }
         }.padding(16).glassPanel()
     }
 
@@ -333,9 +333,9 @@ struct AccountEditorView: View {
 
     init(account: AdminAccount) {
         self.account = account; _name = State(initialValue: account.name); _notes = State(initialValue: account.notes ?? "")
-        _concurrency = State(initialValue: account.concurrency.map(String.init) ?? ""); _loadFactor = State(initialValue: account.loadFactor.map(String.init) ?? "")
-        _priority = State(initialValue: account.priority.map(String.init) ?? ""); _multiplier = State(initialValue: account.rateMultiplier.map(String.init) ?? "")
-        _proxyID = State(initialValue: account.proxyID.map(String.init) ?? ""); _groupIDs = State(initialValue: account.groupIDs?.map(String.init).joined(separator: ",") ?? account.groups?.map { String($0.id) }.joined(separator: ",") ?? "")
+        _concurrency = State(initialValue: account.concurrency.map { String($0) } ?? ""); _loadFactor = State(initialValue: account.loadFactor.map { String($0) } ?? "")
+        _priority = State(initialValue: account.priority.map { String($0) } ?? ""); _multiplier = State(initialValue: account.rateMultiplier.map { String($0) } ?? "")
+        _proxyID = State(initialValue: account.proxyID.map { String($0) } ?? ""); _groupIDs = State(initialValue: account.groupIDs?.map { String($0) }.joined(separator: ",") ?? account.groups?.map { String($0.id) }.joined(separator: ",") ?? "")
         _expiresAt = State(initialValue: account.expiresAt ?? ""); _privacyMode = State(initialValue: account.privacyMode ?? "")
         _status = State(initialValue: account.status ?? "active"); _schedulable = State(initialValue: account.schedulable ?? true)
     }
@@ -357,7 +357,7 @@ struct AccountEditorView: View {
             if let value = try FormParsing.integer(priority) { body["priority"] = .number(Double(value)) }; if let value = try FormParsing.number(multiplier) { body["rate_multiplier"] = .number(value) }
             if proxyID.lowercased() == "null" { body["proxy_id"] = .null } else if let value = try FormParsing.integer(proxyID) { body["proxy_id"] = .number(Double(value)) }
             if let values = try FormParsing.integerList(groupIDs) { body["group_ids"] = .array(values.map { .number(Double($0)) }) }
-            if let value = privacyMode.nilIfBlank { body["privacy_mode"] = .string(value) }; body["expires_at"] = expiresAt.nilIfBlank.map(JSONValue.string) ?? .null
+            if let value = privacyMode.nilIfBlank { body["privacy_mode"] = .string(value) }; body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null
             _ = try await service.updateAccount(account.id, body: body); dismiss()
         } catch { errorMessage = error.localizedDescription } }
     }
@@ -397,8 +397,8 @@ struct AccountCreationView: View {
     @State private var openAIPassthrough = false; @State private var longContextBilling = false; @State private var codexOnly = false; @State private var appServer = false; @State private var websocketMode = "none"; @State private var compactMode = "auto"; @State private var responsesMode = "auto"; @State private var anthropicPassthrough = false
     @State private var groups: [AdminGroup] = []; @State private var showsFileImporter = false; @State private var isWorking = false; @State private var errorMessage: String?
 
-    private let platforms = ["openai", "anthropic", "gemini", "antigravity", "grok"]
-    private var types: [String] { switch platform { case "openai", "grok": ["apikey", "oauth"]; case "anthropic": ["apikey", "oauth", "setup-token", "service_account", "bedrock"]; case "gemini": ["apikey", "oauth", "service_account"]; default: ["oauth", "upstream"] } }
+    private let platforms = ["openai", "anthropic", "gemini", "antigravity", "grok", "kimi", "zhipu", "deepseek", "minimax", "opencode_go", "typesafe"]
+    private var types: [String] { switch platform { case "openai", "grok": ["apikey", "oauth"]; case "anthropic": ["apikey", "oauth", "setup-token", "service_account", "bedrock"]; case "gemini": ["apikey", "oauth", "service_account"]; case "antigravity": ["oauth", "upstream"]; default: ["apikey", "oauth", "upstream"] } }
     private var oauthMethods: [String] { if platform == "anthropic" { ["authorization", "session-key", "manual"] } else if platform == "openai" { ["authorization", "refresh-token", "mobile-refresh-token", "codex-session", "agent-identity", "codex-pat", "manual"] } else { ["manual"] } }
 
     var body: some View {
@@ -448,7 +448,7 @@ struct AccountCreationView: View {
 
     private func create() { guard let service = try? store.adminService() else { return }; isWorking = true; errorMessage = nil; Task { do { let common = try commonBody(); let extra = platformExtra(); if (type == "oauth" || type == "setup-token") && platform == "openai" && ["codex-session", "agent-identity"].contains(oauthMethod) { var body = common; body["content"] = .string(codexContent); body["update_existing"] = .bool(true); if !extra.isEmpty { body["extra"] = .object(extra) }; _ = try await service.importCodexSession(body); dismiss(); return }; if (type == "oauth" || type == "setup-token") && platform == "openai" && oauthMethod == "codex-pat" { var body = common; body["access_token"] = .string(codexPAT); if !extra.isEmpty { body["extra"] = .object(extra) }; _ = try await service.createFromCodexPAT(body); dismiss(); return }; var credentials = try await credentials(service: service); var body = common; body["platform"] = .string(platform); body["type"] = .string(type); body["credentials"] = .object(credentials); if !extra.isEmpty { body["extra"] = .object(extra) }; _ = try await service.createAccount(body); dismiss() } catch { errorMessage = error.localizedDescription }; isWorking = false } }
 
-    private func commonBody() throws -> [String: JSONValue] { var body: [String: JSONValue] = ["name": .string(name), "auto_pause_on_expired": .bool(autoPause)]; if let value = notes.nilIfBlank { body["notes"] = .string(value) }; if let value = try FormParsing.integer(proxyID) { body["proxy_id"] = .number(Double(value)) } else { body["proxy_id"] = .null }; if let value = try FormParsing.integer(concurrency) { body["concurrency"] = .number(Double(value)) }; if let value = try FormParsing.number(loadFactor) { body["load_factor"] = .number(value) }; if let value = try FormParsing.integer(priority) { body["priority"] = .number(Double(value)) }; if let value = try FormParsing.number(multiplier) { body["rate_multiplier"] = .number(value) }; if !selectedGroups.isEmpty { body["group_ids"] = .array(selectedGroups.sorted().map { .number(Double($0)) }) }; body["expires_at"] = expiresAt.nilIfBlank.map(JSONValue.string) ?? .null; if confirmMixedRisk { body["confirm_mixed_channel_risk"] = .bool(true) }; return body }
+    private func commonBody() throws -> [String: JSONValue] { var body: [String: JSONValue] = ["name": .string(name), "auto_pause_on_expired": .bool(autoPause)]; if let value = notes.nilIfBlank { body["notes"] = .string(value) }; if let value = try FormParsing.integer(proxyID) { body["proxy_id"] = .number(Double(value)) } else { body["proxy_id"] = .null }; if let value = try FormParsing.integer(concurrency) { body["concurrency"] = .number(Double(value)) }; if let value = try FormParsing.number(loadFactor) { body["load_factor"] = .number(value) }; if let value = try FormParsing.integer(priority) { body["priority"] = .number(Double(value)) }; if let value = try FormParsing.number(multiplier) { body["rate_multiplier"] = .number(value) }; if !selectedGroups.isEmpty { body["group_ids"] = .array(selectedGroups.sorted().map { .number(Double($0)) }) }; body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null; if confirmMixedRisk { body["confirm_mixed_channel_risk"] = .bool(true) }; return body }
 
     private func credentials(service: AdminService) async throws -> [String: JSONValue] {
         if type == "apikey" || type == "upstream" { var result: [String: JSONValue] = ["base_url": .string(baseURL), "api_key": .string(apiKey)]; if platform == "gemini" { result["tier_id"] = .string(tier) }; if let v = try FormParsing.number(quotaLimit) { result["quota_limit"] = .number(v) }; if let v = try FormParsing.number(dailyLimit) { result["quota_daily_limit"] = .number(v) }; if let v = try FormParsing.number(weeklyLimit) { result["quota_weekly_limit"] = .number(v) }; if poolMode { result["pool_mode"] = .bool(true); if let v = try FormParsing.integer(poolRetries) { result["pool_mode_retry_count"] = .number(Double(v)) }; if let list = try FormParsing.integerList(poolCodes) { result["pool_mode_retry_status_codes"] = .array(list.map { .number(Double($0)) }) } }; if customCodesEnabled { result["custom_error_codes_enabled"] = .bool(true); if let list = try FormParsing.integerList(customCodes) { result["custom_error_codes"] = .array(list.map { .number(Double($0)) }) } }; return result }

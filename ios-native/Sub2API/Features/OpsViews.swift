@@ -90,7 +90,11 @@ private struct OpsOverviewView: View {
     }
 
     private func extractRows(_ value: JSONValue?, keys: [String]) -> [[String: JSONValue]] {
-        guard let value else { return [] }; if let array = value.arrayValue { return array.compactMap(\.objectValue) }; guard let object = value.objectValue else { return [] }; return object.rows(keys)
+        guard let value else { return [] }
+        if let array = value.arrayValue { return array.compactMap(\.objectValue) }
+        guard let object = value.objectValue else { return [] }
+        for key in keys { let rows = object.rows(key); if !rows.isEmpty { return rows } }
+        return []
     }
 
     private func load() async {
@@ -115,7 +119,7 @@ private struct OpsOverviewView: View {
     }
 }
 
-private struct DynamicJSONView: View {
+struct DynamicJSONView: View {
     let value: JSONValue
     var body: some View {
         switch value {

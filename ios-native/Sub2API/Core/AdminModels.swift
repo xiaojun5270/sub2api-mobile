@@ -268,3 +268,23 @@ struct OpsMetricCollection: Decodable, Sendable {
     let distribution: [JSONValue]?
     let histogram: [JSONValue]?
 }
+
+struct DynamicRecord: Identifiable, Hashable, Sendable {
+    let id: String
+    let object: [String: JSONValue]
+
+    init(value: JSONValue, index: Int) {
+        object = value.objectValue ?? ["value": value]
+        id = object.text("id", "code", "key", "name", "title", "request_id") ?? "row-\(index)-\(object.hashValue)"
+    }
+
+    func text(_ keys: String...) -> String? { keys.lazy.compactMap { object[$0]?.stringValue }.first { !$0.isEmpty } }
+    func number(_ keys: String...) -> Double? { keys.lazy.compactMap { object[$0]?.doubleValue }.first }
+}
+
+struct DynamicPage: Sendable {
+    let items: [DynamicRecord]
+    let total: Int
+    let page: Int
+    let pages: Int
+}

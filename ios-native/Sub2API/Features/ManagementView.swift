@@ -9,7 +9,16 @@ struct ManagementHubView: View {
         ManagementModule(title: "API 密钥", subtitle: "创建、编辑、额度、分组和使用趋势", symbol: "key.fill", tint: AppPalette.blue, destination: .apiKeys),
         ManagementModule(title: "分组管理", subtitle: "容量、费率、路由策略和启停", symbol: "folder.fill", tint: .cyan, destination: .groups),
         ManagementModule(title: "使用记录", subtitle: "多条件查询、统计和清理任务", symbol: "clock.arrow.circlepath", tint: AppPalette.orange, destination: .usage),
-        ManagementModule(title: "运维监控", subtitle: "资源、并发、错误、日志和告警", symbol: "waveform.path.ecg", tint: AppPalette.purple, destination: .ops)
+        ManagementModule(title: "运维监控", subtitle: "资源、并发、错误、日志和告警", symbol: "waveform.path.ecg", tint: AppPalette.purple, destination: .ops),
+        ManagementModule(title: "订阅管理", subtitle: "分配、延期、撤销、恢复与配额", symbol: "creditcard", tint: .indigo, destination: .web(.subscriptions)),
+        ManagementModule(title: "公告", subtitle: "发布、编辑与阅读状态", symbol: "megaphone", tint: .orange, destination: .web(.announcements)),
+        ManagementModule(title: "IP / 代理管理", subtitle: "代理测试、质量、统计与账号关联", symbol: "network", tint: .cyan, destination: .web(.proxies)),
+        ManagementModule(title: "兑换码", subtitle: "生成、批量管理、过期与导出", symbol: "ticket", tint: .green, destination: .web(.redeemCodes)),
+        ManagementModule(title: "优惠码", subtitle: "优惠规则、状态与使用明细", symbol: "tag", tint: .pink, destination: .web(.promoCodes)),
+        ManagementModule(title: "渠道管理", subtitle: "渠道、模型价格和路由配置", symbol: "point.3.connected.trianglepath.dotted", tint: AppPalette.blue, destination: .web(.channels)),
+        ManagementModule(title: "渠道监控", subtitle: "监控任务、运行和历史", symbol: "waveform.path.ecg.rectangle", tint: AppPalette.purple, destination: .web(.channelMonitors)),
+        ManagementModule(title: "操作日志", subtitle: "操作审计、详情与清理", symbol: "list.clipboard", tint: .gray, destination: .web(.auditLogs)),
+        ManagementModule(title: "系统设置", subtitle: "站点、认证、计费、通知与系统更新", symbol: "gearshape.2", tint: .secondary, destination: .systemSettings)
     ]
 
     var body: some View {
@@ -55,6 +64,8 @@ struct ManagementHubView: View {
             case .groups: GroupsView()
             case .usage: UsageRecordsView()
             case .ops: OpsView()
+            case let .web(module): WebConsoleListView(module: module)
+            case .systemSettings: SystemSettingsView()
             }
         }
         .appPage()
@@ -74,4 +85,4 @@ private struct ManagementModule: Identifiable {
     let destination: ManagementDestination
 }
 
-private enum ManagementDestination: Hashable { case accounts, apiKeys, groups, usage, ops }
+private enum ManagementDestination: Hashable { case accounts, apiKeys, groups, usage, ops, web(WebConsoleModule), systemSettings }

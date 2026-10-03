@@ -25,6 +25,12 @@ struct AdminService: Sendable {
         return try await api.get("/api/v1/admin/dashboard/snapshot-v2", query: query(values))
     }
 
+    func dashboardDynamic(_ endpoint: String, start: String, end: String, granularity: String) async throws -> JSONValue {
+        try await api.get("/api/v1/admin/dashboard/\(endpoint)", query: query(["start_date": start, "end_date": end, "granularity": granularity]))
+    }
+
+    func currentProfile() async throws -> JSONValue { try await api.get("/api/v1/auth/me") }
+
     func usageStats(start: String, end: String, filters: [String: String] = [:]) async throws -> UsageSummary {
         var values = ["start_date": start, "end_date": end]
         values.merge(filters) { _, new in new }
@@ -50,7 +56,7 @@ struct AdminService: Sendable {
     }
 
     func updateUserStatus(_ id: Int, status: String) async throws -> AdminUser {
-        try await api.send("/api/v1/admin/users/\(id)", method: .put, body: ["status": .string(status)])
+        try await api.send("/api/v1/admin/users/\(id)", method: .put, body: ["status": JSONValue.string(status)])
     }
 
     func updateUserBalance(_ id: Int, amount: Double, operation: String, notes: String?) async throws -> AdminUser {
@@ -106,7 +112,7 @@ struct AdminService: Sendable {
         case .syncModels:
             let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)/models/sync-upstream", method: .post)
         case let .schedulable(enabled):
-            let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/schedulable", method: .put, body: ["schedulable": .bool(enabled)])
+            let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/schedulable", method: .put, body: ["schedulable": JSONValue.bool(enabled)])
         case .togglePrivacy:
             let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/set-privacy", method: .post, body: [String: JSONValue]())
         case .revertProxy:
@@ -155,10 +161,10 @@ struct AdminService: Sendable {
     }
 
     func resetOpenAIQuota(_ id: Int) async throws -> JSONValue { try await api.send("/api/v1/admin/openai/accounts/\(id)/reset-quota", method: .post) }
-    func batchRefresh(_ ids: [Int]) async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/batch-refresh", method: .post, body: ["account_ids": .array(ids.map { .number(Double($0)) })]) }
+    func batchRefresh(_ ids: [Int]) async throws { let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) })]; let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/batch-refresh", method: .post, body: body) }
     func bulkUpdate(_ body: [String: JSONValue]) async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/bulk-update", method: .post, body: body) }
     func exportAccounts(ids: [Int], includeProxies: Bool = false) async throws -> JSONValue {
-        try await api.get("/api/v1/admin/accounts/data", query: query(["ids": ids.map(String.init).joined(separator: ","), "include_proxies": includeProxies ? "true" : "false"]))
+        try await api.get("/api/v1/admin/accounts/data", query: query(["ids": ids.map { String($0) }.joined(separator: ","), "include_proxies": includeProxies ? "true" : "false"]))
     }
     func importAccounts(_ data: JSONValue) async throws -> JSONValue {
         try await api.send("/api/v1/admin/accounts/data", method: .post, body: ["data": data, "skip_default_group_bind": .bool(false)])
@@ -260,11 +266,29 @@ struct AdminService: Sendable {
     func opsDynamic(_ path: String, filters: [String: String] = [:]) async throws -> JSONValue { try await api.get(path, query: query(filters)) }
     func opsRecords(_ path: String, filters: [String: String]) async throws -> Page<OpsRecord> { try await api.get(path, query: query(filters)) }
     func alertEvents(filters: [String: String]) async throws -> Page<OpsAlertEvent> { try await api.listPage("/api/v1/admin/ops/alert-events", query: query(filters), itemKeys: ["items", "events", "alert_events", "alertEvents"] ) }
-    func resolveAlert(_ id: String) async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/ops/alert-events/\(id)/status", method: .put, body: ["status": .string("manual_resolved")]) }
+    func resolveAlert(_ id: String) async throws { let body: [String: JSONValue] = ["status": .string("manual_resolved")]; let _: EmptyResponse = try await api.send("/api/v1/admin/ops/alert-events/\(id)/status", method: .put, body: body) }
     func resolveOpsRecord(_ id: String, kind: OpsRecordKind) async throws {
-        let _: EmptyResponse = try await api.send("/api/v1/admin/ops/\(kind.rawValue)/\(id)/resolve", method: .put, body: ["resolved": .bool(true)])
+        let body: [String: JSONValue] = ["resolved": .bool(true)]
+        let _: EmptyResponse = try await api.send("/api/v1/admin/ops/\(kind.rawValue)/\(id)/resolve", method: .put, body: body)
     }
     func cleanupSystemLogs() async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/ops/system-logs/cleanup", method: .post) }
+
+    // MARK: Web console modules
+
+    func dynamicPage(_ path: String, page: Int = 1, pageSize: Int = 20, search: String = "", filters: [String: String] = [:], itemKeys: [String] = ["items"]) async throws -> DynamicPage {
+        var values = ["page": String(page), "page_size": String(pageSize), "search": search]
+        values.merge(filters) { _, new in new }
+        let result: Page<JSONValue> = try await api.listPage(path, query: query(values), itemKeys: itemKeys)
+        return DynamicPage(items: result.items.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) }, total: result.total, page: result.page, pages: result.pages)
+    }
+
+    func dynamicGet(_ path: String, query values: [String: String] = [:]) async throws -> JSONValue { try await api.get(path, query: query(values)) }
+    func dynamicCreate(_ path: String, body: [String: JSONValue]) async throws -> JSONValue { try await api.send(path, method: .post, body: body) }
+    func dynamicUpdate(_ path: String, body: [String: JSONValue]) async throws -> JSONValue { try await api.send(path, method: .put, body: body) }
+    func dynamicDelete(_ path: String) async throws { let _: EmptyResponse = try await api.send(path, method: .delete) }
+    func dynamicAction(_ path: String, method: HTTPMethod = .post, body: [String: JSONValue] = [:]) async throws {
+        let _: EmptyResponse = try await api.send(path, method: method, body: body)
+    }
 
     private func query(_ values: [String: String]) -> [URLQueryItem] {
         values.filter { !$0.value.isEmpty }.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }

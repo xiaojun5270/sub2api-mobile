@@ -147,7 +147,7 @@ struct APIClient: Sendable {
     private func makeURL(path: String, query: [URLQueryItem]) throws -> URL {
         var normalizedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while normalizedBase.hasSuffix("/") { normalizedBase.removeLast() }
-        var normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
 
         for prefix in ["/api/v1", "/api"] where normalizedBase.hasSuffix(prefix) && normalizedPath.hasPrefix("\(prefix)/") {
             normalizedBase.removeLast(prefix.count)
@@ -231,7 +231,7 @@ extension APIClient {
     private func makePublicURL(path: String, query: [URLQueryItem]) throws -> URL {
         var normalizedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         while normalizedBase.hasSuffix("/") { normalizedBase.removeLast() }
-        var normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
         for prefix in ["/api/v1", "/api"] where normalizedBase.hasSuffix(prefix) && normalizedPath.hasPrefix("\(prefix)/") {
             normalizedBase.removeLast(prefix.count)
             break
