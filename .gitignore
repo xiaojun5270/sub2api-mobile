@@ -71,3 +71,8 @@ skills-lock.json
 # generated native folders
 /ios
 /android
+
+# Xcode user state and build output
+DerivedData/
+*.xcuserstate
+xcuserdata/

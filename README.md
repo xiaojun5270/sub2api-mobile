@@ -26,6 +26,12 @@ Mobile-first admin console for Sub2API operations, built with Expo + React Nativ
 - TanStack Query
 - Valtio
 
+## Native SwiftUI App
+
+A native iOS client is available in [`ios-native`](ios-native/README.md). It uses SwiftUI, Swift Charts, Keychain-backed credentials, and the native iOS 26 Liquid Glass APIs with a system-material fallback for iOS 17 and iOS 18.
+
+Open `ios-native/Sub2API.xcodeproj` with Xcode 26 or newer to run it.
+
 ## Prerequisites
 
 - Node.js 20+
@@ -98,6 +104,7 @@ src/store/           Global config/account state (Valtio)
 src/lib/             Utilities, query client, fetch helpers
 docs/                Operational and release documentation
 server/              Local Express proxy for admin APIs
+ios-native/          Native SwiftUI iOS application
 ```
 
 ## Security Notes

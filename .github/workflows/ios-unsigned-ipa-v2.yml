@@ -1,13 +1,16 @@
-name: Build Unsigned iOS IPA V2
+name: Build Unsigned SwiftUI IPA
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    paths:
+      - "ios-native/**"
+      - ".github/workflows/ios-unsigned-ipa-v2.yml"
 
 concurrency:
-  group: unsigned-ios-ipa-v2-${{ github.ref }}
+  group: unsigned-swiftui-ipa-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,86 +23,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
       - name: Select Xcode 26
         run: |
           set -euo pipefail
           XCODE_26_PATH="$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' -type d | sort | tail -n 1)"
-          if [ -z "$XCODE_26_PATH" ]; then
-            echo "Xcode 26 is required for native iOS Liquid Glass."
+          if [ -n "$XCODE_26_PATH" ]; then
+            sudo xcode-select -s "$XCODE_26_PATH"
+          fi
+
+          XCODE_MAJOR="$(xcodebuild -version | awk 'NR == 1 { split($2, version, "."); print version[1] }')"
+          if [ "$XCODE_MAJOR" -lt 26 ]; then
+            echo "Xcode 26 or newer is required for Liquid Glass."
+            find /Applications -maxdepth 1 -name 'Xcode*.app' -type d -print
             exit 1
           fi
-          sudo xcode-select -s "$XCODE_26_PATH"
+
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
 
-      - name: Generate iOS project
-        run: npx expo prebuild --platform ios --clean --non-interactive
-
-      - name: Disable iOS code signing
-        run: |
-          set -euo pipefail
-
-          PROJECT_FILE="$(find ios -maxdepth 2 -name project.pbxproj -print -quit)"
-          if [ -z "$PROJECT_FILE" ]; then
-            echo "No Xcode project.pbxproj found under ios/."
-            exit 1
-          fi
-
-          ruby - "$PROJECT_FILE" <<'RUBY'
-          path = ARGV.fetch(0)
-          text = File.read(path)
-          text.gsub!(/CODE_SIGN_STYLE = Automatic;/, 'CODE_SIGN_STYLE = Manual;')
-          text.gsub!(/DEVELOPMENT_TEAM = [A-Z0-9]+;/, 'DEVELOPMENT_TEAM = "";')
-          text.gsub!(/"DEVELOPMENT_TEAM\[sdk=iphoneos\*\]" = [A-Z0-9]+;/, '"DEVELOPMENT_TEAM[sdk=iphoneos*]" = "";')
-          text.gsub!(/PROVISIONING_PROFILE_SPECIFIER = .*?;/, 'PROVISIONING_PROFILE_SPECIFIER = "";')
-          text.gsub!(/"PROVISIONING_PROFILE_SPECIFIER\[sdk=iphoneos\*\]" = .*?;/, '"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "";')
-          File.write(path, text)
-          RUBY
-
-      - name: Build unsigned app
+      - name: Inspect project
         run: |
           set -euo pipefail
           mkdir -p artifacts/diagnostics
+          xcodebuild \
+            -project ios-native/Sub2API.xcodeproj \
+            -scheme Sub2API \
+            -list | tee artifacts/diagnostics/xcodebuild-project.txt
 
-          WORKSPACE="$(find ios -maxdepth 1 -name "*.xcworkspace" -print -quit)"
-          if [ -z "$WORKSPACE" ]; then
-            echo "No Xcode workspace found under ios/."
-            exit 1
-          fi
-
-          XCODEPROJ="$(find ios -maxdepth 1 -name "*.xcodeproj" -print -quit)"
-          if [ -z "$XCODEPROJ" ]; then
-            echo "No Xcode project found under ios/."
-            exit 1
-          fi
-
-          SCHEME="$(basename "$XCODEPROJ" .xcodeproj)"
-          if [ -z "$SCHEME" ]; then
-            echo "No Xcode scheme found in $WORKSPACE."
-            exit 1
-          fi
-
-          echo "Workspace: $WORKSPACE"
-          echo "Scheme: $SCHEME"
-          xcodebuild -list -workspace "$WORKSPACE" | tee artifacts/diagnostics/xcodebuild-schemes.txt
-
+      - name: Build unsigned SwiftUI app
+        run: |
+          set -euo pipefail
           set +e
           xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
+            -project ios-native/Sub2API.xcodeproj \
+            -scheme Sub2API \
             -configuration Release \
             -sdk iphoneos \
             -destination generic/platform=iOS \
-            -derivedDataPath build/DerivedData \
+            -derivedDataPath build/SwiftUIDerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -109,41 +70,44 @@ jobs:
           XCODEBUILD_EXIT="${PIPESTATUS[0]}"
           set -e
 
-          find build/DerivedData -maxdepth 8 -path "*/Build/Products/*" -print > artifacts/diagnostics/build-products.txt || true
+          find build/SwiftUIDerivedData -maxdepth 8 -path "*/Build/Products/*" -print \
+            > artifacts/diagnostics/build-products.txt || true
           exit "$XCODEBUILD_EXIT"
 
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
-
-          APP_PATH="$(find build/DerivedData -path "*/Build/Products/*-iphoneos/*.app" -type d -print -quit)"
+          APP_PATH="$(find build/SwiftUIDerivedData -path '*/Build/Products/Release-iphoneos/Sub2API.app' -type d -print -quit)"
           if [ -z "$APP_PATH" ]; then
-            echo "No built .app found."
-            echo "Available build products:"
-            find build/DerivedData -maxdepth 8 -path "*/Build/Products/*" -print || true
+            echo "Sub2API.app was not found in the Release device products."
             exit 1
           fi
 
-          echo "App path: $APP_PATH"
-
           mkdir -p artifacts/Payload
-          cp -R "$APP_PATH" artifacts/Payload/
+          cp -R "$APP_PATH" artifacts/Payload/Sub2API.app
           (
             cd artifacts
-            ditto -c -k --sequesterRsrc --keepParent Payload sub2api-mobile-unsigned.ipa
+            ditto -c -k --sequesterRsrc --keepParent Payload sub2api-swiftui-unsigned.ipa
           )
 
-      - name: Upload unsigned IPA
+          shasum -a 256 artifacts/sub2api-swiftui-unsigned.ipa \
+            | tee artifacts/sub2api-swiftui-unsigned.ipa.sha256
+
+      - name: Upload unsigned SwiftUI IPA
         uses: actions/upload-artifact@v4
         with:
-          name: sub2api-mobile-unsigned-ipa
-          path: artifacts/sub2api-mobile-unsigned.ipa
+          name: sub2api-swiftui-unsigned-ipa
+          path: |
+            artifacts/sub2api-swiftui-unsigned.ipa
+            artifacts/sub2api-swiftui-unsigned.ipa.sha256
           if-no-files-found: error
+          retention-days: 14
 
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sub2api-mobile-ios-build-diagnostics
+          name: sub2api-swiftui-build-diagnostics
           path: artifacts/diagnostics
           if-no-files-found: ignore
+          retention-days: 14
