@@ -29,6 +29,7 @@
 		B00100000000000000000015 /* UsageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000017 /* UsageViews.swift */; };
 		B00100000000000000000016 /* OpsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000018 /* OpsViews.swift */; };
 		B00100000000000000000017 /* WebConsoleViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00100000000000000000019 /* WebConsoleViews.swift */; };
+		B00100000000000000000018 /* AdvancedResourceViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0010000000000000000001A /* AdvancedResourceViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +58,7 @@
 		F00100000000000000000017 /* UsageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageViews.swift; sourceTree = "<group>"; };
 		F00100000000000000000018 /* OpsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpsViews.swift; sourceTree = "<group>"; };
 		F00100000000000000000019 /* WebConsoleViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebConsoleViews.swift; sourceTree = "<group>"; };
+		F0010000000000000000001A /* AdvancedResourceViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedResourceViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +130,7 @@
 				F00100000000000000000017 /* UsageViews.swift */,
 				F00100000000000000000018 /* OpsViews.swift */,
 				F00100000000000000000019 /* WebConsoleViews.swift */,
+				F0010000000000000000001A /* AdvancedResourceViews.swift */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -218,6 +221,7 @@
 				B00100000000000000000015 /* UsageViews.swift in Sources */,
 				B00100000000000000000016 /* OpsViews.swift in Sources */,
 				B00100000000000000000017 /* WebConsoleViews.swift in Sources */,
+				B00100000000000000000018 /* AdvancedResourceViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

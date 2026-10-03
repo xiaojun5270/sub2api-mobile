@@ -16,6 +16,7 @@ struct AccountsView: View {
     @State private var showsCreate = false
     @State private var editingAccount: AdminAccount?
     @State private var quotaAccount: AdminAccount?
+    @State private var advancedAccount: AdminAccount?
     @State private var deletingAccount: AdminAccount?
     @State private var showsImporter = false
     @State private var showsExporter = false
@@ -70,6 +71,7 @@ struct AccountsView: View {
         .sheet(isPresented: $showsCreate, onDismiss: { Task { await load() } }) { AccountCreationView() }
         .sheet(item: $editingAccount, onDismiss: { Task { await load() } }) { AccountEditorView(account: $0) }
         .sheet(item: $quotaAccount) { AccountQuotaView(account: $0) }
+        .sheet(item: $advancedAccount) { AccountAdvancedView(account: $0) }
         .confirmationDialog("删除账号？", isPresented: Binding(get: { deletingAccount != nil }, set: { if !$0 { deletingAccount = nil } }), titleVisibility: .visible) {
             Button("删除", role: .destructive) { if let account = deletingAccount { Task { await delete(account) } } }
         } message: { Text(deletingAccount?.name ?? "") }
@@ -120,6 +122,7 @@ struct AccountsView: View {
         Button { editingAccount = account } label: { Label("编辑", systemImage: "pencil") }
         Button { Task { await toggle(account) } } label: { Label(account.schedulable == false ? "恢复调度" : "暂停调度", systemImage: "pause.circle") }
         Button { quotaAccount = account } label: { Label("查询额度", systemImage: "gauge") }
+        Button { advancedAccount = account } label: { Label("网页高级功能", systemImage: "wrench.and.screwdriver") }
         Divider()
         Button(role: .destructive) { deletingAccount = account } label: { Label("删除", systemImage: "trash") }
     }
@@ -225,6 +228,7 @@ struct AccountDetailView: View {
                 actionPanel
                 trendPanel
                 settingsPanel
+                NavigationLink { AccountAdvancedView(account: account) } label: { HStack { Label("网页高级功能", systemImage: "wrench.and.screwdriver"); Spacer(); Text("计费探测、定时测试与平台用量").font(.caption).foregroundStyle(.secondary); Image(systemName: "chevron.right").font(.caption) }.padding(14).glassPanel(cornerRadius: 16, interactive: true) }.buttonStyle(.plain)
                 modelsPanel
                 usagePanel
                 if let message { Text(message).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(12).glassPanel(cornerRadius: 14) }

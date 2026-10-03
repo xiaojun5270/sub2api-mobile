@@ -16,6 +16,7 @@ struct GroupsView: View {
     @State private var editingGroup: AdminGroup?
     @State private var showsCreate = false
     @State private var deletingGroup: AdminGroup?
+    @State private var advancedGroup: AdminGroup?
 
     private var filtered: [AdminGroup] {
         groups.filter { group in
@@ -39,7 +40,7 @@ struct GroupsView: View {
                 if isLoading && groups.isEmpty { LoadingView(label: "正在加载分组") }
                 else if let errorMessage, groups.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
                 else if filtered.isEmpty { EmptyContentView(symbol: "folder.badge.questionmark", title: "暂无分组", message: "当前筛选条件下没有分组。") }
-                else { ForEach(filtered) { group in GroupCard(group: group, usage: usage[group.id], capacity: capacity[group.id]).contextMenu { Button { editingGroup = group } label: { Label("编辑", systemImage: "pencil") }; Button { Task { await toggle(group) } } label: { Label(inactive(group) ? "启用" : "停用", systemImage: "power") }; Divider(); Button(role: .destructive) { deletingGroup = group } label: { Label("删除", systemImage: "trash") } } } }
+                else { ForEach(filtered) { group in GroupCard(group: group, usage: usage[group.id], capacity: capacity[group.id]).contextMenu { Button { editingGroup = group } label: { Label("编辑", systemImage: "pencil") }; Button { advancedGroup = group } label: { Label("高级管理", systemImage: "wrench.and.screwdriver") }; Button { Task { await toggle(group) } } label: { Label(inactive(group) ? "启用" : "停用", systemImage: "power") }; Divider(); Button(role: .destructive) { deletingGroup = group } label: { Label("删除", systemImage: "trash") } } } }
             }.padding(16)
         }
         .searchable(text: $searchText, prompt: "搜索分组名称")
@@ -48,6 +49,7 @@ struct GroupsView: View {
         .toolbar { ToolbarItemGroup(placement: .primaryAction) { Button { ascending.toggle() } label: { Image(systemName: ascending ? "arrow.up" : "arrow.down") }; Button { showsCreate = true } label: { Image(systemName: "plus") } } }
         .sheet(isPresented: $showsCreate, onDismiss: { Task { await load() } }) { GroupEditorView(group: nil) }
         .sheet(item: $editingGroup, onDismiss: { Task { await load() } }) { GroupEditorView(group: $0) }
+        .sheet(item: $advancedGroup, onDismiss: { Task { await load() } }) { GroupAdvancedView(group: $0) }
         .confirmationDialog("删除分组？", isPresented: Binding(get: { deletingGroup != nil }, set: { if !$0 { deletingGroup = nil } }), titleVisibility: .visible) { Button("删除", role: .destructive) { if let group = deletingGroup { Task { await delete(group) } } } } message: { Text("删除后，关联账号和 API Key 可能失去分组归属。") }
         .appPage().task(id: store.activeServerID) { await load() }
     }

@@ -196,6 +196,7 @@ private struct UserDetailView: View {
                 .glassPanel()
 
                 NavigationLink { APIKeysView() } label: { Label("打开 API 密钥管理", systemImage: "key.horizontal").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent).tint(AppPalette.blue)
+                NavigationLink { UserAdvancedView(user: user) } label: { HStack { Label("网页高级功能", systemImage: "wrench.and.screwdriver"); Spacer(); Text("订阅、属性、身份与平台配额").font(.caption).foregroundStyle(.secondary); Image(systemName: "chevron.right").font(.caption) }.padding(14).glassPanel(cornerRadius: 16, interactive: true) }.buttonStyle(.plain)
 
                 if let errorMessage { InlineErrorView(message: errorMessage) { Task { await load() } } }
             }
