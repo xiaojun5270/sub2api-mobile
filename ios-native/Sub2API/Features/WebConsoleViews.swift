@@ -17,9 +17,9 @@ enum WebConsoleModule: String, CaseIterable, Identifiable, Hashable {
     var createTemplate: [String: JSONValue] { switch self {
         case .subscriptions: ["user_id": .number(0), "group_id": .number(0), "validity_days": .number(30)]
         case .announcements: ["title": .string(""), "content": .string(""), "status": .string("active")]
-        case .proxies: ["name": .string(""), "proxy_url": .string("http://user:pass@host:port"), "status": .string("active")]
+        case .proxies: ["name": .string(""), "protocol": .string("http"), "host": .string(""), "port": .number(0), "username": .string(""), "password": .string(""), "status": .string("active")]
         case .redeemCodes: ["count": .number(1), "type": .string("balance"), "value": .number(0), "expires_in_days": .number(30)]
-        case .promoCodes: ["code": .string(""), "discount_type": .string("percentage"), "discount_value": .number(0), "status": .string("active")]
+        case .promoCodes: ["code": .string(""), "bonus_amount": .number(0), "max_uses": .number(0), "expires_at": .null, "notes": .string(""), "status": .string("active")]
         case .channels: ["name": .string(""), "type": .string("openai"), "base_url": .string(""), "api_key": .string(""), "status": .string("active")]
         case .channelMonitors: ["name": .string(""), "channel_id": .number(0), "interval_seconds": .number(60), "enabled": .bool(true)]
         case .auditLogs: [:]
@@ -143,4 +143,50 @@ struct SystemSettingsView: View {
     private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { let body = try FormParsing.jsonObject(settingsText); _ = try await service.dynamicUpdate("/api/v1/admin/settings", body: body); await load() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
     private func checkUpdates() async { guard let service = try? store.adminService() else { return }; do { updateInfo = try await service.dynamicGet("/api/v1/admin/system/check-updates") } catch { errorMessage = error.localizedDescription } }
     private func systemAction(_ action: String) async { guard let service = try? store.adminService() else { return }; pendingAction = nil; do { try await service.dynamicAction("/api/v1/admin/system/\(action)"); await load() } catch { errorMessage = error.localizedDescription } }
+}
+
+struct PersonalConsoleView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var data: [String: JSONValue] = [:]
+    @State private var editor: AdvancedActionState?
+    @State private var errorMessage: String?
+    @State private var isLoading = true
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                HStack(spacing: 8) {
+                    Button { let object = data["个人资料"]?.objectValue ?? [:]; editor = AdvancedActionState(title: "编辑个人资料", path: "/api/v1/user", method: .put, template: object) } label: { Label("编辑资料", systemImage: "person.crop.circle.badge.checkmark").frame(maxWidth: .infinity) }.buttonStyle(.bordered)
+                    Button { editor = AdvancedActionState(title: "兑换", path: "/api/v1/redeem", method: .post, template: ["code": .string("")]) } label: { Label("兑换", systemImage: "giftcard").frame(maxWidth: .infinity) }.buttonStyle(.borderedProminent)
+                }
+                if isLoading { LoadingView(label: "正在加载个人中心") }
+                if let errorMessage { InlineErrorView(message: errorMessage) }
+                ForEach(data.keys.sorted(), id: \.self) { key in VStack(alignment: .leading, spacing: 9) { Text(key).font(.headline); DynamicJSONView(value: data[key] ?? .null) }.padding(16).glassPanel() }
+            }.padding(16)
+        }
+        .navigationTitle("我的账户")
+        .sheet(item: $editor, onDismiss: { Task { await load() } }) { AdvancedJSONActionEditor(state: $0) }
+        .refreshable { await load() }
+        .appPage().task { await load() }
+    }
+
+    private func load() async {
+        guard let service = try? store.adminService() else { return }
+        isLoading = true; errorMessage = nil
+        async let me: JSONValue? = try? await service.dynamicGet("/api/v1/auth/me")
+        async let user: JSONValue? = try? await service.dynamicGet("/api/v1/user")
+        async let keys: JSONValue? = try? await service.dynamicGet("/api/v1/keys", query: ["page": "1", "page_size": "100"])
+        async let subscriptions: JSONValue? = try? await service.dynamicGet("/api/v1/subscriptions")
+        async let channels: JSONValue? = try? await service.dynamicGet("/api/v1/channels/available")
+        async let monitors: JSONValue? = try? await service.dynamicGet("/api/v1/channel-monitors")
+        let values = await (me, user, keys, subscriptions, channels, monitors)
+        if let value = values.0 { data["我的账户"] = value }
+        if let value = values.1 { data["个人资料"] = value }
+        if let value = values.2 { data["API 密钥"] = value }
+        if let value = values.3 { data["我的订阅"] = value }
+        if let value = values.4 { data["渠道状态"] = value }
+        if let value = values.5 { data["渠道监控"] = value }
+        if data.isEmpty { errorMessage = "个人中心需要网页登录 JWT；当前 Admin API Key 只能访问管理员接口。" }
+        isLoading = false
+    }
 }

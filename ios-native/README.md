@@ -31,3 +31,6 @@ The app accepts both an Admin API Key and a web JWT. Server metadata is stored i
 - Groups and group creation
 - Usage records and operational overview
 - Multiple server profiles with connection verification
+- Web console parity for subscriptions, announcements, proxies, redeem codes, promo codes, channels, audit logs, system settings, and the JWT-backed personal area
+
+The detailed web-to-native mapping is documented in [`../docs/WEB_SWIFTUI_PARITY.md`](../docs/WEB_SWIFTUI_PARITY.md).

@@ -18,6 +18,7 @@ struct ManagementHubView: View {
         ManagementModule(title: "渠道管理", subtitle: "渠道、模型价格和路由配置", symbol: "point.3.connected.trianglepath.dotted", tint: AppPalette.blue, destination: .web(.channels)),
         ManagementModule(title: "渠道监控", subtitle: "监控任务、运行和历史", symbol: "waveform.path.ecg.rectangle", tint: AppPalette.purple, destination: .web(.channelMonitors)),
         ManagementModule(title: "操作日志", subtitle: "操作审计、详情与清理", symbol: "list.clipboard", tint: .gray, destination: .web(.auditLogs)),
+        ManagementModule(title: "我的账户", subtitle: "个人资料、我的密钥、订阅、兑换与渠道状态", symbol: "person.crop.circle", tint: AppPalette.teal, destination: .personal),
         ManagementModule(title: "系统设置", subtitle: "站点、认证、计费、通知与系统更新", symbol: "gearshape.2", tint: .secondary, destination: .systemSettings)
     ]
 
@@ -66,6 +67,7 @@ struct ManagementHubView: View {
             case .ops: OpsView()
             case let .web(module): WebConsoleListView(module: module)
             case .systemSettings: SystemSettingsView()
+            case .personal: PersonalConsoleView()
             }
         }
         .appPage()
@@ -85,4 +87,4 @@ private struct ManagementModule: Identifiable {
     let destination: ManagementDestination
 }
 
-private enum ManagementDestination: Hashable { case accounts, apiKeys, groups, usage, ops, web(WebConsoleModule), systemSettings }
+private enum ManagementDestination: Hashable { case accounts, apiKeys, groups, usage, ops, web(WebConsoleModule), systemSettings, personal }
