@@ -76,3 +76,6 @@ skills-lock.json
 DerivedData/
 *.xcuserstate
 xcuserdata/
+
+# downloaded build artifacts
+/artifacts/
