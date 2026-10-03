@@ -21,6 +21,11 @@ struct AccountsView: View {
     @State private var showsImporter = false
     @State private var showsExporter = false
     @State private var exportDocument = JSONFileDocument()
+    @State private var metricsByAccount: [Int: AccountCardMetrics] = [:]
+    @State private var quotaByAccount: [Int: JSONValue] = [:]
+    @State private var modelPickerAccount: AdminAccount?
+    @State private var selectedModelByAccount: [Int: String] = [:]
+    @State private var detailAccount: AdminAccount?
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -35,48 +40,47 @@ struct AccountsView: View {
     private var types: [String] { ["all"] + Array(Set(accounts.map(\.type))).sorted() }
 
     var body: some View {
-        List {
-            Section {
+        ScrollView {
+            LazyVStack(spacing: 12) {
                 summary
-                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
-                    .listRowSeparator(.hidden)
                 filterBar
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
-                    .listRowSeparator(.hidden)
                 if let message {
                     Text(message).font(.footnote).foregroundStyle(.secondary)
-                        .listRowBackground(Color.primary.opacity(0.035))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
                 }
-            }
-
-            Section {
                 if isLoading && accounts.isEmpty {
                     HStack { Spacer(); ProgressView(); Text("正在加载账号").font(.footnote).foregroundStyle(.secondary); Spacer() }
                         .padding(.vertical, 28)
                 } else if let errorMessage, accounts.isEmpty {
                     InlineErrorView(message: errorMessage) { Task { await load() } }
-                        .listRowSeparator(.hidden)
                 } else if filtered.isEmpty {
                     ContentUnavailableView("暂无账号", systemImage: "shield.slash", description: Text("当前筛选条件下没有匹配账号。"))
-                        .listRowSeparator(.hidden)
                 } else {
                     ForEach(filtered) { account in
-                        NavigationLink { AccountDetailView(initialAccount: account) } label: { AccountRow(account: account) }
-                            .contextMenu { accountMenu(account) }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button { editingAccount = account } label: { Label("编辑", systemImage: "pencil") }.tint(AppPalette.blue)
-                                Button { Task { await test(account) } } label: { Label("测试", systemImage: "checkmark.circle") }.tint(AppPalette.teal)
-                            }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) { deletingAccount = account } label: { Label("删除", systemImage: "trash") }
-                                Button { Task { await toggle(account) } } label: { Label(account.schedulable == false ? "恢复" : "暂停", systemImage: "pause.circle") }.tint(AppPalette.orange)
-                            }
+                        AccountSummaryCard(
+                            account: account,
+                            metrics: metricsByAccount[account.id] ?? .empty,
+                            quota: quotaByAccount[account.id] ?? account.quota ?? account.usage,
+                            selectedModel: selectedModelByAccount[account.id],
+                            onOpen: { detailAccount = account },
+                            onQueryQuota: { Task { await queryQuota(account) } },
+                            onCountQuota: { Task { await showQuotaCount(account) } },
+                            onResetQuota: { Task { await resetQuota(account) } },
+                            onEdit: { editingAccount = account },
+                            onToggleEnabled: { Task { await toggleEnabled(account) } },
+                            onToggleScheduling: { Task { await toggle(account) } },
+                            onDelete: { deletingAccount = account },
+                            onTest: { Task { await test(account) } },
+                            onSelectModel: { modelPickerAccount = account }
+                        )
+                        .contextMenu { accountMenu(account) }
                     }
                 }
             }
+            .padding(12)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
         .searchable(text: $searchText, prompt: "名称、ID、平台或分组")
         .refreshable { await load() }
         .navigationTitle("账号管理")
@@ -96,6 +100,13 @@ struct AccountsView: View {
         .sheet(item: $editingAccount, onDismiss: { Task { await load() } }) { AccountEditorView(account: $0) }
         .sheet(item: $quotaAccount) { AccountQuotaView(account: $0) }
         .sheet(item: $advancedAccount) { AccountAdvancedView(account: $0) }
+        .sheet(item: $modelPickerAccount) { account in
+            AccountModelPickerView(account: account, selected: selectedModelByAccount[account.id]) { model in
+                selectedModelByAccount[account.id] = model
+                modelPickerAccount = nil
+            }
+        }
+        .navigationDestination(item: $detailAccount) { AccountDetailView(initialAccount: $0) }
         .confirmationDialog("删除账号？", isPresented: Binding(get: { deletingAccount != nil }, set: { if !$0 { deletingAccount = nil } }), titleVisibility: .visible) {
             Button("删除", role: .destructive) { if let account = deletingAccount { Task { await delete(account) } } }
         } message: { Text(deletingAccount?.name ?? "") }
@@ -121,6 +132,7 @@ struct AccountsView: View {
             compactMetric("限流", limited, AppPalette.purple)
         }
         .padding(.vertical, 6)
+        .padding(.horizontal, 4)
     }
 
     private func compactMetric(_ label: String, _ value: Int, _ color: Color) -> some View {
@@ -155,13 +167,21 @@ struct AccountsView: View {
     private func load() async {
         guard let service = try? store.adminService() else { return }
         isLoading = true
-        do { accounts = try await service.accounts().items; errorMessage = nil } catch { errorMessage = error.localizedDescription }
+        do {
+            accounts = try await service.accounts().items
+            let ids = accounts.map(\.id)
+            async let today: JSONValue? = try? await service.accountTodayBatch(ids)
+            async let totals: JSONValue? = try? await service.accountUsageBatch(ids)
+            let batch = await (today, totals)
+            metricsByAccount = mergeMetrics(today: batch.0, totals: batch.1)
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
         isLoading = false
     }
 
     private func test(_ account: AdminAccount) async {
         guard let service = try? store.adminService() else { return }; isWorking = true
-        do { _ = try await service.accountAction(account.id, action: .test(model: nil, prompt: nil)); message = "\(account.name) 测试成功" } catch { message = "测试失败：\(error.localizedDescription)" }
+        do { _ = try await service.accountAction(account.id, action: .test(model: selectedModelByAccount[account.id], prompt: nil)); message = "\(account.name) 测试成功" } catch { message = "测试失败：\(error.localizedDescription)" }
         isWorking = false
     }
 
@@ -169,6 +189,54 @@ struct AccountsView: View {
         guard let service = try? store.adminService() else { return }; isWorking = true
         do { _ = try await service.accountAction(account.id, action: .schedulable(account.schedulable == false)); await load() } catch { message = error.localizedDescription }
         isWorking = false
+    }
+
+    private func toggleEnabled(_ account: AdminAccount) async {
+        guard let service = try? store.adminService() else { return }; isWorking = true
+        let disabled = ["inactive", "disabled"].contains((account.status ?? "active").lowercased())
+        do { _ = try await service.updateAccount(account.id, body: ["status": .string(disabled ? "active" : "disabled"), "schedulable": .bool(disabled)]); await load() } catch { message = error.localizedDescription }
+        isWorking = false
+    }
+
+    private func queryQuota(_ account: AdminAccount) async {
+        guard let service = try? store.adminService() else { return }; isWorking = true
+        do { quotaByAccount[account.id] = try await service.quota(account); message = "\(account.name) 额度已更新" } catch { message = "额度查询失败：\(error.localizedDescription)" }
+        isWorking = false
+    }
+
+    private func showQuotaCount(_ account: AdminAccount) async {
+        if quotaByAccount[account.id] == nil { await queryQuota(account) }
+        let value = quotaByAccount[account.id] ?? account.quota ?? account.usage
+        message = value.map { "\(account.name) 次数/额度：\($0.displayText)" } ?? "未获取到次数信息"
+    }
+
+    private func resetQuota(_ account: AdminAccount) async {
+        guard let service = try? store.adminService() else { return }; isWorking = true
+        do {
+            if account.platform.lowercased() == "openai" { quotaByAccount[account.id] = try await service.resetOpenAIQuota(account.id) }
+            else { _ = try await service.accountAction(account.id, action: .resetQuota) }
+            message = "\(account.name) 额度已重置"
+            await queryQuota(account)
+        } catch { message = "重置失败：\(error.localizedDescription)" }
+        isWorking = false
+    }
+
+    private func mergeMetrics(today: JSONValue?, totals: JSONValue?) -> [Int: AccountCardMetrics] {
+        var result: [Int: AccountCardMetrics] = [:]
+        for (id, row) in metricRows(today) { result[id, default: .empty].applyToday(row) }
+        for (id, row) in metricRows(totals) { result[id, default: .empty].applyTotal(row) }
+        return result
+    }
+
+    private func metricRows(_ value: JSONValue?) -> [(Int, [String: JSONValue])] {
+        guard let value else { return [] }
+        if let array = value.arrayValue { return array.compactMap(\.objectValue).compactMap { row in let id = Int(row.number("account_id", "accountId", "id") ?? 0); return id > 0 ? (id, row) : nil } }
+        guard let object = value.objectValue else { return [] }
+        for key in ["items", "stats", "accounts", "records", "rows", "data"] {
+            let rows = object.rows(key)
+            if !rows.isEmpty { return rows.compactMap { row in let id = Int(row.number("account_id", "accountId", "id") ?? 0); return id > 0 ? (id, row) : nil } }
+        }
+        return object.compactMap { key, child in guard let id = Int(key), let row = child.objectValue else { return nil }; return (id, row) }
     }
 
     private func delete(_ account: AdminAccount) async {
@@ -203,31 +271,200 @@ struct AccountsView: View {
     }
 }
 
-private struct AccountRow: View {
+private struct AccountCardMetrics: Sendable {
+    var todayRequests = 0.0
+    var todayTokens = 0.0
+    var todayActualCost = 0.0
+    var todayUserCost = 0.0
+    var totalRequests = 0.0
+    var totalTokens = 0.0
+    var totalCost = 0.0
+    static let empty = AccountCardMetrics()
+
+    mutating func applyToday(_ row: [String: JSONValue]) {
+        todayRequests = row.number("requests", "request_count", "total_requests") ?? 0
+        todayTokens = row.number("tokens", "total_tokens") ?? 0
+        todayActualCost = row.number("cost", "actual_cost", "account_cost") ?? 0
+        todayUserCost = row.number("user_cost", "userCost") ?? todayActualCost
+    }
+
+    mutating func applyTotal(_ row: [String: JSONValue]) {
+        totalRequests = row.number("total_requests", "requests", "request_count") ?? 0
+        totalTokens = row.number("total_tokens", "tokens") ?? 0
+        totalCost = row.number("total_account_cost", "total_actual_cost", "total_cost", "actual_cost", "cost") ?? 0
+    }
+}
+
+private struct AccountSummaryCard: View {
     let account: AdminAccount
+    let metrics: AccountCardMetrics
+    let quota: JSONValue?
+    let selectedModel: String?
+    let onOpen: () -> Void
+    let onQueryQuota: () -> Void
+    let onCountQuota: () -> Void
+    let onResetQuota: () -> Void
+    let onEdit: () -> Void
+    let onToggleEnabled: () -> Void
+    let onToggleScheduling: () -> Void
+    let onDelete: () -> Void
+    let onTest: () -> Void
+    let onSelectModel: () -> Void
+
+    private var style: (String, Color) { StatusStyle.account(account) }
+    private var disabled: Bool { ["inactive", "disabled"].contains((account.status ?? "active").lowercased()) }
+    private var fiveHour: QuotaWindow { quotaWindow(label: "5H", token: "5h") }
+    private var sevenDay: QuotaWindow { quotaWindow(label: "7D", token: "7d") }
+
     var body: some View {
-        let style = StatusStyle.account(account)
-        HStack(spacing: 10) {
-            Circle().fill(style.1).frame(width: 7, height: 7)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(account.name).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text("#\(account.id)").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+        VStack(spacing: 8) {
+            Button(action: onOpen) {
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "key.fill").font(.caption).foregroundStyle(AppPalette.blue)
+                            .frame(width: 26, height: 26).background(AppPalette.blue.opacity(0.09), in: Circle())
+                        Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
+                        Text("#\(account.id) · \(account.platform) · \(account.type)")
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+                        Spacer(minLength: 4)
+                        StatusPill(text: style.0, color: style.1)
+                    }
+                    HStack {
+                        Label("状态：\(style.0)", systemImage: "shield")
+                        Spacer()
+                        Text("最近使用 \(shortTime(account.lastUsedAt ?? account.updatedAt))")
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
                 }
-                Text("\(account.platform) · \(account.type)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(style.0).font(.caption.weight(.semibold)).foregroundStyle(style.1)
-                Label("\(account.currentConcurrency ?? 0)/\(account.concurrency ?? 0)", systemImage: "bolt.horizontal")
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                if let group = account.groupName ?? account.groups?.first?.name {
-                    Text(group).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            .buttonStyle(.plain)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 7), count: 3), spacing: 7) {
+                metric("今日请求", NumberFormatters.compact(metrics.todayRequests) + " req", "waveform.path.ecg", AppPalette.blue)
+                metric("今日 Token", NumberFormatters.compact(metrics.todayTokens), "cpu", .cyan)
+                metric("今日额度", "A \(NumberFormatters.currency(metrics.todayActualCost))\nU \(NumberFormatters.currency(metrics.todayUserCost))", "dollarsign", .orange)
+                metric("总请求", NumberFormatters.compact(metrics.totalRequests) + " req", "number", .indigo)
+                metric("总 Token", NumberFormatters.compact(metrics.totalTokens), "cpu.fill", .mint)
+                metric("总额度", NumberFormatters.currency(metrics.totalCost), "wallet.pass", AppPalette.teal)
+            }
+
+            VStack(spacing: 8) {
+                HStack {
+                    Label("额度窗口", systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
                 }
+                quotaRow(fiveHour)
+                quotaRow(sevenDay)
+                HStack(spacing: 7) {
+                    cardButton("查询", "magnifyingglass", .primary, onQueryQuota)
+                    cardButton("次数", "number", .primary, onCountQuota)
+                    cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
+                }
+            }
+            .padding(10)
+            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 13))
+
+            HStack(spacing: 7) {
+                cardButton("编辑", "pencil", .primary, onEdit)
+                cardButton(disabled ? "启用" : "禁用", "power", .primary, onToggleEnabled)
+                cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", .primary, onToggleScheduling)
+                cardButton("删除", "trash", .red, onDelete)
+            }
+            HStack(spacing: 7) {
+                cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
+                cardButton(selectedModel ?? "选择模型", "cpu", .primary, onSelectModel, fill: .primary.opacity(0.045))
             }
         }
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        .padding(10)
+        .glassPanel(cornerRadius: 18)
+    }
+
+    private func metric(_ label: String, _ value: String, _ symbol: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label(label, systemImage: symbol).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+            Text(value).font(.system(.headline, design: .rounded, weight: .bold)).foregroundStyle(.primary)
+                .lineLimit(2).minimumScaleFactor(0.68)
+        }
+        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
+        .padding(9)
+        .background(color.opacity(0.075), in: RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(color.opacity(0.18), lineWidth: 0.7))
+    }
+
+    private func quotaRow(_ window: QuotaWindow) -> some View {
+        VStack(spacing: 4) {
+            HStack { Text(window.label).font(.caption.weight(.bold)); Spacer(); Text("\(Int(window.percent.rounded()))% · \(window.remaining)").font(.caption2).foregroundStyle(.secondary) }
+            ProgressView(value: min(max(window.percent / 100, 0), 1)).tint(window.percent >= 90 ? .red : AppPalette.teal)
+        }
+    }
+
+    private func cardButton(_ title: String, _ symbol: String, _ color: Color, _ action: @escaping () -> Void, fill: Color = .primary.opacity(0.035)) -> some View {
+        Button(action: action) { Label(title, systemImage: symbol).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity).padding(.vertical, 7) }
+            .buttonStyle(.plain).foregroundStyle(color).background(fill, in: Capsule())
+    }
+
+    private var quotaUpdatedAt: String? { findString(in: quota, matching: ["updated_at", "updatedAt", "queried_at", "queriedAt"]) ?? account.updatedAt }
+
+    private func quotaWindow(label: String, token: String) -> QuotaWindow {
+        let percent = findNumber(in: quota, keyContains: [token, "percent"])
+            ?? findNumber(in: quota, keyContains: [token, "usage"])
+            ?? 0
+        let remaining = findString(in: quota, matching: ["\(token)_remaining", "remaining_\(token)", "\(token)_reset_at", "reset_at"])
+            ?? (token == "5h" ? "剩余 5h" : "剩余 --")
+        return QuotaWindow(label: label, percent: percent <= 1 ? percent * 100 : percent, remaining: remaining)
+    }
+
+    private func findNumber(in value: JSONValue?, keyContains tokens: [String]) -> Double? {
+        guard let value else { return nil }
+        if let object = value.objectValue {
+            for (key, child) in object where tokens.allSatisfy({ key.lowercased().contains($0.lowercased()) }) { if let number = child.doubleValue { return number } }
+            for child in object.values { if let number = findNumber(in: child, keyContains: tokens) { return number } }
+        }
+        if let array = value.arrayValue { for child in array { if let number = findNumber(in: child, keyContains: tokens) { return number } } }
+        return nil
+    }
+
+    private func findString(in value: JSONValue?, matching keys: [String]) -> String? {
+        guard let value else { return nil }
+        if let object = value.objectValue {
+            for key in keys { if let text = object[key]?.stringValue, !text.isEmpty { return text } }
+            for child in object.values { if let text = findString(in: child, matching: keys) { return text } }
+        }
+        return nil
+    }
+
+    private func shortTime(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "--" }
+        return value.replacingOccurrences(of: "T", with: " ").prefix(16).description
+    }
+}
+
+private struct QuotaWindow { let label: String; let percent: Double; let remaining: String }
+
+private struct AccountModelPickerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    let account: AdminAccount
+    let selected: String?
+    let onSelect: (String) -> Void
+    @State private var models: [AccountModel] = []
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+                ForEach(models) { model in
+                    let name = model.modelID ?? model.model ?? model.name ?? model.displayName ?? model.id
+                    Button { onSelect(name) } label: { HStack { Text(model.displayName ?? name); Spacer(); if selected == name { Image(systemName: "checkmark").foregroundStyle(AppPalette.teal) } } }
+                }
+            }
+            .navigationTitle("选择测试模型")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .task { guard let service = try? store.adminService() else { return }; do { models = try await service.accountModels(account.id) } catch { errorMessage = error.localizedDescription } }
+        }
     }
 }
 

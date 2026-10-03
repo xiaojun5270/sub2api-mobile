@@ -201,6 +201,8 @@ struct AdminAccount: Decodable, Identifiable, Hashable, Sendable {
     let privacyMode: String?
     let shadow: Bool?
     let tempUnschedulableUntil: String?
+    let quota: JSONValue?
+    let usage: JSONValue?
     let expiresAt: String?
     let updatedAt: String?
     let lastUsedAt: String?
@@ -223,6 +225,7 @@ struct AdminAccount: Decodable, Identifiable, Hashable, Sendable {
         case privacyMode = "privacy_mode"
         case shadow
         case tempUnschedulableUntil = "temp_unschedulable_until"
+        case quota, usage
         case expiresAt = "expires_at"
         case updatedAt = "updated_at"
         case lastUsedAt = "last_used_at"

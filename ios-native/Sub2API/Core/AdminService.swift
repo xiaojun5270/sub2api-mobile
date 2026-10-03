@@ -84,6 +84,14 @@ struct AdminService: Sendable {
     func deleteAccount(_ id: Int) async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)", method: .delete) }
 
     func accountToday(_ id: Int) async throws -> AccountTodayStats { try await api.get("/api/v1/admin/accounts/\(id)/today-stats") }
+    func accountTodayBatch(_ ids: [Int]) async throws -> JSONValue {
+        let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) })]
+        return try await api.send("/api/v1/admin/accounts/today-stats/batch", method: .post, body: body)
+    }
+    func accountUsageBatch(_ ids: [Int], force: Bool = false) async throws -> JSONValue {
+        let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) }), "force": .bool(force)]
+        return try await api.send("/api/v1/admin/accounts/usage/batch", method: .post, body: body)
+    }
     func accountStats(_ id: Int, days: Int) async throws -> UsageSummary { try await api.get("/api/v1/admin/accounts/\(id)/stats", query: query(["days": String(days)])) }
     func accountUsage(_ id: Int) async throws -> Page<OpsRecord> { try await api.listPage("/api/v1/admin/accounts/\(id)/usage", itemKeys: ["items", "usage", "records"] ) }
     func accountModels(_ id: Int) async throws -> [AccountModel] {
