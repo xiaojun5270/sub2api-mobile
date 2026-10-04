@@ -234,21 +234,102 @@ struct AdminService: Sendable {
     // MARK: API keys
 
     func apiKeys(search: String = "") async throws -> Page<AdminAPIKey> {
-        try await api.listPage("/api/v1/keys", query: query(["page": "1", "page_size": "100", "search": search, "sort_by": "created_at", "sort_order": "desc"]), itemKeys: ["api_keys", "apiKeys", "keys", "items"])
+        let items = query(["page": "1", "page_size": "100", "search": search, "sort_by": "created_at", "sort_order": "desc"])
+        let keys = ["api_keys", "apiKeys", "keys", "items"]
+        var firstError: Error?
+        for path in ["/api/v1/keys", "/api/v1/admin/api-keys"] {
+            do { return try await api.listPage(path, query: items, itemKeys: keys) }
+            catch { if firstError == nil { firstError = error } }
+        }
+        do {
+            let page: Page<AdminAPIKey> = try await api.listPage("/api/v1/admin/usage/search-api-keys", itemKeys: keys)
+            let filtered = filterAPIKeys(page.items, search: search)
+            return Page(items: filtered, total: filtered.count, pageSize: max(filtered.count, 1))
+        } catch { if firstError == nil { firstError = error } }
+
+        do {
+            let userPage = try await users(pageSize: 100)
+            var result: [AdminAPIKey] = []
+            for user in userPage.items {
+                if let page = try? await userAPIKeys(user.id) { result.append(contentsOf: page.items) }
+            }
+            let filtered = filterAPIKeys(result, search: search)
+            return Page(items: filtered, total: filtered.count, pageSize: max(filtered.count, 1))
+        } catch {
+            throw firstError ?? error
+        }
     }
 
     func createAPIKey(_ body: [String: JSONValue]) async throws -> AdminAPIKey {
-        var primary = body; primary.removeValue(forKey: "user_id"); primary.removeValue(forKey: "key")
-        if primary["custom_key"] == nil, let key = body["key"] { primary["custom_key"] = key }
-        return try await api.send("/api/v1/keys", method: .post, body: primary)
+        let primary = primaryAPIKeyBody(body)
+        let legacy = legacyAPIKeyBody(body)
+        var firstError: Error?
+        for path in ["/api/v1/keys", "/api/v1/api-keys"] {
+            do { return try await api.send(path, method: .post, body: primary) }
+            catch { if firstError == nil { firstError = error } }
+        }
+        do { return try await api.send("/api/v1/admin/api-keys", method: .post, body: legacy) }
+        catch {
+            if let userID = body["user_id"]?.doubleValue.map({ Int($0) }) {
+                return try await api.send("/api/v1/admin/users/\(userID)/api-keys", method: .post, body: legacy)
+            }
+            throw firstError ?? error
+        }
     }
 
     func updateAPIKey(_ key: AdminAPIKey, body: [String: JSONValue]) async throws -> AdminAPIKey {
-        try await api.send("/api/v1/keys/\(key.id)", method: .put, body: body)
+        let primary = primaryAPIKeyBody(body)
+        let legacy = legacyAPIKeyBody(body)
+        var variants = [primary, legacy]
+        if let rawStatus = body["status"]?.stringValue {
+            let enabled = !["inactive", "disabled", "revoked", "false", "0"].contains(rawStatus.lowercased())
+            var booleanVariant = primary
+            booleanVariant["enabled"] = .bool(enabled)
+            booleanVariant["active"] = .bool(enabled)
+            variants.append(booleanVariant)
+            var legacyStatus = legacy
+            legacyStatus["status"] = .string(enabled ? "active" : "disabled")
+            variants.append(legacyStatus)
+        }
+
+        let ownerQuery = key.userID.map { "?user_id=\($0)" } ?? ""
+        var paths = ["/api/v1/keys/\(key.id)\(ownerQuery)"]
+        if let userID = key.userID { paths.append("/api/v1/admin/users/\(userID)/api-keys/\(key.id)") }
+        paths.append(contentsOf: [
+            "/api/v1/api-keys/\(key.id)\(ownerQuery)",
+            "/api/v1/api-keys/\(key.id)",
+            "/api/v1/keys/\(key.id)",
+            "/api/v1/admin/api-keys/\(key.id)"
+        ])
+
+        var firstError: Error?
+        for path in paths {
+            for variant in variants {
+                do {
+                    let _: EmptyResponse = try await api.send(path, method: .put, body: variant)
+                    return key
+                } catch { if firstError == nil { firstError = error } }
+            }
+        }
+        throw firstError ?? APIError.invalidResponse
     }
 
     func deleteAPIKey(_ key: AdminAPIKey) async throws {
-        let _: EmptyResponse = try await api.send("/api/v1/keys/\(key.id)", method: .delete)
+        let ownerQuery = key.userID.map { "?user_id=\($0)" } ?? ""
+        var paths = ["/api/v1/keys/\(key.id)\(ownerQuery)"]
+        if let userID = key.userID { paths.append("/api/v1/admin/users/\(userID)/api-keys/\(key.id)") }
+        paths.append(contentsOf: [
+            "/api/v1/api-keys/\(key.id)\(ownerQuery)",
+            "/api/v1/api-keys/\(key.id)",
+            "/api/v1/keys/\(key.id)",
+            "/api/v1/admin/api-keys/\(key.id)"
+        ])
+        var firstError: Error?
+        for path in paths {
+            do { let _: EmptyResponse = try await api.send(path, method: .delete); return }
+            catch { if firstError == nil { firstError = error } }
+        }
+        throw firstError ?? APIError.invalidResponse
     }
 
     func apiKeyUsage(_ id: Int) async throws -> [JSONValue] {
@@ -286,7 +367,10 @@ struct AdminService: Sendable {
 
     // MARK: Operations
 
-    func opsOverview(filters: [String: String]) async throws -> OpsOverview { try await api.get("/api/v1/admin/ops/dashboard/overview", query: query(filters)) }
+    func opsOverview(filters: [String: String]) async throws -> OpsOverview {
+        let value: JSONValue = try await api.get("/api/v1/admin/ops/dashboard/overview", query: query(filters))
+        return OpsOverview(json: value)
+    }
     func opsDynamic(_ path: String, filters: [String: String] = [:]) async throws -> JSONValue { try await api.get(path, query: query(filters)) }
     func opsRecords(_ path: String, filters: [String: String]) async throws -> Page<OpsRecord> { try await api.get(path, query: query(filters)) }
     func alertEvents(filters: [String: String]) async throws -> Page<OpsAlertEvent> { try await api.listPage("/api/v1/admin/ops/alert-events", query: query(filters), itemKeys: ["items", "events", "alert_events", "alertEvents"] ) }
@@ -312,6 +396,40 @@ struct AdminService: Sendable {
     func dynamicDelete(_ path: String) async throws { let _: EmptyResponse = try await api.send(path, method: .delete) }
     func dynamicAction(_ path: String, method: HTTPMethod = .post, body: [String: JSONValue] = [:]) async throws {
         let _: EmptyResponse = try await api.send(path, method: method, body: body)
+    }
+
+    private func primaryAPIKeyBody(_ body: [String: JSONValue]) -> [String: JSONValue] {
+        var result = body
+        result.removeValue(forKey: "user_id")
+        result.removeValue(forKey: "key")
+        if result["custom_key"] == nil, let key = body["key"] { result["custom_key"] = key }
+        if result["custom_key"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
+            result.removeValue(forKey: "custom_key")
+        }
+        return result
+    }
+
+    private func legacyAPIKeyBody(_ body: [String: JSONValue]) -> [String: JSONValue] {
+        var result = body
+        if result["key"] == nil, let customKey = body["custom_key"]?.stringValue, !customKey.isEmpty {
+            result["key"] = .string(customKey)
+        }
+        if result["expires_at"] == nil, let days = body["expires_in_days"]?.doubleValue, days > 0,
+           let expiration = Calendar.current.date(byAdding: .day, value: Int(days), to: Date()) {
+            result["expires_at"] = .string(ISO8601DateFormatter().string(from: expiration))
+        }
+        result.removeValue(forKey: "custom_key")
+        result.removeValue(forKey: "expires_in_days")
+        return result
+    }
+
+    private func filterAPIKeys(_ keys: [AdminAPIKey], search: String) -> [AdminAPIKey] {
+        let keyword = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return keys }
+        return keys.filter {
+            "\($0.name ?? "") \($0.key ?? "") \($0.customKey ?? "") \($0.groupName ?? "") \($0.userEmail ?? "") \($0.userID ?? 0)"
+                .localizedCaseInsensitiveContains(keyword)
+        }
     }
 
     private func query(_ values: [String: String]) -> [URLQueryItem] {

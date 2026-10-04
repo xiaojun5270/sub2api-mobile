@@ -100,7 +100,7 @@ struct DashboardView: View {
         let displayedOutput = useFallback && selectedOutput == 0 ? stats?.todayOutputTokens : selectedOutput
         let displayedCost = useFallback && selectedCost == 0 ? stats?.todayCost : selectedCost
 
-        return Grid(horizontalSpacing: 9, verticalSpacing: 9) {
+        return Grid(horizontalSpacing: 9, verticalSpacing: 7) {
             GridRow {
                 OverviewMetricCard(title: "\(range.label) Token", value: formatTokens(displayedTokens), detail: "输出 \(formatTokens(displayedOutput))", symbol: "bolt.fill", tint: AppPalette.orange)
                 OverviewMetricCard(title: "\(range.label) 成本", value: formatCurrency(displayedCost), detail: "TPM \(formatNumber(stats?.tpm))", symbol: "dollarsign.circle.fill", tint: .green)
@@ -133,7 +133,7 @@ struct DashboardView: View {
             + (other > 0 ? [DashboardSegment(name: "其它", value: other, color: Color(uiColor: .systemGray4))] : [])
         let total = segments.reduce(0) { $0 + $1.value }
 
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "chart.pie.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(AppPalette.blue)
                     .frame(width: 34, height: 34).background(AppPalette.blue.opacity(0.1), in: Circle())
@@ -163,7 +163,7 @@ struct DashboardView: View {
                         Text(groupMetric == "tokens" ? formatTokens(total) : formatCurrency(total)).font(.title3.bold()).minimumScaleFactor(0.7)
                     }.frame(width: 90)
                 }
-                .frame(height: 170).padding(.horizontal, 44)
+                .frame(height: 132).padding(.horizontal, 64)
                 VStack(spacing: 0) {
                     HStack(spacing: 6) {
                         Text("分组").frame(maxWidth: .infinity, alignment: .leading)
@@ -171,7 +171,7 @@ struct DashboardView: View {
                         Text("Token").frame(width: 60, alignment: .trailing)
                         Text("实际").frame(width: 64, alignment: .trailing)
                     }
-                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 7)
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary).padding(.bottom, 5)
                     ForEach(Array(visible.enumerated()), id: \.offset) { index, row in
                         HStack(spacing: 6) {
                             HStack(spacing: 6) { Circle().fill(groupColor(index)).frame(width: 7, height: 7); Text(row.name).font(.caption.weight(.semibold)).lineLimit(1) }.frame(maxWidth: .infinity, alignment: .leading)
@@ -179,13 +179,13 @@ struct DashboardView: View {
                             Text(formatTokens(row.tokens)).frame(width: 60, alignment: .trailing)
                             Text(formatCurrency(row.actualCost)).foregroundStyle(AppPalette.teal).fontWeight(.bold).frame(width: 64, alignment: .trailing)
                         }
-                        .font(.caption2.monospacedDigit()).padding(.vertical, 8)
+                        .font(.caption2.monospacedDigit()).padding(.vertical, 6)
                         if index < visible.count - 1 { Divider() }
                     }
                 }
             }
         }
-        .padding(14).glassPanel(cornerRadius: 18)
+        .padding(.horizontal, 14).padding(.vertical, 12).glassPanel(cornerRadius: 18)
     }
 
     private var accountOverview: some View {
@@ -376,12 +376,12 @@ private struct OverviewMetricCard: View {
     let title: String, value: String, detail: String, symbol: String
     let tint: Color
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
                     .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Text(title).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
             }
@@ -389,8 +389,9 @@ private struct OverviewMetricCard: View {
             Text(value).font(.system(.title3, design: .rounded, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
             Text(detail).font(.caption2.weight(.semibold)).foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
         .glassPanel(cornerRadius: 14)
     }
 }

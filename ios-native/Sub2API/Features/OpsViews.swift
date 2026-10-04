@@ -27,7 +27,7 @@ struct OpsView: View {
         .appPage().task { guard let service = try? store.adminService() else { return }; groups = (try? await service.allGroups()) ?? [] }
     }
 
-    private var filters: [String: String] { ["time_range": timeRange, "window": timeRange, "platform": platform, "group_id": groupID, "page": "1", "page_size": "100"] }
+    private var filters: [String: String] { ["time_range": timeRange, "window": timeRange, "platform": platform, "group_id": groupID] }
 }
 
 private enum OpsSection: String, CaseIterable, Identifiable { case overview, records, alerts; var id: Self { self }; var title: String { switch self { case .overview: "总览"; case .records: "记录"; case .alerts: "告警" } } }
@@ -65,7 +65,8 @@ private struct OpsOverviewView: View {
                 chartPanel("吞吐趋势", value: throughput, keys: ["trend", "items"], color: AppPalette.blue)
                 chartPanel("错误趋势", value: errorTrend, keys: ["trend", "items"], color: AppPalette.orange)
                 dynamicPanel("实时流量", symbol: "dot.radiowaves.left.and.right", value: realtime)
-                dynamicPanel("资源与运行时", symbol: "cpu", value: runtime ?? snapshot)
+                dynamicPanel("资源与运行时", symbol: "cpu", value: resourceMetrics)
+                dynamicPanel("运行时告警", symbol: "exclamationmark.shield", value: runtime)
                 dynamicPanel("账号可用性", symbol: "checkmark.shield", value: availability)
                 dynamicPanel("平台并发 / 排队", symbol: "server.rack", value: concurrency)
                 dynamicPanel("用户并发", symbol: "person.2", value: userConcurrency)
@@ -79,6 +80,16 @@ private struct OpsOverviewView: View {
     }
 
     private var filterKey: String { filters.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "&") }
+
+    private var resourceMetrics: JSONValue? {
+        guard let snapshot else { return nil }
+        let snapshotObject = snapshot.objectValue
+        let overviewValue = snapshotObject?["overview"] ?? snapshot
+        let overviewObject = overviewValue.objectValue
+        return overviewObject?["system_metrics"] ?? overviewObject?["systemMetrics"]
+            ?? snapshotObject?["system_metrics"] ?? snapshotObject?["systemMetrics"]
+            ?? overviewValue
+    }
 
     @ViewBuilder private func chartPanel(_ title: String, value: JSONValue?, keys: [String], color: Color) -> some View {
         let rows = extractRows(value, keys: keys)
@@ -114,8 +125,27 @@ private struct OpsOverviewView: View {
         async let m: JSONValue? = try? await service.opsDynamic("/api/v1/admin/ops/dashboard/latency-histogram", filters: filters)
         async let n: JSONValue? = try? await service.opsDynamic("/api/v1/admin/ops/system-logs/health")
         let values = await (a,b,c,d,e,f,g,h,i,j,k,l,m,n)
-        overview = values.0; snapshot = values.1; realtime = values.2; concurrency = values.3; userConcurrency = values.4; availability = values.5; tokenStats = values.6; runtime = values.7; thresholds = values.8; errorTrend = values.9; throughput = values.10; distribution = values.11; histogram = values.12; logsHealth = values.13
-        if overview == nil { errorMessage = "运维总览加载失败，其他可用模块仍会显示。" }; isLoading = false
+        let snapshotValue = values.1
+        let snapshotObject = snapshotValue?.objectValue
+        let snapshotOverview = snapshotObject?["overview"] ?? snapshotValue
+        overview = values.0 ?? snapshotOverview.map { OpsOverview(json: $0) }
+        snapshot = snapshotValue
+        realtime = values.2 ?? snapshotObject?["realtime"] ?? snapshotOverview
+        concurrency = values.3
+        userConcurrency = values.4
+        availability = values.5
+        tokenStats = values.6 ?? snapshotObject?["openai_token_stats"] ?? snapshotObject?["openaiTokenStats"]
+        runtime = values.7
+        thresholds = values.8
+        errorTrend = values.9 ?? snapshotObject?["error_trend"] ?? snapshotObject?["errorTrend"]
+        throughput = values.10 ?? snapshotObject?["throughput_trend"] ?? snapshotObject?["throughputTrend"]
+        distribution = values.11 ?? snapshotObject?["error_distribution"] ?? snapshotObject?["errorDistribution"]
+        histogram = values.12 ?? snapshotObject?["latency_histogram"] ?? snapshotObject?["latencyHistogram"]
+        logsHealth = values.13
+        if overview == nil && snapshotValue == nil {
+            errorMessage = "运维总览与快照均加载失败，请检查服务端运维接口。"
+        }
+        isLoading = false
     }
 }
 
@@ -150,7 +180,7 @@ private struct OpsRecordsView: View {
     private var taskKey: String { "\(kind.rawValue)-\(level)-\(filters.description)" }
     private var path: String { "/api/v1/admin/ops/\(kind.rawValue)" }
     private func tone(_ row: OpsRecord) -> Color { ["error", "critical", "fatal"].contains((row.level ?? row.status ?? "").lowercased()) ? .red : AppPalette.orange }
-    private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; do { var next = filters; next["level"] = level; next["search"] = search; records = try await service.opsRecords(path, filters: next).items; errorMessage = nil } catch { errorMessage = error.localizedDescription }; isLoading = false }
+    private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; do { var next = filters; next["page"] = "1"; next["page_size"] = "100"; next["sort_by"] = "created_at"; next["sort_order"] = "desc"; next["level"] = level; next["search"] = search; records = try await service.opsRecords(path, filters: next).items; errorMessage = nil } catch { errorMessage = error.localizedDescription }; isLoading = false }
     private func resolve(_ row: OpsRecord) async { guard let service = try? store.adminService() else { return }; do { try await service.resolveOpsRecord(row.id, kind: kind); await load() } catch { message = error.localizedDescription } }
     private func cleanupLogs() async { guard let service = try? store.adminService() else { return }; do { try await service.cleanupSystemLogs(); message = "系统日志清理已提交"; await load() } catch { message = error.localizedDescription } }
 }

@@ -40,7 +40,19 @@ struct APIKeysView: View {
                 if isLoading && keys.isEmpty { LoadingView(label: "正在加载 API 密钥") }
                 else if let errorMessage, keys.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
                 else if filtered.isEmpty { EmptyContentView(symbol: "key.slash", title: "暂无密钥", message: "当前筛选条件下没有 API 密钥。") }
-                else { ForEach(filtered) { key in APIKeyCard(key: key) { UIPasteboard.general.string = key.customKey ?? key.key; message = "密钥已复制" }.contextMenu { keyMenu(key) } } }
+                else {
+                    ForEach(filtered) { key in
+                        APIKeyCard(
+                            key: key,
+                            copy: { UIPasteboard.general.string = key.customKey ?? key.key; message = "密钥已复制" },
+                            showUsage: { usageKey = key },
+                            edit: { editingKey = key },
+                            toggle: { Task { await toggle(key) } },
+                            delete: { deletingKey = key }
+                        )
+                        .contextMenu { keyMenu(key) }
+                    }
+                }
             }.padding(16)
         }
         .searchable(text: $searchText, prompt: "名称、用户、密钥或分组")
@@ -84,6 +96,11 @@ struct APIKeysView: View {
 private struct APIKeyCard: View {
     let key: AdminAPIKey
     let copy: () -> Void
+    let showUsage: () -> Void
+    let edit: () -> Void
+    let toggle: () -> Void
+    let delete: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack { Image(systemName: "key.fill").foregroundStyle(AppPalette.blue); VStack(alignment: .leading, spacing: 3) { Text(key.name ?? "未命名密钥").font(.subheadline.bold()); Text(key.userEmail ?? "用户 #\(key.userID ?? 0)").font(.caption).foregroundStyle(.secondary) }; Spacer(); let style = StatusStyle.generic(key.status); StatusPill(text: style.0, color: style.1) }
@@ -91,8 +108,39 @@ private struct APIKeyCard: View {
             HStack(spacing: 12) { Label(key.groupName ?? key.groupID.map { "#\($0)" } ?? "未分组", systemImage: "folder"); Label(key.expiresAt ?? "永久", systemImage: "calendar"); Spacer() }.font(.caption2).foregroundStyle(.secondary)
             if let quota = key.quota, quota > 0 { ProgressView(value: min((key.quotaUsed ?? 0) / quota, 1)).tint(AppPalette.blue); Text("额度 \(NumberFormatters.compact(key.quotaUsed)) / \(NumberFormatters.compact(quota))").font(.caption2).foregroundStyle(.secondary) }
             HStack { Text("5H \(NumberFormatters.compact(key.usage5h))"); Text("1D \(NumberFormatters.compact(key.usage1d))"); Text("7D \(NumberFormatters.compact(key.usage7d))"); Spacer(); Text(key.lastUsedAt ?? "未使用") }.font(.caption2).foregroundStyle(.secondary)
+            Divider()
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                actionButton("趋势", symbol: "chart.xyaxis.line", action: showUsage)
+                actionButton("编辑", symbol: "pencil", action: edit, prominent: true)
+                actionButton(isDisabled ? "启用" : "禁用", symbol: "power", action: toggle)
+                actionButton("删除", symbol: "trash", action: delete, destructive: true)
+            }
         }.padding(14).glassPanel(cornerRadius: 18)
     }
+
+    private var isDisabled: Bool { ["inactive", "disabled", "revoked"].contains((key.status ?? "active").lowercased()) }
+
+    @ViewBuilder private func actionButton(_ title: String, symbol: String, action: @escaping () -> Void, prominent: Bool = false, destructive: Bool = false) -> some View {
+        if prominent {
+            Button(action: action) {
+                Label(title, systemImage: symbol)
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(AppPalette.blue)
+            .controlSize(.small)
+        } else {
+            Button(role: destructive ? .destructive : nil, action: action) {
+                Label(title, systemImage: symbol)
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
     private var masked: String { let value = key.customKey ?? key.key ?? ""; guard value.count > 10 else { return "••••••••" }; return "\(value.prefix(5))••••••\(value.suffix(4))" }
 }
 
@@ -100,7 +148,7 @@ private struct APIKeyEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
     let key: AdminAPIKey?
-    @State private var name: String; @State private var rawKey = ""; @State private var status: String
+    @State private var userID = ""; @State private var name: String; @State private var rawKey = ""; @State private var status: String
     @State private var groupID: String; @State private var quota: String; @State private var expiresAt: String; @State private var expiresInDays = ""
     @State private var ipWhitelist = ""; @State private var ipBlacklist = ""; @State private var limit5h: String; @State private var limit1d: String; @State private var limit7d: String
     @State private var resetQuota = false; @State private var resetUsage = false; @State private var isSaving = false; @State private var errorMessage: String?
@@ -108,13 +156,13 @@ private struct APIKeyEditorView: View {
     init(key: AdminAPIKey?) { self.key = key; _name = State(initialValue: key?.name ?? ""); _status = State(initialValue: key?.status ?? "active"); _groupID = State(initialValue: key?.groupID.map { String($0) } ?? ""); _quota = State(initialValue: key?.quota.map { String($0) } ?? ""); _expiresAt = State(initialValue: key?.expiresAt ?? ""); _ipWhitelist = State(initialValue: key?.ipWhitelist?.displayText ?? ""); _ipBlacklist = State(initialValue: key?.ipBlacklist?.displayText ?? ""); _limit5h = State(initialValue: key?.rateLimit5h.map { String($0) } ?? ""); _limit1d = State(initialValue: key?.rateLimit1d.map { String($0) } ?? ""); _limit7d = State(initialValue: key?.rateLimit7d.map { String($0) } ?? "") }
 
     var body: some View { NavigationStack { Form {
-        Section("基本信息") { TextField("名称", text: $name); SecureField(key == nil ? "自定义 Key（可选）" : "新 Key（留空不修改）", text: $rawKey); Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") }; TextField("分组 ID（空为未分组）", text: $groupID).keyboardType(.numberPad) }
+        Section("基本信息") { if key == nil { TextField("用户 ID（兼容旧接口，可选）", text: $userID).keyboardType(.numberPad) }; TextField("名称", text: $name); SecureField(key == nil ? "自定义 Key（可选）" : "新 Key（留空不修改）", text: $rawKey); if key != nil { Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") } }; TextField("分组 ID（空为未分组）", text: $groupID).keyboardType(.numberPad) }
         Section("额度与期限") { TextField("额度", text: $quota).keyboardType(.decimalPad); if key == nil { TextField("有效天数", text: $expiresInDays).keyboardType(.numberPad) } else { TextField("到期时间 ISO8601", text: $expiresAt); Toggle("重置额度", isOn: $resetQuota); Toggle("重置限流用量", isOn: $resetUsage) } }
         Section("访问限制") { TextField("IP 白名单，逗号分隔", text: $ipWhitelist); TextField("IP 黑名单，逗号分隔", text: $ipBlacklist); TextField("5H 限额", text: $limit5h).keyboardType(.decimalPad); TextField("1D 限额", text: $limit1d).keyboardType(.decimalPad); TextField("7D 限额", text: $limit7d).keyboardType(.decimalPad) }
         if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
     }.navigationTitle(key == nil ? "创建 API Key" : "编辑 API Key").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || name.isEmpty) } } } }
 
-    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name), "status": .string(status)]; if let value = rawKey.nilIfBlank { body["custom_key"] = .string(value) }; body["group_id"] = try FormParsing.integer(groupID).map { .number(Double($0)) } ?? .null; if let value = try FormParsing.number(quota) { body["quota"] = .number(value) }; if key == nil, let value = try FormParsing.integer(expiresInDays) { body["expires_in_days"] = .number(Double(value)) }; if key != nil { body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null; if resetQuota { body["reset_quota"] = .bool(true) }; if resetUsage { body["reset_rate_limit_usage"] = .bool(true) } }; if let value = ipWhitelist.nilIfBlank { body["ip_whitelist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = ipBlacklist.nilIfBlank { body["ip_blacklist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = try FormParsing.number(limit5h) { body["rate_limit_5h"] = .number(value) }; if let value = try FormParsing.number(limit1d) { body["rate_limit_1d"] = .number(value) }; if let value = try FormParsing.number(limit7d) { body["rate_limit_7d"] = .number(value) }; if let key { _ = try await service.updateAPIKey(key, body: body) } else { body.removeValue(forKey: "status"); _ = try await service.createAPIKey(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
+    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name)]; if let value = rawKey.nilIfBlank { body["custom_key"] = .string(value); body["key"] = .string(value) }; body["group_id"] = try FormParsing.integer(groupID).map { .number(Double($0)) } ?? .null; if let value = try FormParsing.number(quota) { body["quota"] = .number(value) }; if key == nil { if let value = try FormParsing.integer(userID) { body["user_id"] = .number(Double(value)) }; if let value = try FormParsing.integer(expiresInDays) { body["expires_in_days"] = .number(Double(value)) } } else { body["status"] = .string(status); body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null; if resetQuota { body["reset_quota"] = .bool(true) }; if resetUsage { body["reset_rate_limit_usage"] = .bool(true) } }; if let value = ipWhitelist.nilIfBlank { body["ip_whitelist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = ipBlacklist.nilIfBlank { body["ip_blacklist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = try FormParsing.number(limit5h) { body["rate_limit_5h"] = .number(value) }; if let value = try FormParsing.number(limit1d) { body["rate_limit_1d"] = .number(value) }; if let value = try FormParsing.number(limit7d) { body["rate_limit_7d"] = .number(value) }; if let key { _ = try await service.updateAPIKey(key, body: body) } else { _ = try await service.createAPIKey(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
 }
 
 private struct APIKeyUsageView: View {

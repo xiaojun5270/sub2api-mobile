@@ -480,15 +480,49 @@ struct OpsOverview: Decodable, Sendable {
     let activeAccounts: Double?
     let alertCount: Double?
 
-    enum CodingKeys: String, CodingKey {
-        case requests, errors, qps, rpm
-        case totalRequests = "total_requests"
-        case errorCount = "error_count"
-        case errorRate = "error_rate"
-        case avgLatencyMs = "avg_latency_ms"
-        case p95LatencyMs = "p95_latency_ms"
-        case activeAccounts = "active_accounts"
-        case alertCount = "alert_count"
+    init(from decoder: Decoder) throws {
+        self.init(json: try JSONValue(from: decoder))
+    }
+
+    init(json: JSONValue) {
+        let root = json.objectValue ?? [:]
+        let object = root["overview"]?.objectValue ?? root
+        let qpsMetrics = object["qps"]?.objectValue
+        let durationMetrics = object["duration"]?.objectValue ?? object["latency"]?.objectValue
+        let directErrors = object.number(
+            "error_count_total", "errorCountTotal", "request_error_count", "requestErrorCount",
+            "errors", "error_count", "errorCount", "total_errors", "totalErrors"
+        )
+        let successCount = object.number("success_count", "successCount", "request_count_success", "requestCountSuccess")
+
+        requests = object.number("requests", "request_count", "requestCount")
+        let directRequests = object.number(
+            "request_count_total", "requestCountTotal", "total_requests", "totalRequests",
+            "requests", "request_count", "requestCount"
+        )
+        if let directRequests {
+            totalRequests = directRequests
+        } else if let successCount, let directErrors {
+            totalRequests = successCount + directErrors
+        } else {
+            totalRequests = nil
+        }
+        errors = directErrors
+        errorCount = directErrors
+        errorRate = object.number("error_rate", "errorRate", "errors_rate")
+        avgLatencyMs = durationMetrics?.number("avg_ms", "avgMs", "avg", "average_ms", "averageMs")
+            ?? object.number(
+                "duration_avg_ms", "durationAvgMs", "avg_latency_ms", "avgLatencyMs",
+                "average_latency_ms", "averageLatencyMs", "latency_ms", "latencyMs",
+                "avg_duration_ms", "avgDurationMs"
+            )
+        p95LatencyMs = durationMetrics?.number("p95_ms", "p95Ms", "p95")
+            ?? object.number("duration_p95_ms", "durationP95Ms", "p95_latency_ms", "p95LatencyMs", "p95", "latency_p95_ms", "latencyP95Ms")
+        qps = qpsMetrics?.number("current", "avg", "value")
+            ?? object.number("qps_current", "qpsCurrent", "qps", "queries_per_second", "requests_per_second", "requestsPerSecond")
+        rpm = object.number("rpm", "requests_per_minute", "requestsPerMinute") ?? qps.map { $0 * 60 }
+        activeAccounts = object.number("active_accounts", "activeAccounts", "available_accounts", "availableAccounts")
+        alertCount = object.number("alert_count", "alertCount", "alerts", "open_alerts", "openAlerts")
     }
 }
 

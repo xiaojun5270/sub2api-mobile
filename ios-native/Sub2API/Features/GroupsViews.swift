@@ -40,7 +40,27 @@ struct GroupsView: View {
                 if isLoading && groups.isEmpty { LoadingView(label: "正在加载分组") }
                 else if let errorMessage, groups.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
                 else if filtered.isEmpty { EmptyContentView(symbol: "folder.badge.questionmark", title: "暂无分组", message: "当前筛选条件下没有分组。") }
-                else { ForEach(filtered) { group in GroupCard(group: group, usage: usage[group.id], capacity: capacity[group.id]).contextMenu { Button { editingGroup = group } label: { Label("编辑", systemImage: "pencil") }; Button { advancedGroup = group } label: { Label("高级管理", systemImage: "wrench.and.screwdriver") }; Button { Task { await toggle(group) } } label: { Label(inactive(group) ? "启用" : "停用", systemImage: "power") }; Divider(); Button(role: .destructive) { deletingGroup = group } label: { Label("删除", systemImage: "trash") } } } }
+                else {
+                    ForEach(filtered) { group in
+                        GroupCard(
+                            group: group,
+                            usage: usage[group.id],
+                            capacity: capacity[group.id],
+                            isInactive: inactive(group),
+                            onEdit: { editingGroup = group },
+                            onAdvanced: { advancedGroup = group },
+                            onToggle: { Task { await toggle(group) } },
+                            onDelete: { deletingGroup = group }
+                        )
+                        .contextMenu {
+                            Button { editingGroup = group } label: { Label("编辑", systemImage: "pencil") }
+                            Button { advancedGroup = group } label: { Label("高级管理", systemImage: "wrench.and.screwdriver") }
+                            Button { Task { await toggle(group) } } label: { Label(inactive(group) ? "启用" : "停用", systemImage: "power") }
+                            Divider()
+                            Button(role: .destructive) { deletingGroup = group } label: { Label("删除", systemImage: "trash") }
+                        }
+                    }
+                }
             }.padding(16)
         }
         .searchable(text: $searchText, prompt: "搜索分组名称")
@@ -67,12 +87,37 @@ struct GroupsView: View {
 }
 
 private struct GroupCard: View {
-    let group: AdminGroup; let usage: GroupUsageSummary?; let capacity: GroupCapacitySummary?
+    let group: AdminGroup
+    let usage: GroupUsageSummary?
+    let capacity: GroupCapacitySummary?
+    let isInactive: Bool
+    let onEdit: () -> Void
+    let onAdvanced: () -> Void
+    let onToggle: () -> Void
+    let onDelete: () -> Void
+
     var body: some View { VStack(alignment: .leading, spacing: 12) {
         HStack { Image(systemName: group.isExclusive == true ? "lock.folder.fill" : "folder.fill").foregroundStyle(.cyan); VStack(alignment: .leading, spacing: 3) { Text(group.name).font(.subheadline.bold()); Text("\(group.platform) · \(group.subscriptionType ?? "standard") · \(group.isExclusive == true ? "独占" : "共享")").font(.caption).foregroundStyle(.secondary) }; Spacer(); let style = StatusStyle.generic(group.status); StatusPill(text: style.0, color: style.1) }
         HStack(spacing: 8) { small("账号", "\(group.activeAccountCount ?? group.accountCount ?? 0)"); small("今日", NumberFormatters.currency(usage?.todayCost)); small("累计", NumberFormatters.currency(usage?.totalCost)); small("倍率", String(format: "%.2fx", group.rateMultiplier ?? 1)) }
         if let capacity { VStack(spacing: 5) { capacityBar("并发", capacity.concurrencyUsed, capacity.concurrencyMax, .cyan); capacityBar("RPM", capacity.rpmUsed, capacity.rpmMax, AppPalette.blue) } }
         if let description = group.description, !description.isEmpty { Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+        Divider()
+        HStack(spacing: 8) {
+            Button(action: onEdit) { Label("编辑", systemImage: "pencil") }
+                .buttonStyle(.borderedProminent)
+                .tint(AppPalette.blue)
+            Button(action: onAdvanced) { Label("高级", systemImage: "wrench.and.screwdriver") }
+                .buttonStyle(.bordered)
+            Spacer(minLength: 0)
+            Button(action: onToggle) { Image(systemName: "power") }
+                .buttonStyle(.bordered)
+                .tint(isInactive ? .green : AppPalette.orange)
+                .accessibilityLabel(isInactive ? "启用分组" : "停用分组")
+            Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("删除分组")
+        }
+        .controlSize(.small)
     }.padding(14).glassPanel(cornerRadius: 18) }
     private func small(_ label: String, _ value: String) -> some View { VStack(alignment: .leading, spacing: 3) { Text(label).font(.caption2).foregroundStyle(.secondary); Text(value).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.7) }.frame(maxWidth: .infinity, alignment: .leading) }
     private func capacityBar(_ label: String, _ used: Double?, _ max: Double?, _ color: Color) -> some View { HStack { Text(label).font(.caption2).frame(width: 34, alignment: .leading); ProgressView(value: (max ?? 0) > 0 ? (used ?? 0) / (max ?? 1) : 0).tint(color); Text("\(NumberFormatters.compact(used))/\(NumberFormatters.compact(max))").font(.caption2.monospacedDigit()).foregroundStyle(.secondary) } }
@@ -100,5 +145,5 @@ private struct GroupEditorView: View {
         if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
     }.navigationTitle(group == nil ? "创建分组" : "编辑分组").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(name.isEmpty || isSaving) } } } }
 
-    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name), "description": description.nilIfBlank.map { JSONValue.string($0) } ?? .null, "platform": .string(platform), "status": .string(status), "subscription_type": .string(subscription), "is_exclusive": .bool(exclusive), "allow_image_generation": .bool(allowImage), "image_rate_independent": .bool(imageIndependent), "peak_rate_enabled": .bool(peakEnabled), "claude_code_only": .bool(claudeOnly), "allow_messages_dispatch": .bool(allowMessages), "require_oauth_only": .bool(oauthOnly), "require_privacy_set": .bool(privacyRequired), "model_routing_enabled": .bool(modelRouting), "mcp_xml_inject": .bool(mcpXML), "supported_model_scopes": .array(scopes.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) })]; if let v = try FormParsing.number(rate) { body["rate_multiplier"] = .number(v) }; body["daily_limit_usd"] = try FormParsing.number(daily).map { JSONValue.number($0) } ?? .null; body["weekly_limit_usd"] = try FormParsing.number(weekly).map { JSONValue.number($0) } ?? .null; body["monthly_limit_usd"] = try FormParsing.number(monthly).map { JSONValue.number($0) } ?? .null; if let v = try FormParsing.integer(rpm) { body["rpm_limit"] = .number(Double(v)) }; if let v = try FormParsing.number(imageRate) { body["image_rate_multiplier"] = .number(v) }; if peakEnabled { body["peak_start"] = .string(peakStart); body["peak_end"] = .string(peakEnd); if let v = try FormParsing.number(peakRate) { body["peak_rate_multiplier"] = .number(v) } }; body["fallback_group_id"] = try FormParsing.integer(fallback).map { .number(Double($0)) } ?? .null; body["fallback_group_id_on_invalid_request"] = try FormParsing.integer(invalidFallback).map { .number(Double($0)) } ?? .null; body.merge(try FormParsing.jsonObject(advancedJSON)) { _, new in new }; if let group { _ = try await service.updateGroup(group.id, body: body) } else { _ = try await service.createGroup(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
+    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name), "description": description.nilIfBlank.map { JSONValue.string($0) } ?? .null, "platform": .string(platform), "status": .string(status), "subscription_type": .string(subscription), "is_exclusive": .bool(exclusive), "allow_image_generation": .bool(allowImage), "image_rate_independent": .bool(imageIndependent), "peak_rate_enabled": .bool(peakEnabled), "claude_code_only": .bool(claudeOnly), "allow_messages_dispatch": .bool(allowMessages), "require_oauth_only": .bool(oauthOnly), "require_privacy_set": .bool(privacyRequired), "model_routing_enabled": .bool(modelRouting), "mcp_xml_inject": .bool(mcpXML), "supported_model_scopes": .array(scopes.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) })]; if let v = try FormParsing.number(rate) { body["rate_multiplier"] = .number(v) }; body["daily_limit_usd"] = try FormParsing.number(daily).map { JSONValue.number($0) } ?? .null; body["weekly_limit_usd"] = try FormParsing.number(weekly).map { JSONValue.number($0) } ?? .null; body["monthly_limit_usd"] = try FormParsing.number(monthly).map { JSONValue.number($0) } ?? .null; if let v = try FormParsing.integer(rpm) { body["rpm_limit"] = .number(Double(v)) }; if let v = try FormParsing.number(imageRate) { body["image_rate_multiplier"] = .number(v) }; body["peak_start"] = .string(peakStart); body["peak_end"] = .string(peakEnd); if let v = try FormParsing.number(peakRate) { body["peak_rate_multiplier"] = .number(v) }; let emptyFallback: JSONValue = group == nil ? .null : .number(0); body["fallback_group_id"] = try FormParsing.integer(fallback).map { .number(Double($0)) } ?? emptyFallback; body["fallback_group_id_on_invalid_request"] = try FormParsing.integer(invalidFallback).map { .number(Double($0)) } ?? emptyFallback; body.merge(try FormParsing.jsonObject(advancedJSON)) { _, new in new }; if let group { _ = try await service.updateGroup(group.id, body: body) } else { body.removeValue(forKey: "status"); _ = try await service.createGroup(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
 }
