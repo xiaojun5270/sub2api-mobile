@@ -403,13 +403,21 @@ private struct OverviewMetricCard: View {
     let tint: Color
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: symbol).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+            HStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 24, height: 24)
+                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                Text(title).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .font(.caption)
             Text(value).font(.system(.title3, design: .rounded, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
             Text(detail).font(.caption2.weight(.semibold)).foregroundStyle(tint).lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading).padding(10)
-        .background(tint.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(tint.opacity(0.18), lineWidth: 0.7))
+        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
+        .padding(10)
+        .glassPanel(cornerRadius: 14)
     }
 }
 

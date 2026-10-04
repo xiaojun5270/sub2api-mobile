@@ -479,8 +479,8 @@ private struct AccountSummaryCard: View {
                 quotaRow(fiveHour)
                 quotaRow(sevenDay)
                 HStack(spacing: 5) {
-                    cardButton("查询", "magnifyingglass", .primary, onQueryQuota)
-                    cardButton("次数", nil, .primary, onCountQuota)
+                    cardButton("查询", "magnifyingglass", AppPalette.blue, onQueryQuota)
+                    cardButton("次数", nil, AppPalette.purple, onCountQuota)
                     cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
                 }
             }
@@ -488,14 +488,14 @@ private struct AccountSummaryCard: View {
             .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
 
             HStack(spacing: 5) {
-                cardButton("编辑", "pencil", .primary, onEdit)
-                cardButton(disabled ? "启用" : "禁用", "power", .primary, onToggleEnabled)
-                cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", .primary, onToggleScheduling)
+                cardButton("编辑", "pencil", AppPalette.blue, onEdit)
+                cardButton(disabled ? "启用" : "禁用", "power", AppPalette.orange, onToggleEnabled)
+                cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", AppPalette.purple, onToggleScheduling)
                 cardButton("删除", "trash", .red, onDelete)
             }
             HStack(spacing: 5) {
                 cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
-                cardButton(selectedModel ?? "选择模型", "cpu", .primary, onSelectModel, fill: .primary.opacity(0.045))
+                cardButton(selectedModel ?? "选择模型", "cpu", AppPalette.teal, onSelectModel, fill: .primary.opacity(0.045))
             }
         }
         .padding(8)
@@ -506,10 +506,18 @@ private struct AccountSummaryCard: View {
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
-                if let symbol { Label(label, systemImage: symbol) }
+                if let symbol {
+                    HStack(spacing: 5) {
+                        Image(systemName: symbol)
+                            .foregroundStyle(color)
+                            .frame(width: 20, height: 20)
+                            .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        Text(label).foregroundStyle(.secondary)
+                    }
+                }
                 else { Text(label) }
             }
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
+            .font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
             Text(value).font(.system(.headline, design: .rounded, weight: .bold)).foregroundStyle(.primary)
                 .lineLimit(2).minimumScaleFactor(0.68)
         }

@@ -84,6 +84,8 @@ struct MetricTile: View {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .foregroundStyle(tint)
+                    .frame(width: 24, height: 24)
+                    .background(tint.opacity(0.11), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Text(label)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
