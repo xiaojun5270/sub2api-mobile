@@ -5,6 +5,16 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "app/**"
+      - "src/**"
+      - "assets/**"
+      - "package.json"
+      - "package-lock.json"
+      - "app.json"
+      - "babel.config.js"
+      - "metro.config.js"
+      - "tsconfig.json"
 
 concurrency:
   group: android-apk-${{ github.ref }}
