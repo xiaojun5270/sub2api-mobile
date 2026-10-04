@@ -152,15 +152,61 @@ private struct APIKeyEditorView: View {
     @State private var groupID: String; @State private var quota: String; @State private var expiresAt: String; @State private var expiresInDays = ""
     @State private var ipWhitelist = ""; @State private var ipBlacklist = ""; @State private var limit5h: String; @State private var limit1d: String; @State private var limit7d: String
     @State private var resetQuota = false; @State private var resetUsage = false; @State private var isSaving = false; @State private var errorMessage: String?
+    @State private var availableGroups: [AdminGroup] = []
+    @State private var isLoadingGroups = false
+    @State private var groupLoadError: String?
 
     init(key: AdminAPIKey?) { self.key = key; _name = State(initialValue: key?.name ?? ""); _status = State(initialValue: key?.status ?? "active"); _groupID = State(initialValue: key?.groupID.map { String($0) } ?? ""); _quota = State(initialValue: key?.quota.map { String($0) } ?? ""); _expiresAt = State(initialValue: key?.expiresAt ?? ""); _ipWhitelist = State(initialValue: key?.ipWhitelist?.displayText ?? ""); _ipBlacklist = State(initialValue: key?.ipBlacklist?.displayText ?? ""); _limit5h = State(initialValue: key?.rateLimit5h.map { String($0) } ?? ""); _limit1d = State(initialValue: key?.rateLimit1d.map { String($0) } ?? ""); _limit7d = State(initialValue: key?.rateLimit7d.map { String($0) } ?? "") }
 
     var body: some View { NavigationStack { Form {
-        Section("基本信息") { if key == nil { TextField("用户 ID（兼容旧接口，可选）", text: $userID).keyboardType(.numberPad) }; TextField("名称", text: $name); SecureField(key == nil ? "自定义 Key（可选）" : "新 Key（留空不修改）", text: $rawKey); if key != nil { Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") } }; TextField("分组 ID（空为未分组）", text: $groupID).keyboardType(.numberPad) }
+        Section("基本信息") {
+            if key == nil { TextField("用户 ID（兼容旧接口，可选）", text: $userID).keyboardType(.numberPad) }
+            TextField("名称", text: $name)
+            SecureField(key == nil ? "自定义 Key（可选）" : "新 Key（留空不修改）", text: $rawKey)
+            if key != nil { Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") } }
+            Picker("分组", selection: $groupID) {
+                Text("未分组").tag("")
+                if let currentID = key?.groupID, !availableGroups.contains(where: { $0.id == currentID }) {
+                    let currentName = key?.groupName ?? "分组 #\(currentID)"
+                    Text("\(currentName)（当前）").tag(String(currentID))
+                }
+                ForEach(availableGroups.sorted(by: groupSort)) { group in
+                    Text("\(group.name) · \(group.platform)").tag(String(group.id))
+                }
+            }
+            if isLoadingGroups {
+                HStack { ProgressView(); Text("正在加载分组").foregroundStyle(.secondary) }
+                    .font(.caption)
+            } else if let groupLoadError {
+                HStack {
+                    Text(groupLoadError).font(.caption).foregroundStyle(.red).lineLimit(2)
+                    Spacer()
+                    Button("重试") { Task { await loadGroups() } }
+                }
+            }
+        }
         Section("额度与期限") { TextField("额度", text: $quota).keyboardType(.decimalPad); if key == nil { TextField("有效天数", text: $expiresInDays).keyboardType(.numberPad) } else { TextField("到期时间 ISO8601", text: $expiresAt); Toggle("重置额度", isOn: $resetQuota); Toggle("重置限流用量", isOn: $resetUsage) } }
         Section("访问限制") { TextField("IP 白名单，逗号分隔", text: $ipWhitelist); TextField("IP 黑名单，逗号分隔", text: $ipBlacklist); TextField("5H 限额", text: $limit5h).keyboardType(.decimalPad); TextField("1D 限额", text: $limit1d).keyboardType(.decimalPad); TextField("7D 限额", text: $limit7d).keyboardType(.decimalPad) }
         if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
-    }.navigationTitle(key == nil ? "创建 API Key" : "编辑 API Key").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || name.isEmpty) } } } }
+    }.navigationTitle(key == nil ? "创建 API Key" : "编辑 API Key").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || name.isEmpty) } }.task { await loadGroups() } } }
+
+    private func groupSort(_ left: AdminGroup, _ right: AdminGroup) -> Bool {
+        let leftOrder = left.sortOrder ?? Int.max
+        let rightOrder = right.sortOrder ?? Int.max
+        return leftOrder == rightOrder ? left.name.localizedStandardCompare(right.name) == .orderedAscending : leftOrder < rightOrder
+    }
+
+    private func loadGroups() async {
+        guard let service = try? store.adminService() else { return }
+        isLoadingGroups = true
+        groupLoadError = nil
+        do {
+            availableGroups = try await service.allGroups()
+        } catch {
+            groupLoadError = error.localizedDescription
+        }
+        isLoadingGroups = false
+    }
 
     private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name)]; if let value = rawKey.nilIfBlank { body["custom_key"] = .string(value); body["key"] = .string(value) }; body["group_id"] = try FormParsing.integer(groupID).map { .number(Double($0)) } ?? .null; if let value = try FormParsing.number(quota) { body["quota"] = .number(value) }; if key == nil { if let value = try FormParsing.integer(userID) { body["user_id"] = .number(Double(value)) }; if let value = try FormParsing.integer(expiresInDays) { body["expires_in_days"] = .number(Double(value)) } } else { body["status"] = .string(status); body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null; if resetQuota { body["reset_quota"] = .bool(true) }; if resetUsage { body["reset_rate_limit_usage"] = .bool(true) } }; if let value = ipWhitelist.nilIfBlank { body["ip_whitelist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = ipBlacklist.nilIfBlank { body["ip_blacklist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = try FormParsing.number(limit5h) { body["rate_limit_5h"] = .number(value) }; if let value = try FormParsing.number(limit1d) { body["rate_limit_1d"] = .number(value) }; if let value = try FormParsing.number(limit7d) { body["rate_limit_7d"] = .number(value) }; if let key { _ = try await service.updateAPIKey(key, body: body) } else { _ = try await service.createAPIKey(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
 }

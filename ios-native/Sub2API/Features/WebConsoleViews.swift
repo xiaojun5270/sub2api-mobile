@@ -39,6 +39,8 @@ struct WebConsoleListView: View {
     @State private var message: String?
     @State private var editor: ConsoleEditorState?
     @State private var proxyEditor: ProxyEditorState?
+    @State private var channelEditor: ChannelEditorState?
+    @State private var monitorEditor: ChannelMonitorEditorState?
     @State private var detail: ConsoleDetailState?
     @State private var deleting: DynamicRecord?
     @State private var clearsAudit = false
@@ -77,9 +79,11 @@ struct WebConsoleListView: View {
         .onSubmit(of: .search) { page = 1; Task { await load() } }
         .refreshable { await load() }
         .navigationTitle(module.title)
-        .toolbar { ToolbarItemGroup(placement: .primaryAction) { if module == .auditLogs { Button(role: .destructive) { clearsAudit = true } label: { Image(systemName: "trash") } }; if module.canCreate { Button { if module == .proxies { proxyEditor = ProxyEditorState(record: nil) } else { editor = ConsoleEditorState(title: "创建\(module.title)", path: module.createPath, method: .post, object: module.createTemplate) } } label: { Image(systemName: "plus") } } } }
+        .toolbar { ToolbarItemGroup(placement: .primaryAction) { if module == .auditLogs { Button(role: .destructive) { clearsAudit = true } label: { Image(systemName: "trash") } }; if module.canCreate { Button { openCreateEditor() } label: { Image(systemName: "plus") } } } }
         .sheet(item: $editor, onDismiss: { Task { await load() } }) { ConsoleJSONEditor(state: $0) }
         .sheet(item: $proxyEditor, onDismiss: { Task { await load() } }) { ProxyEditorView(state: $0) }
+        .sheet(item: $channelEditor, onDismiss: { Task { await load() } }) { ChannelEditorView(state: $0) }
+        .sheet(item: $monitorEditor, onDismiss: { Task { await load() } }) { ChannelMonitorEditorView(state: $0) }
         .sheet(item: $detail) { ConsoleDetailView(state: $0) }
         .confirmationDialog("确认删除？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) { Button("删除", role: .destructive) { if let deleting { Task { await delete(deleting) } } } }
         .alert("清理操作日志", isPresented: $clearsAudit) { SecureField("TOTP 验证码", text: Binding(get: { auditCode }, set: { auditCode = $0 })); Button("取消", role: .cancel) {}; Button("清理", role: .destructive) { Task { await clearAudit() } } } message: { Text("此操作需要管理员 TOTP 验证码。") }
@@ -90,7 +94,7 @@ struct WebConsoleListView: View {
 
     @ViewBuilder private func recordMenu(_ record: DynamicRecord) -> some View {
         Button { showDetail(record) } label: { Label("详情", systemImage: "info.circle") }
-        if module.canEdit { Button { if module == .proxies { proxyEditor = ProxyEditorState(record: record) } else { editor = ConsoleEditorState(title: "编辑\(module.title)", path: "\(module.path)/\(record.id)", method: .put, object: record.object) } } label: { Label("编辑", systemImage: "pencil") } }
+        if module.canEdit { Button { openEditEditor(record) } label: { Label("编辑", systemImage: "pencil") } }
         ForEach(actions(for: record)) { action in Button(role: action.destructive ? .destructive : nil) { Task { await perform(action, record: record) } } label: { Label(action.title, systemImage: action.symbol) } }
         if module.canDelete { Divider(); Button(role: .destructive) { deleting = record } label: { Label("删除", systemImage: "trash") } }
     }
@@ -105,6 +109,24 @@ struct WebConsoleListView: View {
         case .channels: return [ConsoleAction(title: "模型价格", symbol: "dollarsign.circle", suffix: "model-pricing", method: .get, showsResult: true)]
         case .channelMonitors: return [ConsoleAction(title: "立即运行", symbol: "play.fill", suffix: "run"), ConsoleAction(title: "复制", symbol: "doc.on.doc", suffix: "duplicate"), ConsoleAction(title: "历史", symbol: "clock.arrow.circlepath", suffix: "history", method: .get, showsResult: true)]
         case .auditLogs: return []
+        }
+    }
+
+    private func openCreateEditor() {
+        switch module {
+        case .proxies: proxyEditor = ProxyEditorState(record: nil)
+        case .channels: channelEditor = ChannelEditorState(record: nil)
+        case .channelMonitors: monitorEditor = ChannelMonitorEditorState(record: nil)
+        default: editor = ConsoleEditorState(title: "创建\(module.title)", path: module.createPath, method: .post, object: module.createTemplate)
+        }
+    }
+
+    private func openEditEditor(_ record: DynamicRecord) {
+        switch module {
+        case .proxies: proxyEditor = ProxyEditorState(record: record)
+        case .channels: channelEditor = ChannelEditorState(record: record)
+        case .channelMonitors: monitorEditor = ChannelMonitorEditorState(record: record)
+        default: editor = ConsoleEditorState(title: "编辑\(module.title)", path: "\(module.path)/\(record.id)", method: .put, object: record.object)
         }
     }
 
@@ -206,6 +228,8 @@ private struct ConsoleAction: Identifiable {
 
 private struct ConsoleEditorState: Identifiable { let id = UUID(); let title: String; let path: String; let method: HTTPMethod; let object: [String: JSONValue] }
 private struct ProxyEditorState: Identifiable { let id = UUID(); let record: DynamicRecord? }
+private struct ChannelEditorState: Identifiable { let id = UUID(); let record: DynamicRecord? }
+private struct ChannelMonitorEditorState: Identifiable { let id = UUID(); let record: DynamicRecord? }
 private struct ConsoleDetailState: Identifiable { let id = UUID(); let title: String; let value: JSONValue }
 
 private struct ProxyEditorView: View {
@@ -381,6 +405,466 @@ private struct ProxyEditorView: View {
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.date(from: prefix)
     }
+}
+
+private struct ChannelPricingDraft: Identifiable {
+    let id = UUID()
+    var base: [String: JSONValue]
+    var platform: String
+    var models: String
+    var billingMode: String
+    var inputPrice: String
+    var outputPrice: String
+    var cacheWritePrice: String
+    var cacheWrite1hPrice: String
+    var cacheReadPrice: String
+    var imageInputPrice: String
+    var imageOutputPrice: String
+    var perRequestPrice: String
+    var fastMultiplier: String
+    var flexMultiplier: String
+
+    init(object: [String: JSONValue] = [:]) {
+        base = object
+        platform = object.text("platform") ?? "anthropic"
+        models = object["models"]?.arrayValue?.compactMap(\.stringValue).joined(separator: ",") ?? ""
+        billingMode = object.text("billing_mode") ?? "token"
+        inputPrice = Self.perMillion(object.number("input_price"))
+        outputPrice = Self.perMillion(object.number("output_price"))
+        cacheWritePrice = Self.perMillion(object.number("cache_write_price"))
+        cacheWrite1hPrice = Self.perMillion(object.number("cache_write_1h_price"))
+        cacheReadPrice = Self.perMillion(object.number("cache_read_price"))
+        imageInputPrice = Self.perMillion(object.number("image_input_price"))
+        imageOutputPrice = Self.perMillion(object.number("image_output_price"))
+        perRequestPrice = object.number("per_request_price").map { String($0) } ?? ""
+        fastMultiplier = object.number("fast_multiplier").map { String($0) } ?? ""
+        flexMultiplier = object.number("flex_multiplier").map { String($0) } ?? ""
+    }
+
+    func requestBody() throws -> [String: JSONValue] {
+        let modelList = models.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard !modelList.isEmpty else { throw ValidationError("每条模型定价至少需要一个模型。") }
+        var body = base
+        body["platform"] = .string(platform)
+        body["models"] = .array(modelList.map { .string($0) })
+        body["billing_mode"] = .string(billingMode)
+        try setPerToken(&body, key: "input_price", raw: inputPrice)
+        try setPerToken(&body, key: "output_price", raw: outputPrice)
+        try setPerToken(&body, key: "cache_write_price", raw: cacheWritePrice)
+        try setPerToken(&body, key: "cache_write_1h_price", raw: cacheWrite1hPrice)
+        try setPerToken(&body, key: "cache_read_price", raw: cacheReadPrice)
+        try setPerToken(&body, key: "image_input_price", raw: imageInputPrice)
+        try setPerToken(&body, key: "image_output_price", raw: imageOutputPrice)
+        body["per_request_price"] = try FormParsing.number(perRequestPrice).map { .number($0) } ?? .null
+        body["fast_multiplier"] = try FormParsing.number(fastMultiplier).map { .number($0) } ?? .null
+        body["flex_multiplier"] = try FormParsing.number(flexMultiplier).map { .number($0) } ?? .null
+        return body
+    }
+
+    private static func perMillion(_ value: Double?) -> String { value.map { String($0 * 1_000_000) } ?? "" }
+    private func setPerToken(_ body: inout [String: JSONValue], key: String, raw: String) throws {
+        body[key] = try FormParsing.number(raw).map { .number($0 / 1_000_000) } ?? .null
+    }
+}
+
+private struct ChannelMappingDraft: Identifiable {
+    let id = UUID()
+    var platform: String
+    var source: String
+    var target: String
+}
+
+private struct ChannelEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    let state: ChannelEditorState
+    @State private var name: String
+    @State private var description: String
+    @State private var status: String
+    @State private var billingSource: String
+    @State private var restrictModels: Bool
+    @State private var applyToAccountStats: Bool
+    @State private var selectedGroupIDs: Set<Int>
+    @State private var pricing: [ChannelPricingDraft]
+    @State private var mappings: [ChannelMappingDraft]
+    @State private var features: [String: JSONValue]
+    @State private var webSearchEmulation: Bool
+    @State private var codexImageBridge: Bool
+    @State private var bedrockCompatibility: Bool
+    @State private var groups: [AdminGroup] = []
+    @State private var isLoadingGroups = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(state: ChannelEditorState) {
+        self.state = state
+        let object = state.record?.object ?? [:]
+        let featureObject = object["features_config"]?.objectValue ?? [:]
+        _name = State(initialValue: object.text("name") ?? "")
+        _description = State(initialValue: object.text("description") ?? "")
+        _status = State(initialValue: object.text("status") ?? "active")
+        _billingSource = State(initialValue: object.text("billing_model_source") ?? "channel_mapped")
+        _restrictModels = State(initialValue: object.flag("restrict_models") ?? false)
+        _applyToAccountStats = State(initialValue: object.flag("apply_pricing_to_account_stats") ?? false)
+        _selectedGroupIDs = State(initialValue: Set(object["group_ids"]?.arrayValue?.compactMap { value in value.doubleValue.map { Int($0) } } ?? []))
+        _pricing = State(initialValue: object["model_pricing"]?.arrayValue?.compactMap(\.objectValue).map { ChannelPricingDraft(object: $0) } ?? [])
+        _mappings = State(initialValue: Self.mappingDrafts(object["model_mapping"]?.objectValue ?? [:]))
+        _features = State(initialValue: featureObject)
+        _webSearchEmulation = State(initialValue: Self.platformFlag(featureObject["web_search_emulation"], platform: "anthropic"))
+        _codexImageBridge = State(initialValue: Self.platformFlag(featureObject["codex_image_generation_bridge"], platform: "openai"))
+        _bedrockCompatibility = State(initialValue: featureObject["bedrock_cc_compat"]?.boolValue ?? false)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本信息") {
+                    TextField("渠道名称", text: $name)
+                    TextField("描述", text: $description, axis: .vertical)
+                    if state.record != nil {
+                        Picker("状态", selection: $status) { Text("启用").tag("active"); Text("停用").tag("disabled") }
+                    }
+                    Picker("计费模型来源", selection: $billingSource) {
+                        Text("请求模型").tag("requested")
+                        Text("上游模型").tag("upstream")
+                        Text("渠道映射后模型").tag("channel_mapped")
+                        Text("响应模型").tag("response_model")
+                    }
+                    Toggle("仅允许定价列表中的模型", isOn: $restrictModels)
+                    Toggle("定价应用于账号统计", isOn: $applyToAccountStats)
+                }
+
+                Section("绑定分组") {
+                    if isLoadingGroups { ProgressView("正在加载分组") }
+                    if groups.isEmpty && !isLoadingGroups { Text("暂无可选分组").foregroundStyle(.secondary) }
+                    ForEach(groups.sorted(by: groupSort)) { group in
+                        Toggle("\(group.name) · \(group.platform)", isOn: groupBinding(group.id))
+                    }
+                }
+
+                Section("模型定价") {
+                    Button { pricing.append(ChannelPricingDraft()) } label: { Label("添加模型定价", systemImage: "plus") }
+                    ForEach($pricing) { $entry in
+                        DisclosureGroup(entry.models.nilIfBlank ?? "未命名定价") {
+                            Picker("平台", selection: $entry.platform) { ForEach(Self.platforms, id: \.self) { Text($0).tag($0) } }
+                            TextField("模型，逗号分隔", text: $entry.models)
+                            Picker("计费模式", selection: $entry.billingMode) { Text("Token").tag("token"); Text("按请求").tag("per_request"); Text("图片").tag("image"); Text("视频").tag("video") }
+                            TextField("输入价格 / 1M Token", text: $entry.inputPrice).keyboardType(.decimalPad)
+                            TextField("输出价格 / 1M Token", text: $entry.outputPrice).keyboardType(.decimalPad)
+                            TextField("缓存写入 / 1M Token", text: $entry.cacheWritePrice).keyboardType(.decimalPad)
+                            TextField("1H 缓存写入 / 1M", text: $entry.cacheWrite1hPrice).keyboardType(.decimalPad)
+                            TextField("缓存读取 / 1M Token", text: $entry.cacheReadPrice).keyboardType(.decimalPad)
+                            TextField("图片输入 / 1M Token", text: $entry.imageInputPrice).keyboardType(.decimalPad)
+                            TextField("图片输出 / 1M Token", text: $entry.imageOutputPrice).keyboardType(.decimalPad)
+                            TextField("每请求价格", text: $entry.perRequestPrice).keyboardType(.decimalPad)
+                            TextField("Fast 倍率", text: $entry.fastMultiplier).keyboardType(.decimalPad)
+                            TextField("Flex 倍率", text: $entry.flexMultiplier).keyboardType(.decimalPad)
+                            Button("删除此定价", role: .destructive) { pricing.removeAll { $0.id == entry.id } }
+                        }
+                    }
+                }
+
+                Section("模型映射") {
+                    Button { mappings.append(ChannelMappingDraft(platform: "anthropic", source: "", target: "")) } label: { Label("添加模型映射", systemImage: "plus") }
+                    ForEach($mappings) { $mapping in
+                        DisclosureGroup(mapping.source.nilIfBlank ?? "未命名映射") {
+                            Picker("平台", selection: $mapping.platform) { ForEach(Self.platforms, id: \.self) { Text($0).tag($0) } }
+                            TextField("请求模型 / 匹配模式", text: $mapping.source)
+                            TextField("映射到模型", text: $mapping.target)
+                            Button("删除此映射", role: .destructive) { mappings.removeAll { $0.id == mapping.id } }
+                        }
+                    }
+                }
+
+                Section("平台功能") {
+                    Toggle("Anthropic Web Search 模拟", isOn: $webSearchEmulation)
+                    Toggle("OpenAI Codex 图片生成桥接", isOn: $codexImageBridge)
+                    Toggle("Bedrock Claude Code 兼容", isOn: $bedrockCompatibility)
+                }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle(state.record == nil ? "创建渠道" : "编辑渠道")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || name.nilIfBlank == nil) }
+            }
+            .task { await loadGroups() }
+        }
+    }
+
+    private func save() {
+        guard let service = try? store.adminService() else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                var mappingObject: [String: [String: JSONValue]] = [:]
+                for mapping in mappings where mapping.source.nilIfBlank != nil && mapping.target.nilIfBlank != nil {
+                    mappingObject[mapping.platform, default: [:]][mapping.source.trimmingCharacters(in: .whitespacesAndNewlines)] = .string(mapping.target.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                var nextFeatures = features
+                nextFeatures["web_search_emulation"] = .object(["anthropic": .bool(webSearchEmulation)])
+                nextFeatures["codex_image_generation_bridge"] = .object(["openai": .bool(codexImageBridge)])
+                nextFeatures["bedrock_cc_compat"] = .bool(bedrockCompatibility)
+                let pricingValues = try pricing.map { JSONValue.object(try $0.requestBody()) }
+                var body: [String: JSONValue] = [
+                    "name": .string(name.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "description": .string(description.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "billing_model_source": .string(billingSource),
+                    "restrict_models": .bool(restrictModels),
+                    "apply_pricing_to_account_stats": .bool(applyToAccountStats),
+                    "group_ids": .array(selectedGroupIDs.sorted().map { .number(Double($0)) }),
+                    "model_pricing": .array(pricingValues),
+                    "model_mapping": .object(mappingObject.mapValues { .object($0) }),
+                    "features_config": .object(nextFeatures)
+                ]
+                if let rules = state.record?.object["account_stats_pricing_rules"] { body["account_stats_pricing_rules"] = rules }
+                if let record = state.record {
+                    body["status"] = .string(status)
+                    _ = try await service.dynamicUpdate("/api/v1/admin/channels/\(record.id)", body: body)
+                } else {
+                    _ = try await service.dynamicCreate("/api/v1/admin/channels", body: body)
+                }
+                dismiss()
+            } catch { errorMessage = error.localizedDescription }
+            isSaving = false
+        }
+    }
+
+    private func loadGroups() async {
+        guard let service = try? store.adminService() else { return }
+        isLoadingGroups = true
+        do { groups = try await service.allGroups() }
+        catch { errorMessage = error.localizedDescription }
+        isLoadingGroups = false
+    }
+
+    private func groupBinding(_ id: Int) -> Binding<Bool> {
+        Binding(get: { selectedGroupIDs.contains(id) }, set: { enabled in if enabled { selectedGroupIDs.insert(id) } else { selectedGroupIDs.remove(id) } })
+    }
+
+    private func groupSort(_ left: AdminGroup, _ right: AdminGroup) -> Bool {
+        let leftOrder = left.sortOrder ?? Int.max
+        let rightOrder = right.sortOrder ?? Int.max
+        return leftOrder == rightOrder ? left.name.localizedStandardCompare(right.name) == .orderedAscending : leftOrder < rightOrder
+    }
+    private static let platforms = ["anthropic", "openai", "gemini", "antigravity", "grok", "kimi", "zhipu", "deepseek", "minimax", "opencode_go", "typesafe", "composite"]
+    private static func platformFlag(_ value: JSONValue?, platform: String) -> Bool { value?.objectValue?[platform]?.boolValue ?? value?.boolValue ?? false }
+    private static func mappingDrafts(_ object: [String: JSONValue]) -> [ChannelMappingDraft] {
+        object.keys.sorted().flatMap { platform in
+            (object[platform]?.objectValue ?? [:]).keys.sorted().compactMap { source in
+                guard let target = object[platform]?.objectValue?[source]?.stringValue else { return nil }
+                return ChannelMappingDraft(platform: platform, source: source, target: target)
+            }
+        }
+    }
+}
+
+private struct ChannelMonitorEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    let state: ChannelMonitorEditorState
+    @State private var name: String
+    @State private var provider: String
+    @State private var apiMode: String
+    @State private var checkMode: String
+    @State private var accountID: String
+    @State private var endpoint: String
+    @State private var apiKey = ""
+    @State private var primaryModel: String
+    @State private var extraModels: String
+    @State private var groupName: String
+    @State private var interval: String
+    @State private var jitter: String
+    @State private var enabled: Bool
+    @State private var templateID: String
+    @State private var extraHeaders: String
+    @State private var bodyMode: String
+    @State private var bodyOverride: String
+    @State private var accounts: [AdminAccount] = []
+    @State private var templates: [DynamicRecord] = []
+    @State private var isLoadingOptions = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(state: ChannelMonitorEditorState) {
+        self.state = state
+        let object = state.record?.object ?? [:]
+        _name = State(initialValue: object.text("name") ?? "")
+        _provider = State(initialValue: object.text("provider") ?? "anthropic")
+        _apiMode = State(initialValue: object.text("api_mode") ?? "chat_completions")
+        _checkMode = State(initialValue: object.text("check_mode") ?? "probe")
+        _accountID = State(initialValue: object.number("account_id").map { String(Int($0)) } ?? "")
+        _endpoint = State(initialValue: object.text("endpoint") ?? "")
+        _primaryModel = State(initialValue: object.text("primary_model") ?? "")
+        _extraModels = State(initialValue: object["extra_models"]?.arrayValue?.compactMap(\.stringValue).joined(separator: ",") ?? "")
+        _groupName = State(initialValue: object.text("group_name") ?? "")
+        _interval = State(initialValue: object.number("interval_seconds").map { String(Int($0)) } ?? "60")
+        _jitter = State(initialValue: object.number("jitter_seconds").map { String(Int($0)) } ?? "0")
+        _enabled = State(initialValue: object.flag("enabled") ?? true)
+        _templateID = State(initialValue: object.number("template_id").map { String(Int($0)) } ?? "")
+        _extraHeaders = State(initialValue: Self.headerText(object["extra_headers"]?.objectValue ?? [:]))
+        _bodyMode = State(initialValue: object.text("body_override_mode") ?? "off")
+        _bodyOverride = State(initialValue: Self.prettyJSON(object["body_override"]))
+    }
+
+    private var usesQuota: Bool { checkMode != "probe" }
+    private var usesProbe: Bool { checkMode != "quota" }
+    private var filteredAccounts: [AdminAccount] { accounts.filter { $0.platform == provider }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending } }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("检测设置") {
+                    TextField("名称", text: $name)
+                    Picker("检测模式", selection: $checkMode) { Text("探活").tag("probe"); Text("仅配额").tag("quota"); Text("探活 + 配额").tag("quota_probe") }.pickerStyle(.segmented)
+                    Picker("Provider", selection: $provider) { ForEach(Self.providers, id: \.self) { Text($0).tag($0) } }
+                    if provider == "openai" && usesProbe {
+                        Picker("OpenAI API 模式", selection: $apiMode) { Text("Chat Completions").tag("chat_completions"); Text("Responses").tag("responses") }
+                    }
+                    if usesQuota {
+                        Picker("关联账号", selection: $accountID) {
+                            Text("请选择账号").tag("")
+                            if let currentID = Int(accountID), !filteredAccounts.contains(where: { $0.id == currentID }) {
+                                Text("账号 #\(currentID)（当前）").tag(accountID)
+                            }
+                            ForEach(filteredAccounts) { account in Text("\(account.name) · #\(account.id)").tag(String(account.id)) }
+                        }
+                    }
+                }
+
+                if usesProbe {
+                    Section("探活请求") {
+                        TextField("Endpoint", text: $endpoint).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        SecureField(state.record == nil ? "API Key" : "新 API Key（留空不修改）", text: $apiKey)
+                        TextField("主模型", text: $primaryModel).textInputAutocapitalization(.never)
+                        TextField("附加模型，逗号分隔", text: $extraModels).textInputAutocapitalization(.never)
+                    }
+                }
+
+                Section("调度") {
+                    TextField("显示分组名称", text: $groupName)
+                    TextField("检测间隔（15-3600 秒）", text: $interval).keyboardType(.numberPad)
+                    TextField("随机抖动秒数", text: $jitter).keyboardType(.numberPad)
+                    Toggle("启用监控", isOn: $enabled)
+                }
+
+                if usesProbe {
+                    Section("高级请求配置") {
+                        Picker("请求模板", selection: $templateID) {
+                            Text("不使用模板").tag("")
+                            ForEach(templatesForSelection) { template in Text(template.text("name") ?? "模板 #\(template.id)").tag(template.id) }
+                        }
+                        Text("额外 Headers，每行 key=value").font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $extraHeaders).frame(minHeight: 90).font(.caption.monospaced())
+                        Picker("Body 覆盖", selection: $bodyMode) { Text("关闭").tag("off"); Text("合并").tag("merge"); Text("替换").tag("replace") }
+                        if bodyMode != "off" {
+                            TextEditor(text: $bodyOverride).frame(minHeight: 120).font(.caption.monospaced())
+                        }
+                    }
+                }
+
+                if isLoadingOptions { Section { ProgressView("正在加载账号与模板") } }
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle(state.record == nil ? "创建渠道监控" : "编辑渠道监控")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || !canSave) }
+            }
+            .task { await loadOptions() }
+            .onChange(of: provider) { _, value in if value == "antigravity" { checkMode = "quota" } }
+            .onChange(of: templateID) { _, _ in applySelectedTemplate() }
+        }
+    }
+
+    private var canSave: Bool {
+        guard name.nilIfBlank != nil, let intervalValue = Int(interval), (15...3600).contains(intervalValue), let jitterValue = Int(jitter), jitterValue >= 0, jitterValue <= max(0, intervalValue - 15) else { return false }
+        if usesQuota && accountID.isEmpty { return false }
+        if usesProbe && (endpoint.nilIfBlank == nil || primaryModel.nilIfBlank == nil || (state.record == nil && apiKey.nilIfBlank == nil)) { return false }
+        return true
+    }
+
+    private func save() {
+        guard let service = try? store.adminService(), let intervalValue = Int(interval), let jitterValue = Int(jitter) else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                var body: [String: JSONValue] = [
+                    "name": .string(name.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "provider": .string(provider),
+                    "api_mode": .string(apiMode),
+                    "check_mode": .string(checkMode),
+                    "endpoint": .string(usesProbe ? endpoint.trimmingCharacters(in: .whitespacesAndNewlines) : ""),
+                    "api_key": .string(usesProbe ? apiKey : ""),
+                    "primary_model": .string(usesProbe ? primaryModel.trimmingCharacters(in: .whitespacesAndNewlines) : ""),
+                    "extra_models": .array(usesProbe ? extraModels.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespacesAndNewlines)) } : []),
+                    "group_name": .string(groupName.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "enabled": .bool(enabled),
+                    "interval_seconds": .number(Double(intervalValue)),
+                    "jitter_seconds": .number(Double(jitterValue)),
+                    "extra_headers": .object(try parseHeaders(extraHeaders)),
+                    "body_override_mode": .string(usesProbe ? bodyMode : "off")
+                ]
+                if usesQuota, let id = Int(accountID) { body["account_id"] = .number(Double(id)) }
+                else if state.record != nil { body["account_id"] = .number(0) }
+                if let id = Int(templateID), usesProbe { body["template_id"] = .number(Double(id)) }
+                else if state.record != nil { body["clear_template"] = .bool(true) }
+                body["body_override"] = usesProbe && bodyMode != "off" ? .object(try FormParsing.jsonObject(bodyOverride)) : .null
+                if let record = state.record { _ = try await service.dynamicUpdate("/api/v1/admin/channel-monitors/\(record.id)", body: body) }
+                else { _ = try await service.dynamicCreate("/api/v1/admin/channel-monitors", body: body) }
+                dismiss()
+            } catch { errorMessage = error.localizedDescription }
+            isSaving = false
+        }
+    }
+
+    private func loadOptions() async {
+        guard let service = try? store.adminService() else { return }
+        isLoadingOptions = true
+        async let nextAccounts: Page<AdminAccount>? = try? await service.accounts()
+        async let nextTemplates: JSONValue? = try? await service.dynamicGet("/api/v1/admin/channel-monitor-templates")
+        let values = await (nextAccounts, nextTemplates)
+        accounts = values.0?.items ?? []
+        if let value = values.1 {
+            var rows = value.arrayValue ?? []
+            if rows.isEmpty, let object = value.objectValue { rows = object.rows("items", "templates", "data").map { .object($0) } }
+            templates = rows.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) }
+        }
+        isLoadingOptions = false
+    }
+
+    private var templatesForSelection: [DynamicRecord] {
+        templates.filter { template in
+            template.text("provider") == provider && (provider != "openai" || (template.text("api_mode") ?? "chat_completions") == apiMode)
+        }
+    }
+
+    private func applySelectedTemplate() {
+        guard let selected = templates.first(where: { $0.id == templateID }) else { return }
+        extraHeaders = Self.headerText(selected.object["extra_headers"]?.objectValue ?? [:])
+        bodyMode = selected.text("body_override_mode") ?? "off"
+        bodyOverride = Self.prettyJSON(selected.object["body_override"])
+    }
+
+    private func parseHeaders(_ raw: String) throws -> [String: JSONValue] {
+        var result: [String: JSONValue] = [:]
+        for line in raw.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { continue }
+            let parts = text.split(separator: "=", maxSplits: 1).map { String($0) }
+            guard parts.count == 2, parts[0].nilIfBlank != nil else { throw ValidationError("Header 格式应为 key=value，每行一个。") }
+            result[parts[0].trimmingCharacters(in: .whitespaces)] = .string(parts[1].trimmingCharacters(in: .whitespaces))
+        }
+        return result
+    }
+
+    private static func headerText(_ headers: [String: JSONValue]) -> String { headers.keys.sorted().map { "\($0)=\(headers[$0]?.stringValue ?? "")" }.joined(separator: "\n") }
+    private static func prettyJSON(_ value: JSONValue?) -> String { guard let value, value != .null, let data = try? FormParsing.jsonData(value) else { return "{}" }; return String(data: data, encoding: .utf8) ?? "{}" }
+    private static let providers = ["anthropic", "openai", "gemini", "grok", "antigravity", "kimi", "zhipu", "deepseek", "minimax", "opencode_go"]
 }
 
 private struct ConsoleJSONEditor: View {

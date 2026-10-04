@@ -544,12 +544,18 @@ private struct AccountSummaryCard: View {
     var body: some View {
         VStack(spacing: 6) {
             Button(action: onOpen) {
-                HStack(spacing: 7) {
-                    Image(systemName: "key.fill").font(.caption2).foregroundStyle(AppPalette.blue)
-                        .frame(width: 24, height: 24).background(AppPalette.blue.opacity(0.09), in: Circle())
+                HStack(spacing: 5) {
+                    AccountProviderIcon(platform: account.platform)
                     Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
-                    Text("\(account.platform) · \(account.type)")
-                        .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+                    HStack(spacing: 3) {
+                        Text(account.platform)
+                        Text("·").foregroundStyle(.tertiary)
+                        Text(account.type)
+                    }
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
                     Spacer(minLength: 4)
                     if let modelTestDisplay {
                         Text(modelTestDisplay)
@@ -747,6 +753,67 @@ private struct AccountSummaryCard: View {
             return formatter.string(from: date)
         }
         return value.replacingOccurrences(of: "T", with: " ").prefix(16).description
+    }
+}
+
+private struct AccountProviderIcon: View {
+    let platform: String
+
+    private var key: String { platform.lowercased() }
+    private var assetName: String? {
+        switch key {
+        case "openai": "ProviderOpenAI"
+        case "anthropic": "ProviderAnthropic"
+        case "gemini": "ProviderGemini"
+        case "grok": "ProviderGrok"
+        case "antigravity": "ProviderAntigravity"
+        case "kimi": "ProviderKimi"
+        default: nil
+        }
+    }
+    private var symbol: String {
+        switch key {
+        case "deepseek": "wave.3.right.circle.fill"
+        case "zhipu": "hexagon.fill"
+        case "minimax": "point.3.connected.trianglepath.dotted"
+        case "opencode_go": "terminal.fill"
+        case "typesafe": "checkmark.shield.fill"
+        case "composite": "square.stack.3d.up.fill"
+        default: "server.rack"
+        }
+    }
+    private var color: Color {
+        switch key {
+        case "openai": AppPalette.teal
+        case "anthropic": AppPalette.orange
+        case "gemini": AppPalette.blue
+        case "grok": .primary
+        case "antigravity": AppPalette.purple
+        case "kimi": .indigo
+        case "deepseek": .blue
+        case "zhipu": .cyan
+        case "minimax": .pink
+        default: AppPalette.teal
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let assetName {
+                Image(assetName)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(5)
+            } else {
+                Image(systemName: symbol)
+                    .font(.caption.weight(.semibold))
+            }
+        }
+        .foregroundStyle(color)
+        .frame(width: 26, height: 26)
+        .background(color.opacity(0.1), in: Circle())
+        .accessibilityLabel("\(platform) 供应商")
     }
 }
 
