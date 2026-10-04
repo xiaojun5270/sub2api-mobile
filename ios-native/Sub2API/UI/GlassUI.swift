@@ -197,11 +197,72 @@ struct LoadingView: View {
 
 enum StatusStyle {
     static func account(_ account: AdminAccount) -> (String, Color) {
-        if account.isRateLimited == true { return ("限流", .gray) }
-        if account.error?.isEmpty == false || account.errorMessage?.isEmpty == false { return ("异常", AppPalette.orange) }
         let normalized = (account.status ?? "active").lowercased()
-        if ["disabled", "inactive", "paused"].contains(normalized) { return ("暂停", .secondary) }
+        let extra = account.extra?.objectValue ?? [:]
+        if isRateLimited(account, extra: extra) { return ("限流", .gray) }
+        if normalized == "error" || account.error?.isEmpty == false || account.errorMessage?.isEmpty == false { return ("异常", AppPalette.orange) }
+        let extraPause = extra.text("temp_unschedulable_until", "tempUnschedulableUntil")
+        if ["disabled", "inactive", "paused", "stop", "stopped"].contains(normalized)
+            || account.schedulable == false
+            || isFuture(account.tempUnschedulableUntil)
+            || isFuture(extraPause) { return ("暂停", .secondary) }
         return ("正常", .green)
+    }
+
+    private static func isRateLimited(_ account: AdminAccount, extra: [String: JSONValue]) -> Bool {
+        if let explicit = account.isRateLimited { return explicit }
+        for key in ["is_rate_limited", "isRateLimited", "rate_limited", "rateLimited"] {
+            if let explicit = explicitBoolean(extra[key]) { return explicit }
+        }
+        let rateStatuses = Set(["rate_limited", "rate-limited", "rate_limit", "limited", "throttled", "too_many_requests"])
+        if rateStatuses.contains((account.status ?? "").lowercased()) || rateStatuses.contains(extra.text("status", "state")?.lowercased() ?? "") { return true }
+        if account.errorCode == 429 || extra.number("error_code", "errorCode", "status_code", "statusCode") == 429 { return true }
+        if activeRateLimit(resetAt: account.rateLimitResetAt, limitedAt: account.rateLimitedAt, message: account.errorMessage ?? account.error) { return true }
+        if activeRateLimit(resetAt: extra.text("rate_limit_reset_at", "rateLimitResetAt"), limitedAt: extra.text("rate_limited_at", "rateLimitedAt"), message: extra.text("error_message", "errorMessage", "message", "reason")) { return true }
+        if let modelLimits = extra["model_rate_limits"]?.objectValue ?? extra["modelRateLimits"]?.objectValue {
+            for value in modelLimits.values {
+                guard let row = value.objectValue else { continue }
+                var modelExplicit: Bool?
+                for key in ["is_rate_limited", "isRateLimited", "rate_limited", "rateLimited"] {
+                    if let state = explicitBoolean(row[key]) { modelExplicit = state; break }
+                }
+                if modelExplicit == true { return true }
+                if modelExplicit == false { continue }
+                if rateStatuses.contains(row.text("status", "state")?.lowercased() ?? "") { return true }
+                if activeRateLimit(resetAt: row.text("rate_limit_reset_at", "rateLimitResetAt"), limitedAt: row.text("rate_limited_at", "rateLimitedAt"), message: row.text("error_message", "errorMessage", "message", "reason")) { return true }
+            }
+        }
+        return false
+    }
+
+    private static func explicitBoolean(_ value: JSONValue?) -> Bool? {
+        guard let value else { return nil }
+        switch value {
+        case let .bool(bool): return bool
+        case let .number(number): return number != 0
+        case let .string(raw):
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ["true", "1", "yes", "limited", "rate_limited", "throttled"].contains(text) { return true }
+            if ["false", "0", "no", "normal", "available", "none"].contains(text) { return false }
+            return nil
+        default: return nil
+        }
+    }
+
+    private static func activeRateLimit(resetAt: String?, limitedAt: String?, message: String?) -> Bool {
+        guard let resetAt, let reset = parsedDate(resetAt), reset > Date() else { return false }
+        let signal = (message ?? "").lowercased()
+        let hasSignal = signal.contains("rate limit") || signal.contains("rate_limit") || signal.contains("429") || signal.contains("限流")
+        if let limitedAt, let limited = parsedDate(limitedAt), limited <= Date() { return true }
+        return hasSignal
+    }
+
+    private static func isFuture(_ value: String?) -> Bool { value.flatMap(parsedDate).map { $0 > Date() } ?? false }
+    private static func parsedDate(_ value: String) -> Date? {
+        if let seconds = Double(value) { return Date(timeIntervalSince1970: seconds > 10_000_000_000 ? seconds / 1_000 : seconds) }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
     }
 
     static func generic(_ status: String?) -> (String, Color) {

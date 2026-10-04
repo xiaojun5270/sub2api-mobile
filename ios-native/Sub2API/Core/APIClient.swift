@@ -62,6 +62,38 @@ struct APIClient: Sendable {
         try await request(path, method: method, query: query, body: nil, idempotencyKey: idempotencyKey, as: type)
     }
 
+    func sendText<Body: Encodable & Sendable>(
+        _ path: String,
+        method: HTTPMethod,
+        body: Body
+    ) async throws -> String {
+        try await requestText(path, method: method, body: JSONEncoder().encode(body))
+    }
+
+    private func requestText(_ path: String, method: HTTPMethod, body: Data?) async throws -> String {
+        let url = try makeURL(path: path, query: [])
+        var request = URLRequest(url: url)
+        request.httpMethod = method.rawValue
+        request.httpBody = body
+        request.timeoutInterval = 60
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json, text/event-stream, text/plain", forHTTPHeaderField: "Accept")
+        let token = stripBearer(adminKey)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !isJWT(token) { request.setValue(token, forHTTPHeaderField: "x-api-key") }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        let text = String(data: data, encoding: .utf8) ?? ""
+        guard (200..<300).contains(http.statusCode) else {
+            if let rawObject = try? JSONSerialization.jsonObject(with: data), let object = rawObject as? [String: Any] {
+                throw APIError.server(status: http.statusCode, message: errorMessage(in: object))
+            }
+            throw APIError.server(status: http.statusCode, message: text.isEmpty ? "请求失败（HTTP \(http.statusCode)）。" : String(text.prefix(240)))
+        }
+        return text
+    }
+
     private func request<T: Decodable & Sendable>(
         _ path: String,
         method: HTTPMethod,

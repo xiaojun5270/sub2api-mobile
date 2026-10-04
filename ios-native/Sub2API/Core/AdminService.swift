@@ -123,7 +123,8 @@ struct AdminService: Sendable {
         case let .test(model, prompt):
             var body: [String: JSONValue] = [:]
             if let model, !model.isEmpty { body["model_id"] = .string(model); body["prompt"] = .string(prompt ?? "") }
-            let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)/test", method: .post, body: body)
+            let raw = try await api.sendText("/api/v1/admin/accounts/\(id)/test", method: .post, body: body)
+            return try parseAccountTest(raw)
         case .refresh:
             let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)/refresh", method: .post)
         case .clearError:
@@ -148,6 +149,39 @@ struct AdminService: Sendable {
             let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/shadow", method: .post, body: [String: JSONValue]())
         }
         return nil
+    }
+
+    private func parseAccountTest(_ raw: String) throws -> JSONValue {
+        if let data = raw.data(using: .utf8), let json = try? JSONDecoder().decode(JSONValue.self, from: data) {
+            if let object = json.objectValue {
+                if let code = object["code"]?.doubleValue, code != 0 && !(200..<300).contains(Int(code)) {
+                    throw APIError.server(status: Int(code), message: object.text("reason", "message", "detail") ?? "测试失败")
+                }
+                if object["success"]?.boolValue == false {
+                    throw APIError.server(status: 400, message: object.text("reason", "message", "detail") ?? "测试失败")
+                }
+                return object["data"] ?? json
+            }
+            return json
+        }
+
+        let events = raw.split(whereSeparator: { $0.isNewline }).compactMap { line -> [String: JSONValue]? in
+            let value = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard value.hasPrefix("data:") else { return nil }
+            let payload = String(value.dropFirst(5)).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard payload != "[DONE]", let data = payload.data(using: .utf8), let json = try? JSONDecoder().decode(JSONValue.self, from: data) else { return nil }
+            return json.objectValue
+        }
+        if let error = events.first(where: { $0.text("type") == "error" || ($0.text("type") == "test_complete" && $0["success"]?.boolValue == false) }) {
+            throw APIError.server(status: 400, message: error.text("error", "message") ?? "测试失败")
+        }
+        let model = events.lazy.compactMap { $0.text("model") }.first
+        let content = events.filter { $0.text("type") == "content" }.compactMap { $0.text("text") }.joined()
+        var result: [String: JSONValue] = ["success": .bool(true)]
+        if let model { result["model"] = .string(model) }
+        if !content.isEmpty { result["text"] = .string(content) }
+        if events.isEmpty && !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { result["text"] = .string(raw.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return .object(result)
     }
 
     func applyOAuthCredentials(_ id: Int, body: [String: JSONValue]) async throws -> AdminAccount {
@@ -200,58 +234,21 @@ struct AdminService: Sendable {
     // MARK: API keys
 
     func apiKeys(search: String = "") async throws -> Page<AdminAPIKey> {
-        do {
-            return try await api.listPage("/api/v1/keys", query: query(["page": "1", "page_size": "100", "search": search]), itemKeys: ["api_keys", "apiKeys", "keys", "items"])
-        } catch {
-            do {
-                return try await api.listPage("/api/v1/admin/api-keys", query: query(["page": "1", "page_size": "100", "search": search]), itemKeys: ["api_keys", "apiKeys", "keys", "items"])
-            } catch {
-                return try await api.listPage("/api/v1/admin/usage/search-api-keys", query: query(["q": search]), itemKeys: ["api_keys", "apiKeys", "keys", "items"])
-            }
-        }
+        try await api.listPage("/api/v1/keys", query: query(["page": "1", "page_size": "100", "search": search, "sort_by": "created_at", "sort_order": "desc"]), itemKeys: ["api_keys", "apiKeys", "keys", "items"])
     }
 
-    func createAPIKey(_ body: [String: JSONValue], userID: Int?) async throws -> AdminAPIKey {
+    func createAPIKey(_ body: [String: JSONValue]) async throws -> AdminAPIKey {
         var primary = body; primary.removeValue(forKey: "user_id"); primary.removeValue(forKey: "key")
         if primary["custom_key"] == nil, let key = body["key"] { primary["custom_key"] = key }
-        do { return try await api.send("/api/v1/keys", method: .post, body: primary) }
-        catch {
-            do { return try await api.send("/api/v1/api-keys", method: .post, body: primary) }
-            catch {
-                do { return try await api.send("/api/v1/admin/api-keys", method: .post, body: body) }
-                catch {
-                    guard let userID else { throw error }
-                    return try await api.send("/api/v1/admin/users/\(userID)/api-keys", method: .post, body: body)
-                }
-            }
-        }
+        return try await api.send("/api/v1/keys", method: .post, body: primary)
     }
 
     func updateAPIKey(_ key: AdminAPIKey, body: [String: JSONValue]) async throws -> AdminAPIKey {
-        let paths = [
-            "/api/v1/keys/\(key.id)" + (key.userID.map { "?user_id=\($0)" } ?? ""),
-            key.userID.map { "/api/v1/admin/users/\($0)/api-keys/\(key.id)" },
-            "/api/v1/api-keys/\(key.id)",
-            "/api/v1/admin/api-keys/\(key.id)"
-        ].compactMap { $0 }
-        var savedError: Error?
-        for path in paths {
-            do { return try await api.send(path, method: .put, body: body) } catch { savedError = error }
-        }
-        throw savedError ?? APIError.invalidResponse
+        try await api.send("/api/v1/keys/\(key.id)", method: .put, body: body)
     }
 
     func deleteAPIKey(_ key: AdminAPIKey) async throws {
-        let paths = [
-            "/api/v1/keys/\(key.id)" + (key.userID.map { "?user_id=\($0)" } ?? ""),
-            key.userID.map { "/api/v1/admin/users/\($0)/api-keys/\(key.id)" },
-            "/api/v1/api-keys/\(key.id)", "/api/v1/admin/api-keys/\(key.id)"
-        ].compactMap { $0 }
-        var savedError: Error?
-        for path in paths {
-            do { let _: EmptyResponse = try await api.send(path, method: .delete); return } catch { savedError = error }
-        }
-        throw savedError ?? APIError.invalidResponse
+        let _: EmptyResponse = try await api.send("/api/v1/keys/\(key.id)", method: .delete)
     }
 
     func apiKeyUsage(_ id: Int) async throws -> [JSONValue] {

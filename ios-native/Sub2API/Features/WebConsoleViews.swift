@@ -124,7 +124,7 @@ private struct ConsoleDetailView: View {
     var body: some View { NavigationStack { ScrollView { DynamicJSONView(value: state.value).padding(16).textSelection(.enabled) }.navigationTitle(state.title).navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }.appPage() } }
 }
 
-struct SystemSettingsView: View {
+private struct LegacySystemSettingsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var settingsText = "{}"
     @State private var systemInfo: JSONValue?
@@ -145,7 +145,7 @@ struct SystemSettingsView: View {
     private func systemAction(_ action: String) async { guard let service = try? store.adminService() else { return }; pendingAction = nil; do { try await service.dynamicAction("/api/v1/admin/system/\(action)"); await load() } catch { errorMessage = error.localizedDescription } }
 }
 
-struct PersonalConsoleView: View {
+private struct LegacyPersonalConsoleView: View {
     @EnvironmentObject private var store: AppStore
     @State private var data: [String: JSONValue] = [:]
     @State private var editor: AdvancedActionState?
@@ -189,4 +189,215 @@ struct PersonalConsoleView: View {
         if data.isEmpty { errorMessage = "个人中心需要网页登录 JWT；当前 Admin API Key 只能访问管理员接口。" }
         isLoading = false
     }
+}
+
+struct SystemSettingsView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var values: [String: JSONValue] = [:]
+    @State private var systemInfo: JSONValue?
+    @State private var updateInfo: JSONValue?
+    @State private var isLoading = true
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    @State private var pendingAction: String?
+
+    var body: some View {
+        Form {
+            if isLoading { Section { HStack { Spacer(); ProgressView(); Text("正在加载设置").foregroundStyle(.secondary); Spacer() } } }
+            Section("站点") {
+                TextField("站点名称", text: textBinding("site_name"))
+                TextField("站点副标题", text: textBinding("site_subtitle"))
+                TextField("Logo URL", text: textBinding("site_logo")).textInputAutocapitalization(.never)
+                TextField("API Base URL", text: textBinding("api_base_url")).textInputAutocapitalization(.never)
+                TextField("联系方式", text: textBinding("contact_info"))
+                TextField("文档地址", text: textBinding("doc_url")).textInputAutocapitalization(.never)
+                Toggle("紧凑首页", isOn: boolBinding("compact_home_enabled"))
+            }
+            Section("注册与认证") {
+                Toggle("允许注册", isOn: boolBinding("registration_enabled"))
+                Toggle("邮箱验证", isOn: boolBinding("email_verify_enabled"))
+                Toggle("启用优惠码", isOn: boolBinding("promo_code_enabled"))
+                Toggle("密码重置", isOn: boolBinding("password_reset_enabled"))
+                Toggle("邀请码", isOn: boolBinding("invitation_code_enabled"))
+                Toggle("TOTP", isOn: boolBinding("totp_enabled"))
+                Toggle("Passkey", isOn: boolBinding("passkey_enabled"))
+                Toggle("登录条款确认", isOn: boolBinding("login_agreement_enabled"))
+            }
+            Section("OAuth 登录") {
+                Toggle("GitHub OAuth", isOn: boolBinding("github_oauth_enabled"))
+                Toggle("Google OAuth", isOn: boolBinding("google_oauth_enabled"))
+                Toggle("LinuxDo OAuth", isOn: boolBinding("linuxdo_oauth_enabled"))
+                Toggle("钉钉 OAuth", isOn: boolBinding("dingtalk_oauth_enabled"))
+                Toggle("微信 OAuth", isOn: boolBinding("wechat_oauth_enabled"))
+                Toggle("OIDC", isOn: boolBinding("oidc_oauth_enabled"))
+                TextField("OIDC 提供方名称", text: textBinding("oidc_oauth_provider_name"))
+            }
+            Section("订阅与计费") {
+                Toggle("启用订阅", isOn: boolBinding("subscription_enabled"))
+                Toggle("允许购买订阅", isOn: boolBinding("purchase_subscription_enabled"))
+                TextField("购买订阅地址", text: textBinding("purchase_subscription_url")).textInputAutocapitalization(.never)
+                Toggle("启用支付", isOn: boolBinding("payment_enabled"))
+                Toggle("禁用余额支付", isOn: boolBinding("payment_balance_disabled"))
+                Toggle("推广返佣", isOn: boolBinding("affiliate_enabled"))
+            }
+            Section("通知") {
+                Toggle("余额不足提醒", isOn: boolBinding("balance_low_notify_enabled"))
+                TextField("余额提醒阈值", text: numberBinding("balance_low_notify_threshold")).keyboardType(.decimalPad)
+                TextField("充值地址", text: textBinding("balance_low_notify_recharge_url")).textInputAutocapitalization(.never)
+                Toggle("账号额度提醒", isOn: boolBinding("account_quota_notify_enabled"))
+            }
+            Section("渠道监控") {
+                Toggle("启用渠道监控", isOn: boolBinding("channel_monitor_enabled"))
+                TextField("默认间隔（秒）", text: numberBinding("channel_monitor_default_interval_seconds")).keyboardType(.numberPad)
+                Toggle("隐藏吞吐", isOn: boolBinding("channel_monitor_hide_throughput"))
+                Toggle("隐藏用户排行", isOn: boolBinding("channel_monitor_hide_user_ranking"))
+                Toggle("显示额度", isOn: boolBinding("channel_monitor_show_quota"))
+                Toggle("可用渠道页面", isOn: boolBinding("available_channels_enabled"))
+            }
+            Section("后台能力") {
+                Toggle("后台模式", isOn: boolBinding("backend_mode_enabled"))
+                Toggle("插件管理", isOn: boolBinding("plugin_management_enabled"))
+                Toggle("风控", isOn: boolBinding("risk_control_enabled"))
+                Toggle("允许用户查看错误请求", isOn: boolBinding("allow_user_view_error_requests"))
+                TextField("服务器时区", text: textBinding("server_timezone"))
+                TextField("默认分页数量", text: numberBinding("table_default_page_size")).keyboardType(.numberPad)
+            }
+            if let info = systemInfo?.objectValue {
+                Section("系统版本") {
+                    LabeledValueRow(label: "版本", value: info.text("version", "current_version") ?? "--")
+                    LabeledValueRow(label: "提交", value: info.text("commit", "git_commit") ?? "--")
+                    LabeledValueRow(label: "构建时间", value: info.text("build_time", "buildTime") ?? "--")
+                    Button("检查更新") { Task { await checkUpdates() } }
+                    Button("执行更新", role: .destructive) { pendingAction = "update" }
+                    Button("重启服务", role: .destructive) { pendingAction = "restart" }
+                }
+            }
+            if let updateInfo { Section("更新信息") { Text(updateInfo.displayText).font(.footnote).textSelection(.enabled) } }
+            if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+        }
+        .scrollContentBackground(.hidden)
+        .navigationTitle("系统设置")
+        .toolbar { ToolbarItem(placement: .primaryAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || isLoading) } }
+        .confirmationDialog("确认系统操作？", isPresented: Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } }), titleVisibility: .visible) {
+            Button(pendingAction == "restart" ? "重启服务" : "执行更新", role: .destructive) { if let action = pendingAction { Task { await systemAction(action) } } }
+        }
+        .appPage().task { await load() }
+    }
+
+    private func textBinding(_ key: String) -> Binding<String> {
+        Binding(get: { values[key]?.stringValue ?? "" }, set: { values[key] = .string($0) })
+    }
+    private func numberBinding(_ key: String) -> Binding<String> {
+        Binding(get: { values[key]?.displayText == "--" ? "" : values[key]?.displayText ?? "" }, set: { raw in values[key] = Double(raw).map(JSONValue.number) ?? .null })
+    }
+    private func boolBinding(_ key: String) -> Binding<Bool> {
+        Binding(get: { values[key]?.boolValue ?? false }, set: { values[key] = .bool($0) })
+    }
+    private func load() async {
+        guard let service = try? store.adminService() else { return }
+        isLoading = true
+        do {
+            let settings = try await service.dynamicGet("/api/v1/admin/settings")
+            values = settings.objectValue ?? [:]
+            systemInfo = try? await service.dynamicGet("/api/v1/admin/system/version")
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+        isLoading = false
+    }
+    private func save() {
+        guard let service = try? store.adminService() else { return }
+        isSaving = true
+        Task { do { _ = try await service.dynamicUpdate("/api/v1/admin/settings", body: values); await load() } catch { errorMessage = error.localizedDescription }; isSaving = false }
+    }
+    private func checkUpdates() async { guard let service = try? store.adminService() else { return }; do { updateInfo = try await service.dynamicGet("/api/v1/admin/system/check-updates") } catch { errorMessage = error.localizedDescription } }
+    private func systemAction(_ action: String) async { guard let service = try? store.adminService() else { return }; pendingAction = nil; do { try await service.dynamicAction("/api/v1/admin/system/\(action)"); await load() } catch { errorMessage = error.localizedDescription } }
+}
+
+struct PersonalConsoleView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var profile: [String: JSONValue] = [:]
+    @State private var subscriptions: JSONValue?
+    @State private var channels: JSONValue?
+    @State private var monitors: JSONValue?
+    @State private var showsProfile = false
+    @State private var showsPassword = false
+    @State private var showsRedeem = false
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.fill").font(.largeTitle).foregroundStyle(AppPalette.teal)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(profile.text("username", "display_name", "email") ?? "我的账户").font(.title3.bold())
+                            Text(profile.text("email") ?? "--").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if profile.text("role") == "admin" { StatusPill(text: "管理员", color: AppPalette.purple) }
+                    }
+                    HStack { accountMetric("余额", NumberFormatters.currency(profile.number("balance")), "creditcard", .green); accountMetric("并发", "\(Int(profile.number("current_concurrency") ?? 0))/\(Int(profile.number("concurrency") ?? 0))", "bolt.horizontal", AppPalette.blue); accountMetric("加入时间", shortDate(profile.text("created_at")), "calendar", AppPalette.orange) }
+                    HStack { Button("编辑资料") { showsProfile = true }.buttonStyle(.borderedProminent); Button("修改密码") { showsPassword = true }.buttonStyle(.bordered); Button("兑换") { showsRedeem = true }.buttonStyle(.bordered) }
+                }.padding(16).glassPanel()
+
+                NavigationLink { APIKeysView() } label: { personalLink("API 密钥", "创建、额度、限流、期限与使用配置", "key.fill", AppPalette.blue) }.buttonStyle(.plain)
+                personalSection("我的订阅", symbol: "creditcard", color: .indigo, value: subscriptions)
+                personalSection("渠道状态", symbol: "point.3.connected.trianglepath.dotted", color: .cyan, value: channels)
+                personalSection("渠道监控", symbol: "waveform.path.ecg.rectangle", color: AppPalette.purple, value: monitors)
+                if isLoading { LoadingView(label: "正在加载个人中心") }
+                if let errorMessage { InlineErrorView(message: errorMessage) }
+            }.padding(16)
+        }
+        .navigationTitle("我的账户")
+        .sheet(isPresented: $showsProfile, onDismiss: { Task { await load() } }) { ProfileEditorView(profile: profile) }
+        .sheet(isPresented: $showsPassword) { PasswordEditorView() }
+        .sheet(isPresented: $showsRedeem, onDismiss: { Task { await load() } }) { RedeemCodeView() }
+        .refreshable { await load() }
+        .appPage().task { await load() }
+    }
+
+    private func accountMetric(_ label: String, _ value: String, _ symbol: String, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) { Image(systemName: symbol).foregroundStyle(color); Text(value).font(.subheadline.bold()).lineLimit(1).minimumScaleFactor(0.7); Text(label).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity, alignment: .leading).padding(9).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func personalLink(_ title: String, _ subtitle: String, _ symbol: String, _ color: Color) -> some View { HStack(spacing: 12) { Image(systemName: symbol).foregroundStyle(color).frame(width: 38, height: 38).background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 11)); VStack(alignment: .leading, spacing: 3) { Text(title).font(.headline); Text(subtitle).font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }.padding(14).glassPanel(cornerRadius: 18, interactive: true) }
+    @ViewBuilder private func personalSection(_ title: String, symbol: String, color: Color, value: JSONValue?) -> some View {
+        VStack(alignment: .leading, spacing: 10) { Label(title, systemImage: symbol).font(.headline).foregroundStyle(color); let rows = personalRows(value); if rows.isEmpty { Text("暂无数据").font(.caption).foregroundStyle(.secondary) }; ForEach(rows) { row in HStack { VStack(alignment: .leading, spacing: 3) { Text(row.text("name", "title", "group_name", "platform") ?? "#\(row.id)").font(.subheadline.weight(.semibold)); Text(row.text("description", "status", "expires_at", "updated_at") ?? "").font(.caption).foregroundStyle(.secondary) }; Spacer(); if let status = row.text("status") { StatusPill(text: status, color: status == "active" ? .green : .secondary) } }; Divider() } }.padding(14).glassPanel()
+    }
+    private func personalRows(_ value: JSONValue?) -> [DynamicRecord] { guard let value else { return [] }; if let array = value.arrayValue { return array.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) } }; if let object = value.objectValue { for key in ["items", "subscriptions", "channels", "monitors", "data"] { if let array = object[key]?.arrayValue { return array.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) } } } }; return [] }
+    private func shortDate(_ value: String?) -> String { value.map { String($0.replacingOccurrences(of: "T", with: " ").prefix(10)) } ?? "--" }
+    private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; errorMessage = nil; async let nextProfile: JSONValue? = try? await service.dynamicGet("/api/v1/user/profile"); async let nextSubscriptions: JSONValue? = try? await service.dynamicGet("/api/v1/subscriptions"); async let nextChannels: JSONValue? = try? await service.dynamicGet("/api/v1/channels/available"); async let nextMonitors: JSONValue? = try? await service.dynamicGet("/api/v1/channel-monitors"); let result = await (nextProfile, nextSubscriptions, nextChannels, nextMonitors); profile = result.0?.objectValue ?? [:]; subscriptions = result.1; channels = result.2; monitors = result.3; if profile.isEmpty { errorMessage = "个人中心需要网页登录 JWT；Admin API Key 只能访问管理员接口。" }; isLoading = false }
+}
+
+private struct ProfileEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    let profile: [String: JSONValue]
+    @State private var username: String
+    @State private var avatarURL: String
+    @State private var notifyEnabled: Bool
+    @State private var notifyThreshold: String
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+    init(profile: [String: JSONValue]) { self.profile = profile; _username = State(initialValue: profile.text("username") ?? ""); _avatarURL = State(initialValue: profile.text("avatar_url", "avatarUrl") ?? ""); _notifyEnabled = State(initialValue: profile.flag("balance_notify_enabled", "balanceNotifyEnabled") ?? false); _notifyThreshold = State(initialValue: profile.number("balance_notify_threshold", "balanceNotifyThreshold").map { String($0) } ?? "") }
+    var body: some View { NavigationStack { Form { Section("基本资料") { TextField("用户名", text: $username); TextField("头像 URL", text: $avatarURL).textInputAutocapitalization(.never) }; Section("余额提醒") { Toggle("启用余额提醒", isOn: $notifyEnabled); TextField("提醒阈值", text: $notifyThreshold).keyboardType(.decimalPad) }; if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } } }.navigationTitle("编辑资料").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(username.nilIfBlank == nil || isSaving) } } } }
+    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["username": .string(username), "avatar_url": .string(avatarURL), "balance_notify_enabled": .bool(notifyEnabled)]; if let threshold = Double(notifyThreshold) { body["balance_notify_threshold"] = .number(threshold) }; _ = try await service.dynamicUpdate("/api/v1/user", body: body); dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
+}
+
+private struct PasswordEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    @State private var oldPassword = "", newPassword = "", confirmation = ""
+    @State private var errorMessage: String?
+    var body: some View { NavigationStack { Form { SecureField("当前密码", text: $oldPassword); SecureField("新密码", text: $newPassword); SecureField("确认新密码", text: $confirmation); if let errorMessage { Text(errorMessage).foregroundStyle(.red) } }.navigationTitle("修改密码").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("修改") { save() }.disabled(newPassword.count < 8 || newPassword != confirmation) } } } }
+    private func save() { guard let service = try? store.adminService() else { return }; Task { do { _ = try await service.dynamicUpdate("/api/v1/user/password", body: ["old_password": .string(oldPassword), "new_password": .string(newPassword)]); dismiss() } catch { errorMessage = error.localizedDescription } } }
+}
+
+private struct RedeemCodeView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    @State private var code = "", errorMessage: String?
+    var body: some View { NavigationStack { Form { TextField("兑换码", text: $code).textInputAutocapitalization(.characters); if let errorMessage { Text(errorMessage).foregroundStyle(.red) } }.navigationTitle("兑换").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("兑换") { redeem() }.disabled(code.nilIfBlank == nil) } } } }
+    private func redeem() { guard let service = try? store.adminService() else { return }; Task { do { _ = try await service.dynamicCreate("/api/v1/redeem", body: ["code": .string(code)]); dismiss() } catch { errorMessage = error.localizedDescription } } }
 }

@@ -336,10 +336,10 @@ struct DashboardView: View {
     }
 
     private var totalAccounts: Double { stats?.totalAccounts ?? Double(accounts.count) }
-    private var errorAccounts: Double { max(stats?.errorAccounts ?? 0, Double(accounts.filter(hasError).count)) }
-    private var limitedAccounts: Double { Double(accounts.filter(isRateLimited).count) }
-    private var normalAccounts: Double { Double(accounts.filter(isNormal).count) }
-    private var busyAccounts: Double { Double(accounts.filter { !hasError($0) && !isRateLimited($0) && ($0.currentConcurrency ?? 0) > 0 }.count) }
+    private var errorAccounts: Double { max(stats?.errorAccounts ?? 0, Double(accounts.filter { StatusStyle.account($0).0 == "异常" }.count)) }
+    private var limitedAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "限流" }.count) }
+    private var normalAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "正常" }.count) }
+    private var busyAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "正常" && ($0.currentConcurrency ?? 0) > 0 }.count) }
     private var currentRPM: Double? { stats?.rpm ?? ops?.rpm }
     private var currentTPM: Double? { stats?.tpm }
 
@@ -356,32 +356,6 @@ struct DashboardView: View {
         if weighted.requests > 0 { return String(format: "%.2fs", weighted.duration / weighted.requests / 1_000) }
         if weighted.count > 0 { return String(format: "%.2fs", weighted.sum / weighted.count / 1_000) }
         return "--"
-    }
-
-    private func hasError(_ account: AdminAccount) -> Bool { account.status?.lowercased() == "error" || account.error?.isEmpty == false || account.errorMessage?.isEmpty == false }
-    private func isRateLimited(_ account: AdminAccount) -> Bool {
-        let extra = account.extra?.objectValue ?? [:]
-        if let explicit = extra["is_rate_limited"]?.boolValue ?? extra["isRateLimited"]?.boolValue ?? extra["rate_limited"]?.boolValue ?? extra["rateLimited"]?.boolValue { return explicit }
-        if account.isRateLimited == true || ["rate_limited", "rate-limited", "rate_limit", "limited", "throttled", "too_many_requests"].contains(account.status?.lowercased() ?? "") || account.errorCode == 429 || extra.number("error_code", "errorCode", "status_code", "statusCode") == 429 { return true }
-        let message = (account.errorMessage ?? account.error ?? "").lowercased()
-        let extraMessage = extra.text("error_message", "errorMessage", "message", "reason")?.lowercased() ?? ""
-        let hasSignal = [message, extraMessage].contains { $0.contains("rate limit") || $0.contains("rate_limit") || $0.contains("429") || $0.contains("限流") }
-        let resetAt = account.rateLimitResetAt ?? extra.text("rate_limit_reset_at", "rateLimitResetAt")
-        if let resetAt, let date = ISO8601DateFormatter().date(from: resetAt), date > Date(), hasSignal { return true }
-        if let limits = extra["model_rate_limits"]?.objectValue ?? extra["modelRateLimits"]?.objectValue {
-            for value in limits.values {
-                guard let row = value.objectValue else { continue }
-                if row["is_rate_limited"]?.boolValue == true || row["isRateLimited"]?.boolValue == true { return true }
-                if ["rate_limited", "limited", "throttled"].contains(row.text("status", "state")?.lowercased() ?? "") { return true }
-            }
-        }
-        return hasSignal && account.rateLimitResetAt != nil
-    }
-    private func isNormal(_ account: AdminAccount) -> Bool {
-        if hasError(account) || isRateLimited(account) || account.schedulable == false || ["inactive", "disabled", "paused", "stop", "stopped"].contains(account.status?.lowercased() ?? "") { return false }
-        let pause = account.tempUnschedulableUntil ?? account.extra?.objectValue?.text("temp_unschedulable_until", "tempUnschedulableUntil")
-        if let pause, let date = ISO8601DateFormatter().date(from: pause), date > Date() { return false }
-        return true
     }
 
     private func groupMetricValue(_ row: DashboardGroupRow) -> Double { groupMetric == "tokens" ? row.tokens : row.actualCost }

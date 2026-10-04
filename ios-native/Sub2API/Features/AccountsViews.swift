@@ -2,6 +2,7 @@ import Charts
 import SwiftUI
 import UniformTypeIdentifiers
 
+@MainActor
 struct AccountsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var accounts: [AdminAccount] = []
@@ -25,6 +26,7 @@ struct AccountsView: View {
     @State private var quotaByAccount: [Int: JSONValue] = [:]
     @State private var modelPickerAccount: AdminAccount?
     @State private var selectedModelByAccount: [Int: String] = [:]
+    @State private var testFeedbackByAccount: [Int: String] = [:]
     @State private var detailAccount: AdminAccount?
     @State private var totalMetricsLoading: Set<Int> = []
 
@@ -64,6 +66,7 @@ struct AccountsView: View {
                             metrics: metricsByAccount[account.id] ?? .empty,
                             quota: accountQuotaPayload(account),
                             selectedModel: selectedModelByAccount[account.id],
+                            testFeedback: testFeedbackByAccount[account.id],
                             onLoadMetrics: { await loadTotalMetrics(account) },
                             onOpen: { detailAccount = account },
                             onQueryQuota: { Task { await queryQuota(account) } },
@@ -105,6 +108,7 @@ struct AccountsView: View {
         .sheet(item: $modelPickerAccount) { account in
             AccountModelPickerView(account: account, selected: selectedModelByAccount[account.id]) { model in
                 selectedModelByAccount[account.id] = model
+                persistCache()
                 modelPickerAccount = nil
             }
         }
@@ -118,7 +122,7 @@ struct AccountsView: View {
         }
         .overlay { if isWorking { ProgressView().padding(20).glassPanel(cornerRadius: 14) } }
         .appPage()
-        .task(id: store.activeServerID) { await load() }
+        .task(id: store.activeServerID) { restoreCache(); await load() }
     }
 
     private var summary: some View {
@@ -127,18 +131,30 @@ struct AccountsView: View {
         let errors = accounts.filter { StatusStyle.account($0).0 == "异常" }.count
         let limited = accounts.filter { StatusStyle.account($0).0 == "限流" }.count
         return HStack(spacing: 0) {
-            compactMetric("全部", accounts.count, .primary)
-            compactMetric("正常", active, .green)
-            compactMetric("暂停", paused, .secondary)
-            compactMetric("异常", errors, AppPalette.orange)
-            compactMetric("限流", limited, AppPalette.purple)
+            compactMetric("全部", accounts.count, .primary, filter: "all")
+            compactMetric("正常", active, .green, filter: "正常")
+            compactMetric("暂停", paused, .secondary, filter: "暂停")
+            compactMetric("异常", errors, AppPalette.orange, filter: "异常")
+            compactMetric("限流", limited, AppPalette.purple, filter: "限流")
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 4)
     }
 
-    private func compactMetric(_ label: String, _ value: Int, _ color: Color) -> some View {
-        VStack(spacing: 3) { Text("\(value)").font(.headline.monospacedDigit()).foregroundStyle(color); Text(label).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity)
+    private func compactMetric(_ label: String, _ value: Int, _ color: Color, filter: String) -> some View {
+        let selected = statusFilter == filter
+        return Button { statusFilter = filter } label: {
+            VStack(spacing: 3) {
+                Text("\(value)").font(.headline.monospacedDigit()).foregroundStyle(color)
+                Text(label).font(.caption2).foregroundStyle(selected ? color : Color.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(selected ? color.opacity(0.11) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .overlay { if selected { RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.28), lineWidth: 0.7) } }
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var filterBar: some View {
@@ -168,25 +184,82 @@ struct AccountsView: View {
 
     private func load() async {
         guard let service = try? store.adminService() else { return }
-        isLoading = true
+        let serverID = store.activeServerID
+        isLoading = accounts.isEmpty
         do {
             accounts = try await service.accounts().items
+            if let serverID { AccountsPageMemoryCache.accounts[serverID] = accounts }
             let ids = accounts.map(\.id)
             if ids.isEmpty {
                 metricsByAccount = [:]
                 quotaByAccount = [:]
             } else {
-                metricsByAccount = await loadTodayMetrics(ids: ids, service: service)
+                let refreshedToday = await loadTodayMetrics(ids: ids, service: service)
+                var merged = metricsByAccount.filter { ids.contains($0.key) }
+                for (id, today) in refreshedToday {
+                    var current = merged[id] ?? .empty
+                    current.todayRequests = today.todayRequests
+                    current.todayTokens = today.todayTokens
+                    current.todayActualCost = today.todayActualCost
+                    current.todayUserCost = today.todayUserCost
+                    current.todayLoaded = today.todayLoaded
+                    merged[id] = current
+                }
+                metricsByAccount = merged
+                quotaByAccount = quotaByAccount.filter { ids.contains($0.key) }
             }
+            persistCache()
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
         isLoading = false
     }
 
+    private func restoreCache() {
+        guard let serverID = store.activeServerID else { return }
+        if let cached = AccountsPageMemoryCache.accounts[serverID], !cached.isEmpty {
+            accounts = cached
+            isLoading = false
+        }
+        metricsByAccount = AccountsPageMemoryCache.metrics[serverID] ?? metricsByAccount
+        quotaByAccount = AccountsPageMemoryCache.quotas[serverID] ?? quotaByAccount
+        selectedModelByAccount = AccountsPageMemoryCache.selectedModels[serverID] ?? selectedModelByAccount
+        testFeedbackByAccount = AccountsPageMemoryCache.testFeedback[serverID] ?? testFeedbackByAccount
+    }
+
+    private func persistCache() {
+        guard let serverID = store.activeServerID else { return }
+        AccountsPageMemoryCache.accounts[serverID] = accounts
+        AccountsPageMemoryCache.metrics[serverID] = metricsByAccount
+        AccountsPageMemoryCache.quotas[serverID] = quotaByAccount
+        AccountsPageMemoryCache.selectedModels[serverID] = selectedModelByAccount
+        AccountsPageMemoryCache.testFeedback[serverID] = testFeedbackByAccount
+    }
+
     private func test(_ account: AdminAccount) async {
         guard let service = try? store.adminService() else { return }; isWorking = true
-        do { _ = try await service.accountAction(account.id, action: .test(model: selectedModelByAccount[account.id], prompt: nil)); message = "\(account.name) 测试成功" } catch { message = "测试失败：\(error.localizedDescription)" }
+        testFeedbackByAccount[account.id] = "测试中"
+        persistCache()
+        do {
+            let result = try await service.accountAction(account.id, action: .test(model: selectedModelByAccount[account.id], prompt: nil))
+            testFeedbackByAccount[account.id] = testFeedbackText(result)
+            message = "\(account.name) 测试成功"
+        } catch {
+            testFeedbackByAccount[account.id] = "测试失败"
+            message = "测试失败：\(error.localizedDescription)"
+        }
+        persistCache()
         isWorking = false
+    }
+
+    private func testFeedbackText(_ result: JSONValue?) -> String {
+        guard let result else { return "测试成功" }
+        if let object = result.objectValue {
+            if let text = object.text("text", "content", "message"), !text.isEmpty { return String(text.prefix(64)) }
+            if let model = object.text("model"), !model.isEmpty { return "\(model) · 测试成功" }
+            return object["success"]?.boolValue == false ? "测试失败" : "测试成功"
+        }
+        if let text = result.stringValue, !text.isEmpty { return String(text.prefix(64)) }
+        return "测试成功"
     }
 
     private func toggle(_ account: AdminAccount) async {
@@ -208,6 +281,7 @@ struct AccountsView: View {
             switch quotaMode(account) {
             case .openai, .grok:
                 quotaByAccount[account.id] = try await service.quota(account)
+                persistCache()
                 message = "\(account.name) 额度已更新"
             case .generic:
                 message = "\(account.name) 使用普通额度配置，无独立查询接口"
@@ -248,6 +322,7 @@ struct AccountsView: View {
                     message = "当前没有可用重置次数"
                 } else {
                     quotaByAccount[account.id] = try await service.resetOpenAIQuota(account.id)
+                    persistCache()
                     message = "\(account.name) 额度已重置"
                 }
             case .grok:
@@ -318,11 +393,17 @@ struct AccountsView: View {
                             metrics.todayTokens = stats.tokens ?? 0
                             metrics.todayActualCost = stats.cost ?? 0
                             metrics.todayUserCost = stats.userCost ?? stats.cost ?? 0
+                            metrics.todayLoaded = true
                             result[id] = metrics
                         }
                     }
                 }
             }
+        }
+        for id in ids {
+            var metrics = result[id] ?? .empty
+            metrics.todayLoaded = true
+            result[id] = metrics
         }
         return result
     }
@@ -340,10 +421,12 @@ struct AccountsView: View {
             metrics.totalCost = stats.totalAccountCost ?? stats.totalActualCost ?? stats.actualCost ?? stats.totalCost ?? 0
             metrics.totalLoaded = true
             metricsByAccount[account.id] = metrics
+            persistCache()
         } catch {
             var metrics = metricsByAccount[account.id] ?? .empty
             metrics.totalLoaded = true
             metricsByAccount[account.id] = metrics
+            persistCache()
         }
     }
 
@@ -406,6 +489,7 @@ private struct AccountCardMetrics: Sendable {
     var totalRequests = 0.0
     var totalTokens = 0.0
     var totalCost = 0.0
+    var todayLoaded = false
     var totalLoaded = false
     static let empty = AccountCardMetrics()
 
@@ -414,6 +498,7 @@ private struct AccountCardMetrics: Sendable {
         todayTokens = row.number("tokens", "total_tokens") ?? 0
         todayActualCost = row.number("cost", "actual_cost", "account_cost") ?? 0
         todayUserCost = row.number("user_cost", "userCost") ?? todayActualCost
+        todayLoaded = true
     }
 
     mutating func applyTotal(_ row: [String: JSONValue]) {
@@ -424,11 +509,21 @@ private struct AccountCardMetrics: Sendable {
     }
 }
 
+@MainActor
+private enum AccountsPageMemoryCache {
+    static var accounts: [UUID: [AdminAccount]] = [:]
+    static var metrics: [UUID: [Int: AccountCardMetrics]] = [:]
+    static var quotas: [UUID: [Int: JSONValue]] = [:]
+    static var selectedModels: [UUID: [Int: String]] = [:]
+    static var testFeedback: [UUID: [Int: String]] = [:]
+}
+
 private struct AccountSummaryCard: View {
     let account: AdminAccount
     let metrics: AccountCardMetrics
     let quota: JSONValue?
     let selectedModel: String?
+    let testFeedback: String?
     let onLoadMetrics: () async -> Void
     let onOpen: () -> Void
     let onQueryQuota: () -> Void
@@ -456,18 +551,27 @@ private struct AccountSummaryCard: View {
                     Text("\(account.platform) · \(account.type)")
                         .font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
                     Spacer(minLength: 4)
+                    if let modelTestDisplay {
+                        Text(modelTestDisplay)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(modelTestColor)
+                            .lineLimit(1).minimumScaleFactor(0.65)
+                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .background(modelTestColor.opacity(0.1), in: Capsule())
+                            .frame(maxWidth: 132)
+                    }
                     StatusPill(text: style.0, color: style.1)
                 }
             }
             .buttonStyle(.plain)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
-                metric("今日请求", NumberFormatters.compact(metrics.todayRequests) + " req", "waveform.path.ecg", AppPalette.blue)
-                metric("今日 Token", NumberFormatters.compact(metrics.todayTokens), "cpu", .cyan)
-                metric("今日额度", "A \(NumberFormatters.currency(metrics.todayActualCost))\nU \(NumberFormatters.currency(metrics.todayUserCost))", "dollarsign", .orange)
-                metric("总请求", NumberFormatters.compact(metrics.totalRequests) + " req", nil, .indigo)
-                metric("总 Token", NumberFormatters.compact(metrics.totalTokens), "cpu.fill", .mint)
-                metric("总额度", NumberFormatters.currency(metrics.totalCost), "wallet.pass", AppPalette.teal)
+                metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
+                metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
+                metric("今日额度", metrics.todayLoaded ? "U \(NumberFormatters.currency(metrics.todayUserCost))" : "U --", "dollarsign", .orange)
+                metric("总请求", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalRequests) + " req" : "--", nil, .indigo)
+                metric("总 Token", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalTokens) : "--", "cpu.fill", .mint)
+                metric("总额度", metrics.totalLoaded ? NumberFormatters.currency(metrics.totalCost) : "--", "wallet.pass", AppPalette.teal)
             }
 
             VStack(spacing: 5) {
@@ -480,7 +584,7 @@ private struct AccountSummaryCard: View {
                 quotaRow(sevenDay)
                 HStack(spacing: 5) {
                     cardButton("查询", "magnifyingglass", AppPalette.blue, onQueryQuota)
-                    cardButton("次数", nil, AppPalette.purple, onCountQuota)
+                    cardButton(resetCount.map { "次数 \(NumberFormatters.compact($0))" } ?? "次数", nil, AppPalette.purple, onCountQuota)
                     cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
                 }
             }
@@ -503,6 +607,22 @@ private struct AccountSummaryCard: View {
         .task { await onLoadMetrics() }
     }
 
+    private var resetCount: Double? {
+        quota?.objectValue?["rate_limit_reset_credits"]?.objectValue?.number("available_count", "availableCount", "count", "remaining")
+    }
+
+    private var modelTestDisplay: String? {
+        let feedback = testFeedback?.nilIfBlank
+        return feedback ?? selectedModel?.nilIfBlank
+    }
+
+    private var modelTestColor: Color {
+        guard let testFeedback else { return AppPalette.orange }
+        if testFeedback.contains("失败") { return .red }
+        if testFeedback.contains("成功") { return .green }
+        return AppPalette.orange
+    }
+
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
@@ -523,8 +643,7 @@ private struct AccountSummaryCard: View {
         }
         .padding(7)
         .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
-        .background(color.opacity(0.075), in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.18), lineWidth: 0.7))
+        .glassPanel(cornerRadius: 11)
     }
 
     private func quotaRow(_ window: QuotaWindow) -> some View {
