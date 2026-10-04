@@ -85,35 +85,77 @@ private struct UserRow: View {
     let usage: UsageSummary?
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: user.role?.lowercased() == "admin" ? "person.badge.shield.checkmark.fill" : "person.crop.circle.fill")
-                .font(.title2)
-                .foregroundStyle(user.role?.lowercased() == "admin" ? AppPalette.purple : AppPalette.blue)
-                .frame(width: 42, height: 42)
-                .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 13))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(user.email).font(.subheadline.weight(.bold)).lineLimit(1)
-                Text(user.username?.isEmpty == false ? user.username! : (user.notes?.isEmpty == false ? user.notes! : "用户 #\(user.id)"))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                HStack(spacing: 10) {
-                    Label(NumberFormatters.currency(user.balance), systemImage: "creditcard")
-                    Label(NumberFormatters.currency(usage?.totalAccountCost ?? usage?.totalActualCost ?? usage?.totalCost), systemImage: "dollarsign.circle")
-                    Label(NumberFormatters.compact(usage?.totalTokens), systemImage: "cpu")
-                    Label(NumberFormatters.compact(usage?.totalRequests), systemImage: "arrow.up.arrow.down")
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 11) {
+                Image(systemName: user.role?.lowercased() == "admin" ? "person.badge.shield.checkmark.fill" : "person.crop.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(user.role?.lowercased() == "admin" ? AppPalette.purple : AppPalette.blue)
+                    .frame(width: 42, height: 42)
+                    .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(user.email)
+                        .font(.subheadline.weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                    Text(user.username?.isEmpty == false ? user.username! : (user.notes?.isEmpty == false ? user.notes! : "用户 #\(user.id)"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption2)
+                Spacer(minLength: 6)
+                let style = StatusStyle.generic(user.status)
+                StatusPill(text: style.0, color: style.1)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                metric(label: "余额", value: NumberFormatters.currency(user.balance), symbol: "creditcard.fill", color: AppPalette.orange)
+                metric(label: "近 7 天成本", value: NumberFormatters.currency(usage?.totalAccountCost ?? usage?.totalActualCost ?? usage?.totalCost), symbol: "dollarsign.circle.fill", color: .green)
+                metric(label: "Token", value: NumberFormatters.compact(usage?.totalTokens), symbol: "cpu.fill", color: AppPalette.purple)
+                metric(label: "请求", value: NumberFormatters.compact(usage?.totalRequests ?? usage?.requestCount), symbol: "arrow.up.arrow.down.circle.fill", color: AppPalette.blue)
+            }
+
+            if user.concurrency != nil || user.currentConcurrency != nil {
+                HStack(spacing: 5) {
+                    Image(systemName: "bolt.horizontal.fill")
+                        .foregroundStyle(AppPalette.teal)
+                    Text("当前并发 \(user.currentConcurrency ?? 0) / \(user.concurrency ?? 0)")
+                    Spacer()
+                }
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 4)
-            let style = StatusStyle.generic(user.status)
-            StatusPill(text: style.0, color: style.1)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
         }
         .padding(14)
         .contentShape(Rectangle())
         .glassPanel(cornerRadius: 18, interactive: true)
+    }
+
+    private func metric(label: String, value: String, symbol: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.caption)
+                .foregroundStyle(color)
+                .frame(width: 24, height: 24)
+                .background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

@@ -38,6 +38,7 @@ struct WebConsoleListView: View {
     @State private var errorMessage: String?
     @State private var message: String?
     @State private var editor: ConsoleEditorState?
+    @State private var proxyEditor: ProxyEditorState?
     @State private var detail: ConsoleDetailState?
     @State private var deleting: DynamicRecord?
     @State private var clearsAudit = false
@@ -58,8 +59,9 @@ struct WebConsoleListView: View {
         .onSubmit(of: .search) { page = 1; Task { await load() } }
         .refreshable { await load() }
         .navigationTitle(module.title)
-        .toolbar { ToolbarItemGroup(placement: .primaryAction) { if module == .auditLogs { Button(role: .destructive) { clearsAudit = true } label: { Image(systemName: "trash") } }; if module.canCreate { Button { editor = ConsoleEditorState(title: "创建\(module.title)", path: module.createPath, method: .post, object: module.createTemplate) } label: { Image(systemName: "plus") } } } }
+        .toolbar { ToolbarItemGroup(placement: .primaryAction) { if module == .auditLogs { Button(role: .destructive) { clearsAudit = true } label: { Image(systemName: "trash") } }; if module.canCreate { Button { if module == .proxies { proxyEditor = ProxyEditorState(record: nil) } else { editor = ConsoleEditorState(title: "创建\(module.title)", path: module.createPath, method: .post, object: module.createTemplate) } } label: { Image(systemName: "plus") } } } }
         .sheet(item: $editor, onDismiss: { Task { await load() } }) { ConsoleJSONEditor(state: $0) }
+        .sheet(item: $proxyEditor, onDismiss: { Task { await load() } }) { ProxyEditorView(state: $0) }
         .sheet(item: $detail) { ConsoleDetailView(state: $0) }
         .confirmationDialog("确认删除？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), titleVisibility: .visible) { Button("删除", role: .destructive) { if let deleting { Task { await delete(deleting) } } } }
         .alert("清理操作日志", isPresented: $clearsAudit) { SecureField("TOTP 验证码", text: Binding(get: { auditCode }, set: { auditCode = $0 })); Button("取消", role: .cancel) {}; Button("清理", role: .destructive) { Task { await clearAudit() } } } message: { Text("此操作需要管理员 TOTP 验证码。") }
@@ -70,7 +72,7 @@ struct WebConsoleListView: View {
 
     @ViewBuilder private func recordMenu(_ record: DynamicRecord) -> some View {
         Button { showDetail(record) } label: { Label("详情", systemImage: "info.circle") }
-        if module.canEdit { Button { editor = ConsoleEditorState(title: "编辑\(module.title)", path: "\(module.path)/\(record.id)", method: .put, object: record.object) } label: { Label("编辑", systemImage: "pencil") } }
+        if module.canEdit { Button { if module == .proxies { proxyEditor = ProxyEditorState(record: record) } else { editor = ConsoleEditorState(title: "编辑\(module.title)", path: "\(module.path)/\(record.id)", method: .put, object: record.object) } } label: { Label("编辑", systemImage: "pencil") } }
         ForEach(actions(for: record)) { action in Button(role: action.destructive ? .destructive : nil) { Task { await perform(action, record: record) } } label: { Label(action.title, systemImage: action.symbol) } }
         if module.canDelete { Divider(); Button(role: .destructive) { deleting = record } label: { Label("删除", systemImage: "trash") } }
     }
@@ -107,7 +109,183 @@ private struct ConsoleAction: Identifiable {
 }
 
 private struct ConsoleEditorState: Identifiable { let id = UUID(); let title: String; let path: String; let method: HTTPMethod; let object: [String: JSONValue] }
+private struct ProxyEditorState: Identifiable { let id = UUID(); let record: DynamicRecord? }
 private struct ConsoleDetailState: Identifiable { let id = UUID(); let title: String; let value: JSONValue }
+
+private struct ProxyEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var store: AppStore
+    let state: ProxyEditorState
+    @State private var name: String
+    @State private var proxyProtocol: String
+    @State private var host: String
+    @State private var port: String
+    @State private var username: String
+    @State private var password = ""
+    @State private var passwordDirty = false
+    @State private var status: String
+    @State private var hasExpiry: Bool
+    @State private var expiryDate: Date
+    @State private var expiryWarnDays: String
+    @State private var fallbackMode: String
+    @State private var backupProxyID: String
+    @State private var backupProxies: [DynamicRecord] = []
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(state: ProxyEditorState) {
+        self.state = state
+        let object = state.record?.object ?? [:]
+        let expiresAt = object.text("expires_at")
+        _name = State(initialValue: object.text("name") ?? "")
+        _proxyProtocol = State(initialValue: object.text("protocol") ?? "http")
+        _host = State(initialValue: object.text("host") ?? "")
+        _port = State(initialValue: object.number("port").map { String(Int($0)) } ?? "8080")
+        _username = State(initialValue: object.text("username") ?? "")
+        _status = State(initialValue: object.text("status") == "inactive" ? "inactive" : "active")
+        _hasExpiry = State(initialValue: expiresAt != nil)
+        _expiryDate = State(initialValue: Self.parseDate(expiresAt) ?? Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date())
+        _expiryWarnDays = State(initialValue: object.number("expiry_warn_days").map { String(Int($0)) } ?? "7")
+        _fallbackMode = State(initialValue: object.text("fallback_mode") ?? "none")
+        _backupProxyID = State(initialValue: object.number("backup_proxy_id").map { String(Int($0)) } ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("代理信息") {
+                    TextField("名称", text: $name)
+                    Picker("协议", selection: $proxyProtocol) {
+                        Text("HTTP").tag("http")
+                        Text("HTTPS").tag("https")
+                        Text("SOCKS5").tag("socks5")
+                        Text("SOCKS5H").tag("socks5h")
+                    }
+                    TextField("主机 / IP", text: $host)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("端口", text: $port)
+                        .keyboardType(.numberPad)
+                    if state.record != nil {
+                        Picker("状态", selection: $status) {
+                            Text("启用").tag("active")
+                            Text("停用").tag("inactive")
+                        }
+                    }
+                }
+
+                Section("身份验证") {
+                    TextField("用户名（可选）", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField(state.record == nil ? "密码（可选）" : "新密码（留空不修改）", text: $password)
+                        .textContentType(.password)
+                        .onChange(of: password) { _, _ in passwordDirty = true }
+                }
+
+                Section("有效期") {
+                    Toggle("设置到期日", isOn: $hasExpiry)
+                    if hasExpiry {
+                        DatePicker("到期日期", selection: $expiryDate, displayedComponents: .date)
+                    }
+                    TextField("提前提醒天数", text: $expiryWarnDays)
+                        .keyboardType(.numberPad)
+                }
+
+                Section("到期后连接方式") {
+                    Picker("Fallback 模式", selection: $fallbackMode) {
+                        Text("无").tag("none")
+                        Text("备用代理").tag("proxy")
+                        Text("直连").tag("direct")
+                    }
+                    if fallbackMode == "proxy" {
+                        Picker("备用代理", selection: $backupProxyID) {
+                            Text("请选择").tag("")
+                            ForEach(backupProxies) { proxy in
+                                Text(proxyLabel(proxy)).tag(proxy.id)
+                            }
+                        }
+                    }
+                }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle(state.record == nil ? "添加代理" : "编辑代理")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "保存中" : "保存") { save() }
+                        .disabled(isSaving || name.nilIfBlank == nil || host.nilIfBlank == nil || !(1...65535).contains(Int(port) ?? 0) || (fallbackMode == "proxy" && backupProxyID.isEmpty))
+                }
+            }
+            .task { await loadBackupProxies() }
+        }
+    }
+
+    private func save() {
+        guard let service = try? store.adminService(), let portValue = Int(port) else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                var body: [String: JSONValue] = [
+                    "name": .string(name.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "protocol": .string(proxyProtocol),
+                    "host": .string(host.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "port": .number(Double(portValue)),
+                    "username": .string(username.trimmingCharacters(in: .whitespacesAndNewlines)),
+                    "fallback_mode": .string(fallbackMode),
+                    "backup_proxy_id": fallbackMode == "proxy" ? .number(Double(Int(backupProxyID) ?? 0)) : .null,
+                    "expiry_warn_days": .number(Double(Int(expiryWarnDays) ?? 7))
+                ]
+                body["expires_at"] = hasExpiry ? .number(expiryTimestamp) : .null
+                if state.record == nil || passwordDirty { body["password"] = .string(password.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                if let record = state.record {
+                    body["status"] = .string(status)
+                    _ = try await service.dynamicUpdate("/api/v1/admin/proxies/\(record.id)", body: body)
+                } else {
+                    _ = try await service.dynamicCreate("/api/v1/admin/proxies", body: body)
+                }
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isSaving = false
+        }
+    }
+
+    private func loadBackupProxies() async {
+        guard let service = try? store.adminService() else { return }
+        guard let value = try? await service.dynamicGet("/api/v1/admin/proxies/all", query: ["with_count": "true"]) else { return }
+        var rows = value.arrayValue ?? []
+        if rows.isEmpty, let object = value.objectValue {
+            rows = object.rows("items", "proxies", "data").map { .object($0) }
+        }
+        backupProxies = rows.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) }.filter { $0.id != state.record?.id }
+    }
+
+    private var expiryTimestamp: Double {
+        Calendar.current.startOfDay(for: expiryDate).timeIntervalSince1970
+    }
+
+    private func proxyLabel(_ proxy: DynamicRecord) -> String {
+        let name = proxy.text("name") ?? "代理 #\(proxy.id)"
+        let address = "\(proxy.text("host") ?? "--"):\(Int(proxy.number("port") ?? 0))"
+        return "\(name)（\(address)）"
+    }
+
+    private static func parseDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let prefix = String(value.prefix(10))
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.date(from: prefix)
+    }
+}
 
 private struct ConsoleJSONEditor: View {
     @Environment(\.dismiss) private var dismiss
@@ -388,7 +566,9 @@ private struct ProfileEditorView: View {
 private struct PasswordEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
-    @State private var oldPassword = "", newPassword = "", confirmation = ""
+    @State private var oldPassword = ""
+    @State private var newPassword = ""
+    @State private var confirmation = ""
     @State private var errorMessage: String?
     var body: some View { NavigationStack { Form { SecureField("当前密码", text: $oldPassword); SecureField("新密码", text: $newPassword); SecureField("确认新密码", text: $confirmation); if let errorMessage { Text(errorMessage).foregroundStyle(.red) } }.navigationTitle("修改密码").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("修改") { save() }.disabled(newPassword.count < 8 || newPassword != confirmation) } } } }
     private func save() { guard let service = try? store.adminService() else { return }; Task { do { _ = try await service.dynamicUpdate("/api/v1/user/password", body: ["old_password": .string(oldPassword), "new_password": .string(newPassword)]); dismiss() } catch { errorMessage = error.localizedDescription } } }
@@ -397,7 +577,8 @@ private struct PasswordEditorView: View {
 private struct RedeemCodeView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
-    @State private var code = "", errorMessage: String?
+    @State private var code = ""
+    @State private var errorMessage: String?
     var body: some View { NavigationStack { Form { TextField("兑换码", text: $code).textInputAutocapitalization(.characters); if let errorMessage { Text(errorMessage).foregroundStyle(.red) } }.navigationTitle("兑换").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("兑换") { redeem() }.disabled(code.nilIfBlank == nil) } } } }
     private func redeem() { guard let service = try? store.adminService() else { return }; Task { do { _ = try await service.dynamicCreate("/api/v1/redeem", body: ["code": .string(code)]); dismiss() } catch { errorMessage = error.localizedDescription } } }
 }

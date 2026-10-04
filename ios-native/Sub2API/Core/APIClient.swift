@@ -7,6 +7,11 @@ enum HTTPMethod: String, Sendable {
     case delete = "DELETE"
 }
 
+enum AuthLoginResult: Sendable {
+    case authenticated(String)
+    case requiresTwoFactor(tempToken: String, maskedEmail: String?)
+}
+
 enum APIError: LocalizedError, Sendable {
     case invalidBaseURL
     case invalidResponse
@@ -217,6 +222,97 @@ struct APIClient: Sendable {
 }
 
 extension APIClient {
+    static func login(baseURL: String, account: String, password: String) async throws -> AuthLoginResult {
+        let object = try await sendAuthenticationRequest(
+            baseURL: baseURL,
+            path: "/api/v1/auth/login",
+            body: [
+                "email": account.trimmingCharacters(in: .whitespacesAndNewlines),
+                "password": password
+            ]
+        )
+        if let payload = authenticationPayload(in: object),
+           payload["requires_2fa"]?.boolValue == true,
+           let tempToken = payload["temp_token"]?.stringValue,
+           !tempToken.isEmpty {
+            return .requiresTwoFactor(
+                tempToken: tempToken,
+                maskedEmail: payload["user_email_masked"]?.stringValue
+            )
+        }
+        guard let token = accessToken(in: object), !token.isEmpty else {
+            throw APIError.decoding("登录成功，但响应中没有 access_token。")
+        }
+        return .authenticated(token)
+    }
+
+    static func completeTwoFactor(baseURL: String, tempToken: String, code: String) async throws -> String {
+        let object = try await sendAuthenticationRequest(
+            baseURL: baseURL,
+            path: "/api/v1/auth/login/2fa",
+            body: ["temp_token": tempToken, "totp_code": code]
+        )
+        guard let token = accessToken(in: object), !token.isEmpty else {
+            throw APIError.decoding("验证成功，但响应中没有 access_token。")
+        }
+        return token
+    }
+
+    private static func sendAuthenticationRequest(
+        baseURL: String,
+        path: String,
+        body: [String: String]
+    ) async throws -> JSONValue {
+        let client = APIClient(baseURL: baseURL, adminKey: "")
+        let url = try client.makePublicURL(path: path, query: [])
+        var request = URLRequest(url: url)
+        request.httpMethod = HTTPMethod.post.rawValue
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard let object = try? JSONSerialization.jsonObject(with: data) else {
+            let text = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.server(
+                status: http.statusCode,
+                message: text.isEmpty ? "登录接口返回了无法识别的数据。" : String(text.prefix(240))
+            )
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if let dictionary = object as? [String: Any] {
+                throw APIError.server(status: http.statusCode, message: client.errorMessage(in: dictionary))
+            }
+            throw APIError.server(status: http.statusCode, message: "账号或密码错误。")
+        }
+        do {
+            return try JSONDecoder().decode(JSONValue.self, from: data)
+        } catch {
+            throw APIError.decoding(error.localizedDescription)
+        }
+    }
+
+    private static func authenticationPayload(in value: JSONValue) -> [String: JSONValue]? {
+        guard let object = value.objectValue else { return nil }
+        for key in ["data", "result"] {
+            if let nested = object[key]?.objectValue { return nested }
+        }
+        return object
+    }
+
+    private static func accessToken(in value: JSONValue) -> String? {
+        guard let object = value.objectValue else { return nil }
+        for key in ["access_token", "accessToken", "token"] {
+            if let token = object[key]?.stringValue, !token.isEmpty { return token }
+        }
+        for key in ["data", "result"] {
+            if let nested = object[key], let token = accessToken(in: nested) { return token }
+        }
+        return nil
+    }
+
     func listPage<T: Decodable & Sendable>(
         _ path: String,
         query: [URLQueryItem] = [],
