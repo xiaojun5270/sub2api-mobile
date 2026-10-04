@@ -51,7 +51,25 @@ struct WebConsoleListView: View {
                 if isLoading && records.isEmpty { LoadingView() }
                 else if let errorMessage, records.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
                 else if records.isEmpty { EmptyContentView(symbol: module.symbol, title: "暂无\(module.title)", message: "当前条件下没有数据。") }
-                else { ForEach(records) { record in ConsoleRecordCard(module: module, record: record).onTapGesture { showDetail(record) }.contextMenu { recordMenu(record) } } }
+                else {
+                    ForEach(records) { record in
+                        if module == .proxies {
+                            ConsoleRecordCard(
+                                module: module,
+                                record: record,
+                                onProxyTest: { Task { await performProxyAction("test", record: record) } },
+                                onProxyQuality: { Task { await performProxyAction("quality-check", record: record) } },
+                                onProxyEdit: { proxyEditor = ProxyEditorState(record: record) },
+                                onProxyDelete: { deleting = record }
+                            )
+                            .contextMenu { recordMenu(record) }
+                        } else {
+                            ConsoleRecordCard(module: module, record: record)
+                                .onTapGesture { showDetail(record) }
+                                .contextMenu { recordMenu(record) }
+                        }
+                    }
+                }
                 HStack { Button("上一页") { page -= 1; Task { await load() } }.disabled(page <= 1); Spacer(); Text("第 \(page) / \(pages) 页").font(.caption).foregroundStyle(.secondary); Spacer(); Button("下一页") { page += 1; Task { await load() } }.disabled(page >= pages) }.padding(12).glassPanel(cornerRadius: 16)
             }.padding(16)
         }
@@ -81,7 +99,7 @@ struct WebConsoleListView: View {
         switch module {
         case .subscriptions: return [ConsoleAction(title: "延期", symbol: "calendar.badge.plus", suffix: "extend", body: ["days": .number(30)]), ConsoleAction(title: "重置配额", symbol: "arrow.counterclockwise", suffix: "reset-quota"), ConsoleAction(title: "撤销", symbol: "xmark.circle", suffix: "revoke", destructive: true), ConsoleAction(title: "恢复", symbol: "arrow.uturn.backward.circle", suffix: "restore")]
         case .announcements: return [ConsoleAction(title: "阅读状态", symbol: "eye", suffix: "read-status", method: .get, showsResult: true)]
-        case .proxies: return [ConsoleAction(title: "测试代理", symbol: "checkmark.circle", suffix: "test"), ConsoleAction(title: "质量检测", symbol: "waveform.path.ecg", suffix: "quality-check", showsResult: true), ConsoleAction(title: "统计", symbol: "chart.bar", suffix: "stats", method: .get, showsResult: true), ConsoleAction(title: "关联账号", symbol: "server.rack", suffix: "accounts", method: .get, showsResult: true)]
+        case .proxies: return [ConsoleAction(title: "测试连接", symbol: "checkmark.circle", suffix: "test", showsResult: true), ConsoleAction(title: "质量检测", symbol: "checkmark.shield", suffix: "quality-check", showsResult: true), ConsoleAction(title: "统计", symbol: "chart.bar", suffix: "stats", method: .get, showsResult: true), ConsoleAction(title: "关联账号", symbol: "server.rack", suffix: "accounts", method: .get, showsResult: true)]
         case .redeemCodes: return [ConsoleAction(title: "立即过期", symbol: "clock.badge.xmark", suffix: "expire", destructive: true)]
         case .promoCodes: return [ConsoleAction(title: "使用明细", symbol: "list.bullet", suffix: "usages", method: .get, showsResult: true)]
         case .channels: return [ConsoleAction(title: "模型价格", symbol: "dollarsign.circle", suffix: "model-pricing", method: .get, showsResult: true)]
@@ -93,13 +111,91 @@ struct WebConsoleListView: View {
     private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; do { let result = try await service.dynamicPage(module.path, page: page, search: search, itemKeys: module.itemKeys); records = result.items; total = result.total; pages = max(result.pages, Int(ceil(Double(total) / 20))); errorMessage = nil } catch { errorMessage = error.localizedDescription }; isLoading = false }
     private func showDetail(_ record: DynamicRecord) { detail = ConsoleDetailState(title: record.text("name", "title", "code", "email") ?? "\(module.title)详情", value: .object(record.object)) }
     private func delete(_ record: DynamicRecord) async { guard let service = try? store.adminService() else { return }; deleting = nil; do { try await service.dynamicDelete("\(module.path)/\(record.id)"); await load() } catch { message = error.localizedDescription } }
-    private func perform(_ action: ConsoleAction, record: DynamicRecord) async { guard let service = try? store.adminService() else { return }; let path = "\(module.path)/\(record.id)/\(action.suffix)"; do { if action.method == .get { let value = try await service.dynamicGet(path, query: action.suffix == "usages" ? ["page": "1", "page_size": "100"] : [:]); if action.showsResult { detail = ConsoleDetailState(title: action.title, value: value) } } else if action.showsResult { let value = try await service.dynamicCreate(path, body: action.body); detail = ConsoleDetailState(title: action.title, value: value) } else { try await service.dynamicAction(path, method: action.method, body: action.body); message = "\(action.title)已完成"; await load() } } catch { message = error.localizedDescription } }
+    private func perform(_ action: ConsoleAction, record: DynamicRecord) async {
+        guard let service = try? store.adminService() else { return }
+        let path = "\(module.path)/\(record.id)/\(action.suffix)"
+        do {
+            if action.method == .get {
+                let value = try await service.dynamicGet(path, query: action.suffix == "usages" ? ["page": "1", "page_size": "100"] : [:])
+                if action.showsResult { detail = ConsoleDetailState(title: action.title, value: value) }
+            } else if action.showsResult {
+                let value = try await service.dynamicCreate(path, body: action.body)
+                detail = ConsoleDetailState(title: action.title, value: value)
+            } else {
+                try await service.dynamicAction(path, method: action.method, body: action.body)
+                message = "\(action.title)已完成"
+                await load()
+            }
+            if module == .proxies && action.showsResult { await load() }
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+    private func performProxyAction(_ suffix: String, record: DynamicRecord) async {
+        guard let action = actions(for: record).first(where: { $0.suffix == suffix }) else { return }
+        await perform(action, record: record)
+    }
     private func clearAudit() async { guard let service = try? store.adminService() else { return }; do { try await service.dynamicAction("/api/v1/admin/audit-logs/clear", body: ["totp_code": .string(auditCode)]); auditCode = ""; await load() } catch { message = error.localizedDescription } }
 }
 
 private struct ConsoleRecordCard: View {
-    let module: WebConsoleModule; let record: DynamicRecord
-    var body: some View { VStack(alignment: .leading, spacing: 9) { HStack { Image(systemName: module.symbol).foregroundStyle(module.color); VStack(alignment: .leading, spacing: 3) { Text(record.text("name", "title", "code", "email", "action") ?? "#\(record.id)").font(.subheadline.bold()).lineLimit(2); Text(record.text("description", "content", "url", "proxy_url", "created_at", "createdAt") ?? "ID \(record.id)").font(.caption).foregroundStyle(.secondary).lineLimit(2) }; Spacer(); if let status = record.text("status", "state") { StatusPill(text: status, color: statusColor(status)) } }; LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 7)], spacing: 7) { ForEach(summaryFields, id: \.0) { label, value in VStack(alignment: .leading, spacing: 2) { Text(label).font(.caption2).foregroundStyle(.secondary); Text(value).font(.caption.weight(.semibold)).lineLimit(1) }.frame(maxWidth: .infinity, alignment: .leading).padding(8).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8)) } } }.padding(14).contentShape(Rectangle()).glassPanel(cornerRadius: 18, interactive: true) }
+    let module: WebConsoleModule
+    let record: DynamicRecord
+    var onProxyTest: (() -> Void)? = nil
+    var onProxyQuality: (() -> Void)? = nil
+    var onProxyEdit: (() -> Void)? = nil
+    var onProxyDelete: (() -> Void)? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Image(systemName: module.symbol).foregroundStyle(module.color)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(record.text("name", "title", "code", "email", "action") ?? "#\(record.id)").font(.subheadline.bold()).lineLimit(2)
+                    Text(record.text("description", "content", "url", "proxy_url", "created_at", "createdAt") ?? "ID \(record.id)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer()
+                if let status = record.text("status", "state") { StatusPill(text: status, color: statusColor(status)) }
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 7)], spacing: 7) {
+                ForEach(summaryFields, id: \.0) { label, value in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label).font(.caption2).foregroundStyle(.secondary)
+                        Text(value).font(.caption.weight(.semibold)).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                }
+            }
+            if module == .proxies {
+                Divider()
+                HStack(spacing: 4) {
+                    proxyAction("测试连接", symbol: "checkmark.circle", color: AppPalette.teal, action: onProxyTest)
+                    proxyAction("质量检测", symbol: "checkmark.shield", color: AppPalette.blue, action: onProxyQuality)
+                    proxyAction("编辑", symbol: "pencil", color: .secondary, action: onProxyEdit)
+                    proxyAction("删除", symbol: "trash", color: .red, action: onProxyDelete)
+                }
+            }
+        }
+        .padding(14)
+        .contentShape(Rectangle())
+        .glassPanel(cornerRadius: 18, interactive: true)
+    }
+
+    private func proxyAction(_ title: String, symbol: String, color: Color, action: (() -> Void)?) -> some View {
+        Button { action?() } label: {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.subheadline.weight(.medium))
+                Text(title).font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
+            }
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, minHeight: 42)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil)
+    }
+
     private var summaryFields: [(String, String)] { let skip = Set(["id", "name", "title", "description", "content", "status", "state", "created_at", "updated_at"]); return record.object.keys.sorted().filter { !skip.contains($0) && record.object[$0]?.objectValue == nil && record.object[$0]?.arrayValue == nil }.prefix(6).map { ($0.replacingOccurrences(of: "_", with: " "), record.object[$0]?.displayText ?? "--") } }
     private func statusColor(_ value: String) -> Color { ["active", "enabled", "success", "completed", "valid"].contains(value.lowercased()) ? .green : ["failed", "error", "revoked", "expired", "disabled"].contains(value.lowercased()) ? .red : .secondary }
 }
