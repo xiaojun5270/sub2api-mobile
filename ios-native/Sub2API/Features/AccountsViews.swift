@@ -581,7 +581,7 @@ private struct AccountSummaryCard: View {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
                 metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
-                metric("今日额度", metrics.todayLoaded ? "U \(NumberFormatters.currency(metrics.todayUserCost))" : "U --", "dollarsign", .orange)
+                metric("今日额度", metrics.todayLoaded ? NumberFormatters.currency(metrics.todayUserCost) : "--", "dollarsign", .orange)
                 metric("总请求", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalRequests) + " req" : "--", "arrow.up.arrow.down.circle.fill", .indigo)
                 metric("总 Token", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalTokens) : "--", "cpu.fill", .mint)
                 metric("总额度", metrics.totalLoaded ? NumberFormatters.currency(metrics.totalCost) : "--", "wallet.pass", AppPalette.teal)
@@ -717,29 +717,31 @@ private struct AccountSummaryCard: View {
     }
 
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
             if let symbol {
                 Image(systemName: symbol)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(color)
                     .frame(width: 15, height: 15)
             }
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-            Spacer(minLength: 1)
-            Text(value)
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.58)
-                .monospacedDigit()
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                Text(value)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .monospacedDigit()
+            }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
         .glassPanel(cornerRadius: 11)
     }
 

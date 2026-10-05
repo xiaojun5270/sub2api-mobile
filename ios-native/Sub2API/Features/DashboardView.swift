@@ -136,7 +136,7 @@ struct DashboardView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "chart.pie.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(AppPalette.blue)
-                    .frame(width: 34, height: 34).background(AppPalette.blue.opacity(0.1), in: Circle())
+                    .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("分组使用分布").font(.headline)
                     Text("\(range.label) 分组请求、Token 与费用分布").font(.caption).foregroundStyle(.secondary)
@@ -275,8 +275,8 @@ struct DashboardView: View {
         let maximum = visible.map(modelTokens).max() ?? 0
         return VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 10) {
-                Image(systemName: "externaldrive.badge.bolt.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(AppPalette.blue)
-                    .frame(width: 34, height: 34).background(AppPalette.blue.opacity(0.1), in: Circle())
+                Image(systemName: "flame.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(AppPalette.orange)
+                    .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 2) { Text("热点模型").font(.headline); Text("当前时间范围内最活跃的模型").font(.caption).foregroundStyle(.secondary) }
             }
             if visible.isEmpty { Text("暂无模型数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80) }
