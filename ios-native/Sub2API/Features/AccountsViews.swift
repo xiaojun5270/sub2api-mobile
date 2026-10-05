@@ -582,7 +582,7 @@ private struct AccountSummaryCard: View {
                 metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
                 metric("今日额度", metrics.todayLoaded ? "U \(NumberFormatters.currency(metrics.todayUserCost))" : "U --", "dollarsign", .orange)
-                metric("总请求", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalRequests) + " req" : "--", nil, .indigo)
+                metric("总请求", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalRequests) + " req" : "--", "arrow.up.arrow.down.circle.fill", .indigo)
                 metric("总 Token", metrics.totalLoaded ? NumberFormatters.compact(metrics.totalTokens) : "--", "cpu.fill", .mint)
                 metric("总额度", metrics.totalLoaded ? NumberFormatters.currency(metrics.totalCost) : "--", "wallet.pass", AppPalette.teal)
             }
@@ -717,24 +717,29 @@ private struct AccountSummaryCard: View {
     }
 
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Group {
-                if let symbol {
-                    HStack(spacing: 5) {
-                        Image(systemName: symbol)
-                            .foregroundStyle(color)
-                            .frame(width: 20, height: 20)
-                        Text(label).foregroundStyle(.secondary)
-                    }
-                }
-                else { Text(label) }
+        HStack(spacing: 4) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(color)
+                    .frame(width: 15, height: 15)
             }
-            .font(.caption2).lineLimit(1).minimumScaleFactor(0.75)
-            Text(value).font(.system(.headline, design: .rounded, weight: .bold)).foregroundStyle(.primary)
-                .lineLimit(2).minimumScaleFactor(0.68)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+            Spacer(minLength: 1)
+            Text(value)
+                .font(.system(size: 15, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.58)
+                .monospacedDigit()
         }
-        .padding(7)
-        .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         .glassPanel(cornerRadius: 11)
     }
 
