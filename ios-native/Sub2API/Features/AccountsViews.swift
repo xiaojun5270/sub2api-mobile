@@ -613,7 +613,7 @@ private struct AccountSummaryCard: View {
         if account.platform.lowercased().contains("antigravity") {
             VStack(spacing: 6) {
                 HStack {
-                    Label("模型额度", systemImage: "square.stack.3d.up.fill").font(.subheadline.weight(.bold))
+                    Label("5 小时模型额度", systemImage: "square.stack.3d.up.fill").font(.subheadline.weight(.bold))
                     if let tier = antigravityTier {
                         Text(tier).font(.caption2.weight(.bold)).foregroundStyle(AppPalette.purple)
                             .padding(.horizontal, 7).padding(.vertical, 3)
@@ -627,12 +627,7 @@ private struct AccountSummaryCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ForEach(Array(antigravityRows.prefix(4))) { row in antigravityQuotaRow(row) }
-                    if antigravityRows.count > 4 {
-                        Text("另有 \(antigravityRows.count - 4) 个模型")
-                            .font(.caption2).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
+                    ForEach(antigravityRows) { row in antigravityQuotaRow(row) }
                 }
                 HStack(spacing: 8) {
                     cardButton("刷新模型额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
@@ -667,20 +662,24 @@ private struct AccountSummaryCard: View {
 
     private var antigravityRows: [AntigravityQuotaRow] {
         guard let values = quota?.objectValue?["antigravity_quota"]?.objectValue else { return [] }
-        let details = quota?.objectValue?["antigravity_quota_details"]?.objectValue ?? [:]
-        return values.compactMap { model, value in
-            guard let object = value.objectValue else { return nil }
-            let detail = details[model]?.objectValue
+        let definitions: [(id: String, name: String, color: Color, matches: (String) -> Bool)] = [
+            ("g3f", "G3F", .green, { $0 == "gemini-3-flash" || $0.hasPrefix("gemini-3-flash-") }),
+            ("g31f", "G31F", AppPalette.purple, { ["gemini-2.5-flash-image", "gemini-3.1-flash-image", "gemini-3-pro-image"].contains($0) }),
+            ("claude", "Claude", AppPalette.orange, { $0.hasPrefix("claude-") })
+        ]
+        return definitions.compactMap { definition in
+            let matches = values.filter { definition.matches($0.key.lowercased()) }
+            guard !matches.isEmpty else { return nil }
+            let percent = matches.values.compactMap { $0.objectValue?.number("utilization") }.max() ?? 0
+            let resetTimes = matches.values.compactMap { $0.objectValue?.text("reset_time", "resetTime") }.filter { !$0.isEmpty }
+            let reset = resetTimes.min().map { formatRemaining(.string($0), fallback: "无重置时间") } ?? "无重置时间"
             return AntigravityQuotaRow(
-                id: model,
-                name: detail?.text("display_name", "displayName") ?? model,
-                percent: min(max(object.number("utilization") ?? 0, 0), 100),
-                remaining: formatRemaining(object["reset_time"], fallback: "无重置时间"),
-                recommended: detail?.flag("recommended") ?? false
+                id: definition.id,
+                name: definition.name,
+                percent: min(max(percent, 0), 100),
+                remaining: reset.replacingOccurrences(of: "剩余 ", with: ""),
+                color: definition.color
             )
-        }.sorted {
-            if $0.recommended != $1.recommended { return $0.recommended && !$1.recommended }
-            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }
 
@@ -698,11 +697,10 @@ private struct AccountSummaryCard: View {
         VStack(spacing: 2) {
             HStack(spacing: 5) {
                 Text(row.name).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.75)
-                if row.recommended { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
                 Spacer()
                 Text("\(Int(row.percent.rounded()))% · \(row.remaining)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
-            ProgressView(value: row.percent / 100).tint(row.percent >= 90 ? .red : AppPalette.purple)
+            ProgressView(value: row.percent / 100).tint(row.percent >= 90 ? .red : row.color)
         }
     }
 
@@ -905,7 +903,7 @@ private struct AccountProviderIcon: View {
 }
 
 private struct QuotaWindow { let label: String; let percent: Double; let remaining: String }
-private struct AntigravityQuotaRow: Identifiable { let id: String; let name: String; let percent: Double; let remaining: String; let recommended: Bool }
+private struct AntigravityQuotaRow: Identifiable { let id: String; let name: String; let percent: Double; let remaining: String; let color: Color }
 private enum AccountQuotaMode { case openai, antigravity, grok, generic, unsupported }
 
 private struct AccountModelPickerView: View {
