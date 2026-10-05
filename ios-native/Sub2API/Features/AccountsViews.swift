@@ -29,6 +29,7 @@ struct AccountsView: View {
     @State private var testFeedbackByAccount: [Int: String] = [:]
     @State private var detailAccount: AdminAccount?
     @State private var totalMetricsLoading: Set<Int> = []
+    @State private var automaticQuotaLoading: Set<Int> = []
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -67,7 +68,7 @@ struct AccountsView: View {
                             quota: accountQuotaPayload(account),
                             selectedModel: selectedModelByAccount[account.id],
                             testFeedback: testFeedbackByAccount[account.id],
-                            onLoadMetrics: { await loadTotalMetrics(account) },
+                            onLoadMetrics: { await loadCardData(account) },
                             onOpen: { detailAccount = account },
                             onQueryQuota: { Task { await queryQuota(account) } },
                             onCountQuota: { Task { await showQuotaCount(account) } },
@@ -434,6 +435,25 @@ struct AccountsView: View {
             metrics.totalLoaded = true
             metricsByAccount[account.id] = metrics
             persistCache()
+        }
+    }
+
+    private func loadCardData(_ account: AdminAccount) async {
+        await loadAutomaticQuotaIfNeeded(account)
+        await loadTotalMetrics(account)
+    }
+
+    private func loadAutomaticQuotaIfNeeded(_ account: AdminAccount) async {
+        guard account.platform.lowercased().contains("antigravity") else { return }
+        if let quotas = accountQuotaPayload(account)?.objectValue?["antigravity_quota"]?.objectValue, !quotas.isEmpty { return }
+        guard !automaticQuotaLoading.contains(account.id), let service = try? store.adminService() else { return }
+        automaticQuotaLoading.insert(account.id)
+        defer { automaticQuotaLoading.remove(account.id) }
+        do {
+            quotaByAccount[account.id] = try await service.quota(account)
+            persistCache()
+        } catch {
+            // Automatic loading is best effort; manual refresh remains available.
         }
     }
 
