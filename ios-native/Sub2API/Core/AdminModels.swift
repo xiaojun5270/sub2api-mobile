@@ -343,11 +343,23 @@ struct DynamicRecord: Identifiable, Hashable, Sendable {
 
     init(value: JSONValue, index: Int) {
         object = value.objectValue ?? ["value": value]
-        id = object.text("id", "code", "key", "name", "title", "request_id") ?? "row-\(index)-\(object.hashValue)"
+        id = Self.identifier(in: object, keys: ["id", "code", "key", "name", "title", "request_id"])
+            ?? "row-\(index)-\(object.hashValue)"
     }
 
     func text(_ keys: String...) -> String? { keys.lazy.compactMap { object[$0]?.stringValue }.first { !$0.isEmpty } }
     func number(_ keys: String...) -> Double? { keys.lazy.compactMap { object[$0]?.doubleValue }.first }
+
+    private static func identifier(in object: [String: JSONValue], keys: [String]) -> String? {
+        for key in keys {
+            guard let value = object[key] else { continue }
+            if let number = value.doubleValue {
+                return number.rounded() == number ? String(Int(number)) : String(number)
+            }
+            if let text = value.stringValue, !text.isEmpty { return text }
+        }
+        return nil
+    }
 }
 
 struct DynamicPage: Sendable {

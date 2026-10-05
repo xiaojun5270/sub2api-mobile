@@ -382,7 +382,6 @@ private struct OverviewMetricCard: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
                     .frame(width: 22, height: 22)
-                    .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 Text(title).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.75)
             }
             .font(.caption)

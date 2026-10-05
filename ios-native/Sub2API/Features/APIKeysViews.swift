@@ -171,7 +171,7 @@ private struct APIKeyEditorView: View {
                     Text("\(currentName)（当前）").tag(String(currentID))
                 }
                 ForEach(availableGroups.sorted(by: groupSort)) { group in
-                    Text("\(group.name) · \(group.platform)").tag(String(group.id))
+                    Text("\(group.name) · \(ConsoleLocalization.provider(group.platform))").tag(String(group.id))
                 }
             }
             if isLoadingGroups {

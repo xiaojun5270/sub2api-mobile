@@ -279,7 +279,7 @@ struct AccountsView: View {
         guard let service = try? store.adminService() else { return }; isWorking = true
         do {
             switch quotaMode(account) {
-            case .openai, .grok:
+            case .openai, .grok, .antigravity:
                 quotaByAccount[account.id] = try await service.quota(account)
                 persistCache()
                 message = "\(account.name) 额度已更新"
@@ -306,6 +306,10 @@ struct AccountsView: View {
             let retry = snapshot?.number("retry_after_seconds", "retryAfterSeconds")
             let status = snapshot?.text("entitlement_status", "entitlementStatus") ?? "--"
             message = "\(account.name) 权益：\(status) · 等待 \(retry.map { formatDuration($0) } ?? "--")"
+        case .antigravity:
+            let modelCount = value?.objectValue?["antigravity_quota"]?.objectValue?.count ?? 0
+            let tier = value?.objectValue?.text("subscription_tier", "subscriptionTier") ?? "--"
+            message = "\(account.name) \(tier) · \(modelCount) 个模型额度"
         case .generic, .unsupported:
             message = "当前账号类型没有次数查询接口"
         }
@@ -327,6 +331,8 @@ struct AccountsView: View {
                 }
             case .grok:
                 message = "Grok 账号支持额度查询，但不支持重置"
+            case .antigravity:
+                message = "Antigravity 按模型返回额度，不支持 OpenAI 重置次数"
             case .generic:
                 _ = try await service.accountAction(account.id, action: .resetQuota)
                 message = "\(account.name) 普通额度已重置"
@@ -349,6 +355,7 @@ struct AccountsView: View {
         let platform = account.platform.lowercased()
         let type = account.type.lowercased()
         if platform.contains("grok") || platform.contains("xai") { return .grok }
+        if platform.contains("antigravity") { return .antigravity }
         if platform.contains("openai") && type == "oauth" { return .openai }
         if hasQuotaConfig(account) { return .generic }
         return .unsupported
@@ -548,9 +555,9 @@ private struct AccountSummaryCard: View {
                     AccountProviderIcon(platform: account.platform)
                     Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
                     HStack(spacing: 3) {
-                        Text(account.platform)
+                        Text(ConsoleLocalization.provider(account.platform))
                         Text("·").foregroundStyle(.tertiary)
-                        Text(account.type)
+                        Text(ConsoleLocalization.accountType(account.type))
                     }
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -580,22 +587,7 @@ private struct AccountSummaryCard: View {
                 metric("总额度", metrics.totalLoaded ? NumberFormatters.currency(metrics.totalCost) : "--", "wallet.pass", AppPalette.teal)
             }
 
-            VStack(spacing: 5) {
-                HStack {
-                    Label("额度窗口", systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
-                    Spacer()
-                    Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
-                }
-                quotaRow(fiveHour)
-                quotaRow(sevenDay)
-                HStack(spacing: 5) {
-                    cardButton("查询", "magnifyingglass", AppPalette.blue, onQueryQuota)
-                    cardButton(resetCount.map { "次数 \(NumberFormatters.compact($0))" } ?? "次数", nil, AppPalette.purple, onCountQuota)
-                    cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
-                }
-            }
-            .padding(8)
-            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+            quotaPanel
 
             HStack(spacing: 5) {
                 cardButton("编辑", "pencil", AppPalette.blue, onEdit)
@@ -615,6 +607,103 @@ private struct AccountSummaryCard: View {
 
     private var resetCount: Double? {
         quota?.objectValue?["rate_limit_reset_credits"]?.objectValue?.number("available_count", "availableCount", "count", "remaining")
+    }
+
+    @ViewBuilder private var quotaPanel: some View {
+        if account.platform.lowercased().contains("antigravity") {
+            VStack(spacing: 6) {
+                HStack {
+                    Label("模型额度", systemImage: "square.stack.3d.up.fill").font(.subheadline.weight(.bold))
+                    if let tier = antigravityTier {
+                        Text(tier).font(.caption2.weight(.bold)).foregroundStyle(AppPalette.purple)
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(AppPalette.purple.opacity(0.1), in: Capsule())
+                    }
+                    Spacer()
+                    Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
+                }
+                if antigravityRows.isEmpty {
+                    Text("暂无模型额度，点击刷新获取。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(Array(antigravityRows.prefix(4))) { row in antigravityQuotaRow(row) }
+                    if antigravityRows.count > 4 {
+                        Text("另有 \(antigravityRows.count - 4) 个模型")
+                            .font(.caption2).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+                HStack(spacing: 8) {
+                    cardButton("刷新模型额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
+                    if let credits = antigravityCredits {
+                        Text("AI 点数 \(NumberFormatters.compact(credits))")
+                            .font(.caption.weight(.semibold)).foregroundStyle(AppPalette.teal)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            .padding(8)
+            .background(AppPalette.purple.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+        } else {
+            VStack(spacing: 5) {
+                HStack {
+                    Label("额度窗口", systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
+                }
+                quotaRow(fiveHour)
+                quotaRow(sevenDay)
+                HStack(spacing: 5) {
+                    cardButton("查询", "magnifyingglass", AppPalette.blue, onQueryQuota)
+                    cardButton(resetCount.map { "次数 \(NumberFormatters.compact($0))" } ?? "次数", nil, AppPalette.purple, onCountQuota)
+                    cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
+                }
+            }
+            .padding(8)
+            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+        }
+    }
+
+    private var antigravityRows: [AntigravityQuotaRow] {
+        guard let values = quota?.objectValue?["antigravity_quota"]?.objectValue else { return [] }
+        let details = quota?.objectValue?["antigravity_quota_details"]?.objectValue ?? [:]
+        return values.compactMap { model, value in
+            guard let object = value.objectValue else { return nil }
+            let detail = details[model]?.objectValue
+            return AntigravityQuotaRow(
+                id: model,
+                name: detail?.text("display_name", "displayName") ?? model,
+                percent: min(max(object.number("utilization") ?? 0, 0), 100),
+                remaining: formatRemaining(object["reset_time"], fallback: "无重置时间"),
+                recommended: detail?.flag("recommended") ?? false
+            )
+        }.sorted {
+            if $0.recommended != $1.recommended { return $0.recommended && !$1.recommended }
+            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+        }
+    }
+
+    private var antigravityTier: String? {
+        quota?.objectValue?.text("subscription_tier", "subscriptionTier", "subscription_tier_raw", "subscriptionTierRaw")?.nilIfBlank
+    }
+
+    private var antigravityCredits: Double? {
+        guard let credits = quota?.objectValue?["ai_credits"]?.arrayValue else { return nil }
+        let total = credits.compactMap { $0.objectValue?.number("amount") }.reduce(0, +)
+        return total > 0 ? total : nil
+    }
+
+    private func antigravityQuotaRow(_ row: AntigravityQuotaRow) -> some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 5) {
+                Text(row.name).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.75)
+                if row.recommended { Image(systemName: "star.fill").font(.caption2).foregroundStyle(.yellow) }
+                Spacer()
+                Text("\(Int(row.percent.rounded()))% · \(row.remaining)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            ProgressView(value: row.percent / 100).tint(row.percent >= 90 ? .red : AppPalette.purple)
+        }
     }
 
     private var modelTestDisplay: String? {
@@ -637,7 +726,6 @@ private struct AccountSummaryCard: View {
                         Image(systemName: symbol)
                             .foregroundStyle(color)
                             .frame(width: 20, height: 20)
-                            .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                         Text(label).foregroundStyle(.secondary)
                     }
                 }
@@ -812,13 +900,13 @@ private struct AccountProviderIcon: View {
         }
         .foregroundStyle(color)
         .frame(width: 26, height: 26)
-        .background(color.opacity(0.1), in: Circle())
         .accessibilityLabel("\(platform) 供应商")
     }
 }
 
 private struct QuotaWindow { let label: String; let percent: Double; let remaining: String }
-private enum AccountQuotaMode { case openai, grok, generic, unsupported }
+private struct AntigravityQuotaRow: Identifiable { let id: String; let name: String; let percent: Double; let remaining: String; let recommended: Bool }
+private enum AccountQuotaMode { case openai, antigravity, grok, generic, unsupported }
 
 private struct AccountModelPickerView: View {
     @Environment(\.dismiss) private var dismiss
@@ -891,7 +979,7 @@ struct AccountDetailView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack { VStack(alignment: .leading, spacing: 4) { Text(account.name).font(.title3.bold()); Text("\(account.platform) · \(account.type) · ID \(account.id)").font(.caption).foregroundStyle(.secondary) }; Spacer(); let style = StatusStyle.account(account); StatusPill(text: style.0, color: style.1) }
+            HStack { VStack(alignment: .leading, spacing: 4) { Text(account.name).font(.title3.bold()); Text("\(ConsoleLocalization.provider(account.platform)) · \(ConsoleLocalization.accountType(account.type)) · ID \(account.id)").font(.caption).foregroundStyle(.secondary) }; Spacer(); let style = StatusStyle.account(account); StatusPill(text: style.0, color: style.1) }
             if let error = account.errorMessage ?? account.error, !error.isEmpty { Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red) }
             if let notes = account.notes, !notes.isEmpty { Text(notes).font(.footnote).foregroundStyle(.secondary) }
         }.padding(16).glassPanel()
@@ -1022,7 +1110,7 @@ private struct OAuthCredentialsView: View {
     @EnvironmentObject private var store: AppStore
     let account: AdminAccount
     @State private var accessToken = ""; @State private var refreshToken = ""; @State private var expiresAt = ""; @State private var clientID = ""; @State private var accountID = ""; @State private var email = ""; @State private var errorMessage: String?
-    var body: some View { NavigationStack { Form { Section("OAuth 凭证") { SecureField("Access Token", text: $accessToken); SecureField("Refresh Token", text: $refreshToken); TextField("Expires At", text: $expiresAt); TextField("Client ID", text: $clientID); TextField("Account ID", text: $accountID); TextField("Email", text: $email) }; if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } } }.navigationTitle("应用 OAuth 凭证").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("应用") { apply() }.disabled(accessToken.isEmpty) } } } }
+    var body: some View { NavigationStack { Form { Section("OAuth 凭证") { SecureField("访问令牌", text: $accessToken); SecureField("刷新令牌", text: $refreshToken); TextField("到期时间", text: $expiresAt); TextField("客户端 ID", text: $clientID); TextField("上游账号 ID", text: $accountID); TextField("邮箱", text: $email) }; if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } } }.navigationTitle("应用 OAuth 凭证").toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("应用") { apply() }.disabled(accessToken.isEmpty) } } } }
     private func apply() { guard let service = try? store.adminService() else { return }; Task { do { var body: [String: JSONValue] = ["access_token": .string(accessToken)]; if let value = refreshToken.nilIfBlank { body["refresh_token"] = .string(value) }; if let value = expiresAt.nilIfBlank { body["expires_at"] = .string(value) }; if let value = clientID.nilIfBlank { body["client_id"] = .string(value) }; if let value = accountID.nilIfBlank { body["account_id"] = .string(value) }; if let value = email.nilIfBlank { body["email"] = .string(value) }; _ = try await service.applyOAuthCredentials(account.id, body: body); dismiss() } catch { errorMessage = error.localizedDescription } } }
 }
 
@@ -1031,7 +1119,7 @@ private struct AccountQuotaView: View {
     @EnvironmentObject private var store: AppStore
     let account: AdminAccount
     @State private var value: JSONValue?; @State private var errorMessage: String?; @State private var isWorking = false
-    var body: some View { NavigationStack { ScrollView { VStack(spacing: 14) { if isWorking { LoadingView() }; if let value { Text(value.displayText).font(.body.monospaced()).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16).glassPanel() }; if let errorMessage { InlineErrorView(message: errorMessage) }; if account.platform.lowercased() != "grok" { Button("重置额度", role: .destructive) { Task { await reset() } }.buttonStyle(.borderedProminent) } }.padding(16) }.navigationTitle("账号额度").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }.appPage().task { await load() } } }
+    var body: some View { NavigationStack { ScrollView { VStack(spacing: 14) { if isWorking { LoadingView() }; if let value { DynamicJSONView(value: value).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(16).glassPanel() }; if let errorMessage { InlineErrorView(message: ConsoleLocalization.error(errorMessage)) }; if !["grok", "antigravity"].contains(account.platform.lowercased()) { Button("重置额度", role: .destructive) { Task { await reset() } }.buttonStyle(.borderedProminent) } }.padding(16) }.navigationTitle("账号额度").toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }.appPage().task { await load() } } }
     private func load() async { guard let service = try? store.adminService() else { return }; isWorking = true; do { value = try await service.quota(account); errorMessage = nil } catch { errorMessage = error.localizedDescription }; isWorking = false }
     private func reset() async { guard let service = try? store.adminService() else { return }; isWorking = true; do { if account.platform.lowercased() == "openai" { value = try await service.resetOpenAIQuota(account.id) } else { _ = try await service.accountAction(account.id, action: .resetQuota); await load() } } catch { errorMessage = error.localizedDescription }; isWorking = false }
 }
@@ -1058,23 +1146,23 @@ struct AccountCreationView: View {
 
     var body: some View {
         NavigationStack { Form {
-            Section("账号信息") { TextField("账号名称", text: $name); TextField("备注", text: $notes, axis: .vertical); Picker("平台", selection: $platform) { ForEach(platforms, id: \.self) { Text($0.capitalized).tag($0) } }.onChange(of: platform) { _, value in selectPlatform(value) }; Picker("类型", selection: $type) { ForEach(types, id: \.self) { Text($0).tag($0) } } }
+            Section("账号信息") { TextField("账号名称", text: $name); TextField("备注", text: $notes, axis: .vertical); Picker("平台", selection: $platform) { ForEach(platforms, id: \.self) { Text(ConsoleLocalization.provider($0)).tag($0) } }.onChange(of: platform) { _, value in selectPlatform(value) }; Picker("类型", selection: $type) { ForEach(types, id: \.self) { Text(ConsoleLocalization.accountType($0)).tag($0) } } }
             credentialsSection
             Section("关联与调度") { TextField("代理 ID", text: $proxyID).keyboardType(.numberPad); TextField("并发", text: $concurrency).keyboardType(.numberPad); TextField("负载系数", text: $loadFactor).keyboardType(.decimalPad); TextField("优先级", text: $priority).keyboardType(.numberPad); TextField("费率倍率", text: $multiplier).keyboardType(.decimalPad); TextField("到期时间 ISO8601", text: $expiresAt); Toggle("到期自动暂停", isOn: $autoPause); Toggle("确认混合渠道风险", isOn: $confirmMixedRisk) }
             if !groups.isEmpty { Section("分组") { ForEach(groups) { group in Toggle("\(group.name) · \(group.platform)", isOn: Binding(get: { selectedGroups.contains(group.id) }, set: { enabled in if enabled { selectedGroups.insert(group.id) } else { selectedGroups.remove(group.id) } })) } } }
             Section("配额与重试") { TextField("总额度", text: $quotaLimit).keyboardType(.decimalPad); TextField("每日额度", text: $dailyLimit).keyboardType(.decimalPad); TextField("每周额度", text: $weeklyLimit).keyboardType(.decimalPad); Toggle("池模式", isOn: $poolMode); if poolMode { TextField("重试次数", text: $poolRetries).keyboardType(.numberPad); TextField("重试状态码", text: $poolCodes) }; Toggle("自定义错误码", isOn: $customCodesEnabled); if customCodesEnabled { TextField("错误码，逗号分隔", text: $customCodes) } }
             platformOptions
-            Section("网页高级字段") { Text("凭证覆盖 JSON").font(.caption).foregroundStyle(.secondary); TextEditor(text: $credentialOverridesJSON).frame(minHeight: 90).font(.caption.monospaced()); Text("Extra 覆盖 JSON").font(.caption).foregroundStyle(.secondary); TextEditor(text: $extraOverridesJSON).frame(minHeight: 90).font(.caption.monospaced()) }
+        Section("网页高级字段") { Text("凭证覆盖 JSON").font(.caption).foregroundStyle(.secondary); TextEditor(text: $credentialOverridesJSON).frame(minHeight: 90).font(.caption.monospaced()); Text("扩展配置覆盖 JSON").font(.caption).foregroundStyle(.secondary); TextEditor(text: $extraOverridesJSON).frame(minHeight: 90).font(.caption.monospaced()) }
             if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
         }.navigationTitle("添加账号").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isWorking ? "处理中" : "创建") { create() }.disabled(isWorking || name.isEmpty) } }
         .fileImporter(isPresented: $showsFileImporter, allowedContentTypes: [.json, .plainText]) { result in readCredentialFile(result) }.task(id: platform) { await loadGroups() } }
     }
 
     @ViewBuilder private var credentialsSection: some View {
-        if type == "apikey" || type == "upstream" { Section("API 凭证") { TextField("Base URL", text: $baseURL).textInputAutocapitalization(.never); SecureField("API Key", text: $apiKey); if platform == "gemini" { Picker("Tier", selection: $tier) { Text("AI Studio Free").tag("aistudio_free"); Text("Google One Free").tag("google_one_free"); Text("GCP Standard").tag("gcp_standard") } } } }
-        else if type == "oauth" || type == "setup-token" { Section("OAuth") { Picker("输入方式", selection: $oauthMethod) { ForEach(oauthMethods, id: \.self) { Text($0).tag($0) } }; oauthFields } }
-        else if type == "service_account" { Section("Service Account") { Button("选择 JSON 文件") { showsFileImporter = true }; TextEditor(text: $serviceAccountJSON).frame(minHeight: 100).font(.caption.monospaced()); TextField("Project ID", text: $projectID); TextField("Client Email", text: $clientEmail); TextField("Location", text: $location) } }
-        else { Section("AWS Bedrock") { TextField("Region", text: $region); SecureField("Access Key ID", text: $accessKeyID); SecureField("Secret Access Key", text: $secretAccessKey); SecureField("Session Token（可选）", text: $sessionToken) } }
+        if type == "apikey" || type == "upstream" { Section("API 凭证") { TextField("基础地址", text: $baseURL).textInputAutocapitalization(.never); SecureField("API 密钥", text: $apiKey); if platform == "gemini" { Picker("套餐等级", selection: $tier) { Text("AI Studio 免费版").tag("aistudio_free"); Text("Google One 免费版").tag("google_one_free"); Text("GCP 标准版").tag("gcp_standard") } } } }
+        else if type == "oauth" || type == "setup-token" { Section("OAuth") { Picker("输入方式", selection: $oauthMethod) { ForEach(oauthMethods, id: \.self) { Text(ConsoleLocalization.oauthMethod($0)).tag($0) } }; oauthFields } }
+        else if type == "service_account" { Section("服务账号") { Button("选择 JSON 文件") { showsFileImporter = true }; TextEditor(text: $serviceAccountJSON).frame(minHeight: 100).font(.caption.monospaced()); TextField("项目 ID", text: $projectID); TextField("客户端邮箱", text: $clientEmail); TextField("区域", text: $location) } }
+        else { Section("AWS Bedrock 凭证") { TextField("区域", text: $region); SecureField("访问密钥 ID", text: $accessKeyID); SecureField("访问密钥", text: $secretAccessKey); SecureField("会话令牌（可选）", text: $sessionToken) } }
     }
 
     @ViewBuilder private var oauthFields: some View {
@@ -1083,17 +1171,17 @@ struct AccountCreationView: View {
             Button(authURL.isEmpty ? "生成并打开授权链接" : "重新生成授权链接") { Task { await generateAuthorization() } }
             if !authURL.isEmpty { Text(authURL).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled) }
             TextField("回调 URL 或授权码", text: $authCode, axis: .vertical)
-        case "session-key": SecureField("Session Key", text: $sessionKey)
-        case "refresh-token", "mobile-refresh-token": SecureField("Refresh Token", text: $refreshToken); TextField("Client ID（可选）", text: $clientID)
+        case "session-key": SecureField("会话密钥", text: $sessionKey)
+        case "refresh-token", "mobile-refresh-token": SecureField("刷新令牌", text: $refreshToken); TextField("客户端 ID（可选）", text: $clientID)
         case "codex-session", "agent-identity": Button("选择 auth.json / 文本文件") { showsFileImporter = true }; TextEditor(text: $codexContent).frame(minHeight: 100).font(.caption.monospaced())
-        case "codex-pat": SecureField("Codex Personal Access Token", text: $codexPAT)
-        default: SecureField("Access Token", text: $accessToken); SecureField("Refresh Token（可选）", text: $refreshToken); TextField("Client ID", text: $clientID); TextField("Email", text: $oauthEmail); TextField("Account ID", text: $oauthAccountID); TextField("Expires At", text: $oauthExpiresAt); if platform == "antigravity" { TextField("Project ID", text: $oauthProjectID) }
+        case "codex-pat": SecureField("Codex 个人访问令牌", text: $codexPAT)
+        default: SecureField("访问令牌", text: $accessToken); SecureField("刷新令牌（可选）", text: $refreshToken); TextField("客户端 ID", text: $clientID); TextField("邮箱", text: $oauthEmail); TextField("上游账号 ID", text: $oauthAccountID); TextField("到期时间", text: $oauthExpiresAt); if platform == "antigravity" { TextField("项目 ID", text: $oauthProjectID) }
         }
     }
 
     @ViewBuilder private var platformOptions: some View {
-        if platform == "openai" { Section("OpenAI 选项") { Toggle("Passthrough", isOn: $openAIPassthrough); Toggle("长上下文计费", isOn: $longContextBilling); Toggle("仅 Codex CLI", isOn: $codexOnly); if codexOnly { Toggle("允许 App Server", isOn: $appServer) }; Picker("WebSocket", selection: $websocketMode) { Text("关闭").tag("none"); Text("上下文池").tag("ctx_pool"); Text("透传").tag("passthrough") }; Picker("Compact", selection: $compactMode) { Text("自动").tag("auto"); Text("强制开启").tag("force_on"); Text("强制关闭").tag("force_off") }; Picker("Responses", selection: $responsesMode) { Text("自动").tag("auto"); Text("Responses").tag("force_responses"); Text("Chat Completions").tag("force_chat_completions") } } }
-        if platform == "anthropic" && type == "apikey" { Section("Anthropic 选项") { Toggle("Passthrough", isOn: $anthropicPassthrough) } }
+        if platform == "openai" { Section("OpenAI 选项") { Toggle("透传", isOn: $openAIPassthrough); Toggle("长上下文计费", isOn: $longContextBilling); Toggle("仅 Codex CLI", isOn: $codexOnly); if codexOnly { Toggle("允许应用服务器", isOn: $appServer) }; Picker("WebSocket 模式", selection: $websocketMode) { Text("关闭").tag("none"); Text("上下文池").tag("ctx_pool"); Text("透传").tag("passthrough") }; Picker("上下文压缩", selection: $compactMode) { Text("自动").tag("auto"); Text("强制开启").tag("force_on"); Text("强制关闭").tag("force_off") }; Picker("响应接口", selection: $responsesMode) { Text("自动").tag("auto"); Text("Responses API").tag("force_responses"); Text("聊天补全 API").tag("force_chat_completions") } } }
+        if platform == "anthropic" && type == "apikey" { Section("Anthropic 选项") { Toggle("透传", isOn: $anthropicPassthrough) } }
     }
 
     private func selectPlatform(_ value: String) { let defaults = ["openai": "https://api.openai.com", "anthropic": "https://api.anthropic.com", "gemini": "https://generativelanguage.googleapis.com", "antigravity": "https://cloudcode-pa.googleapis.com", "grok": "https://api.x.ai"]; baseURL = defaults[value] ?? ""; if !types.contains(type) { type = types.first ?? "apikey" }; oauthMethod = (value == "openai" || value == "anthropic") ? "authorization" : "manual"; selectedGroups = [] }

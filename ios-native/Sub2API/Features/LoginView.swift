@@ -130,7 +130,7 @@ struct LoginView: View {
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 7) {
-                                Label("Admin Key / JWT", systemImage: "key")
+                                Label("管理密钥 / JWT", systemImage: "key")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                 HStack(spacing: 8) {

@@ -1,6 +1,163 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum ConsoleLocalization {
+    static func field(_ key: String) -> String {
+        let labels: [String: String] = [
+            "id": "ID", "name": "名称", "title": "标题", "description": "描述", "content": "内容", "status": "状态", "state": "状态",
+            "type": "类型", "platform": "平台", "model": "模型", "models": "模型", "code": "代码", "email": "邮箱", "role": "角色",
+            "protocol": "协议", "host": "主机", "port": "端口", "username": "用户名", "password": "密码",
+            "account_count": "关联账号数", "backup_proxy_id": "备用代理", "fallback_mode": "到期后连接方式",
+            "expiry_warn_days": "到期提醒天数", "expires_at": "到期时间", "created_at": "创建时间", "updated_at": "更新时间",
+            "city": "城市", "region": "地区", "country": "国家或地区", "country_code": "国家代码", "ip_address": "出口 IP",
+            "latency_ms": "延迟", "latency_status": "延迟状态", "latency_message": "延迟信息",
+            "quality_status": "质量状态", "quality_score": "质量评分", "quality_grade": "质量等级",
+            "quality_summary": "质量摘要", "quality_checked": "检测项目数", "success": "是否成功", "message": "信息",
+            "target": "检测目标", "http_status": "HTTP 状态码", "cf_ray": "Cloudflare Ray", "exit_ip": "出口 IP",
+            "base_latency_ms": "基础延迟", "passed_count": "通过数", "warn_count": "警告数", "failed_count": "失败数",
+            "challenge_count": "验证挑战数", "checked_at": "检测时间", "items": "检测明细",
+            "provider": "供应商", "api_mode": "API 模式", "check_mode": "检测模式", "endpoint": "接口地址",
+            "primary_model": "主模型", "extra_models": "附加模型", "group_name": "显示分组", "enabled": "已启用",
+            "interval_seconds": "检测间隔（秒）", "jitter_seconds": "随机抖动（秒）", "availability_7d": "7 天可用率",
+            "primary_status": "主模型状态", "primary_latency_ms": "主模型延迟", "last_checked_at": "最后检测时间",
+            "billing_model_source": "计费模型来源", "restrict_models": "限制模型", "group_ids": "绑定分组",
+            "model_pricing": "模型定价", "model_mapping": "模型映射", "features_config": "功能配置",
+            "evaluation_interval_seconds": "评估间隔（秒）", "events_open": "未恢复事件", "events_total": "事件总数",
+            "request_count_total": "请求总数", "error_count_total": "错误总数", "error_rate": "错误率",
+            "health_score": "健康评分", "qps_current": "当前每秒请求", "tps_current": "当前每秒 Token",
+            "cpu_usage_percent": "CPU 使用率", "memory_usage_percent": "内存使用率", "memory_used_mb": "已用内存",
+            "memory_total_mb": "总内存", "db_ok": "数据库正常", "redis_ok": "Redis 正常", "goroutine_count": "协程数",
+            "current_concurrency": "当前并发", "max_concurrency": "最大并发", "queue_size": "排队数量",
+            "total_requests": "总请求", "total_tokens": "总 Token", "total_cost": "总成本", "actual_cost": "实际成本",
+            "input_tokens": "输入 Token", "output_tokens": "输出 Token", "cache_read_tokens": "缓存读取 Token",
+            "user_id": "用户 ID", "account_id": "账号 ID", "group_id": "分组 ID", "channel_id": "渠道 ID",
+            "sort_order": "排序", "value": "值", "count": "数量", "total": "总数", "page": "页码", "page_size": "每页数量",
+            "source": "数据来源", "five_hour": "5 小时额度", "seven_day": "7 天额度", "seven_day_sonnet": "Sonnet 7 天额度",
+            "antigravity_quota": "Antigravity 模型额度", "antigravity_quota_details": "模型能力详情",
+            "subscription_tier": "订阅等级", "subscription_tier_raw": "原始订阅等级", "ai_credits": "AI 点数",
+            "utilization": "使用率", "reset_time": "重置时间", "resets_at": "重置时间", "remaining_seconds": "剩余秒数",
+            "display_name": "显示名称", "recommended": "推荐模型", "supports_images": "支持图片", "supports_thinking": "支持思考",
+            "max_tokens": "最大 Token", "max_output_tokens": "最大输出 Token", "credit_type": "点数类型",
+            "amount": "数量", "minimum_balance": "最低余额", "is_forbidden": "上游禁止", "forbidden_reason": "禁止原因"
+        ]
+        if let label = labels[key] { return label }
+        if key.contains("-") || key.contains(".") { return key }
+        return "其他信息"
+    }
+
+    static func status(_ value: String) -> String {
+        switch value.lowercased() {
+        case "active", "enabled": "启用"
+        case "inactive", "disabled": "停用"
+        case "expired": "已过期"
+        case "success", "healthy", "operational", "pass", "passed": "正常"
+        case "warn", "warning", "degraded": "警告"
+        case "critical", "fatal": "严重"
+        case "info": "信息"
+        case "debug": "调试"
+        case "firing": "触发中"
+        case "resolved": "已恢复"
+        case "manual_resolved": "手动恢复"
+        case "queued": "排队中"
+        case "challenge": "需要验证"
+        case "failed", "failure", "error": "失败"
+        case "pending": "等待中"
+        case "running": "运行中"
+        case "completed": "已完成"
+        default: value
+        }
+    }
+
+    static func value(_ value: JSONValue, key: String) -> String {
+        if ["status", "state", "quality_status", "latency_status", "primary_status"].contains(key), let text = value.stringValue {
+            return status(text)
+        }
+        if case let .bool(flag) = value { return flag ? "是" : "否" }
+        if key == "protocol", let text = value.stringValue { return text.uppercased() }
+        if ["provider", "platform"].contains(key), let text = value.stringValue { return provider(text) }
+        if key == "fallback_mode", let text = value.stringValue { return ["none": "无", "proxy": "备用代理", "direct": "直连"][text] ?? text }
+        if key == "check_mode", let text = value.stringValue { return ["probe": "探活", "quota": "仅配额", "quota_probe": "探活 + 配额"][text] ?? text }
+        if key == "api_mode", let text = value.stringValue { return ["chat_completions": "Chat Completions", "responses": "Responses"][text] ?? text }
+        if ["message", "quality_summary", "latency_message", "error"].contains(key), let text = value.stringValue { return phrase(text) }
+        if key.hasSuffix("_at"), let text = value.stringValue, let date = parseDate(text) {
+            let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd HH:mm"
+            return formatter.string(from: date)
+        }
+        return value.displayText
+    }
+
+    private static func parseDate(_ text: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: text) { return date }
+        return ISO8601DateFormatter().date(from: text)
+    }
+
+    static func error(_ message: String) -> String {
+        phrase(message)
+    }
+
+    static func provider(_ value: String) -> String {
+        switch value.lowercased() {
+        case "openai": "OpenAI"
+        case "anthropic": "Anthropic"
+        case "gemini": "Gemini"
+        case "antigravity": "Antigravity"
+        case "grok", "xai": "Grok"
+        case "kimi": "Kimi"
+        case "zhipu": "智谱"
+        case "deepseek": "DeepSeek"
+        case "minimax": "MiniMax"
+        case "opencode_go": "OpenCode Go"
+        case "typesafe": "TypeSafe"
+        case "composite": "复合渠道"
+        default: value
+        }
+    }
+
+    static func accountType(_ value: String) -> String {
+        switch value.lowercased() {
+        case "apikey": "API 密钥"
+        case "oauth": "OAuth"
+        case "setup-token": "设置令牌"
+        case "service_account": "服务账号"
+        case "bedrock": "Bedrock"
+        case "upstream": "上游接口"
+        default: value
+        }
+    }
+
+    static func oauthMethod(_ value: String) -> String {
+        switch value {
+        case "manual": "手动凭证"
+        case "authorization": "手动授权"
+        case "session-key": "会话密钥"
+        case "refresh-token": "刷新令牌"
+        case "mobile-refresh-token": "移动端刷新令牌"
+        case "codex-session": "Codex 会话"
+        case "agent-identity": "Agent Identity 文件"
+        case "codex-pat": "Codex 个人访问令牌"
+        default: value
+        }
+    }
+
+    private static func phrase(_ message: String) -> String {
+        let replacements = [
+            "Invalid proxy ID": "代理 ID 无效",
+            "Proxy not found": "未找到代理",
+            "Failed to test proxy": "代理连接测试失败",
+            "Failed to check proxy quality": "代理质量检测失败",
+            "Request failed": "请求失败",
+            "Proxy connection successful": "代理连接成功",
+            "Connection successful": "连接成功",
+            "Proxy is working": "代理工作正常",
+            "All checks passed": "全部检测通过",
+            "Healthy": "正常"
+        ]
+        return replacements.reduce(message) { result, item in result.replacingOccurrences(of: item.key, with: item.value) }
+    }
+}
+
 enum WebConsoleModule: String, CaseIterable, Identifiable, Hashable {
     case subscriptions, announcements, proxies, redeemCodes, promoCodes, auditLogs, channels, channelMonitors
     var id: String { rawValue }
@@ -130,9 +287,9 @@ struct WebConsoleListView: View {
         }
     }
 
-    private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; do { let result = try await service.dynamicPage(module.path, page: page, search: search, itemKeys: module.itemKeys); records = result.items; total = result.total; pages = max(result.pages, Int(ceil(Double(total) / 20))); errorMessage = nil } catch { errorMessage = error.localizedDescription }; isLoading = false }
+    private func load() async { guard let service = try? store.adminService() else { return }; isLoading = true; do { let result = try await service.dynamicPage(module.path, page: page, search: search, itemKeys: module.itemKeys); records = result.items; total = result.total; pages = max(result.pages, Int(ceil(Double(total) / 20))); errorMessage = nil } catch { errorMessage = ConsoleLocalization.error(error.localizedDescription) }; isLoading = false }
     private func showDetail(_ record: DynamicRecord) { detail = ConsoleDetailState(title: record.text("name", "title", "code", "email") ?? "\(module.title)详情", value: .object(record.object)) }
-    private func delete(_ record: DynamicRecord) async { guard let service = try? store.adminService() else { return }; deleting = nil; do { try await service.dynamicDelete("\(module.path)/\(record.id)"); await load() } catch { message = error.localizedDescription } }
+    private func delete(_ record: DynamicRecord) async { guard let service = try? store.adminService() else { return }; deleting = nil; do { try await service.dynamicDelete("\(module.path)/\(record.id)"); await load() } catch { message = ConsoleLocalization.error(error.localizedDescription) } }
     private func perform(_ action: ConsoleAction, record: DynamicRecord) async {
         guard let service = try? store.adminService() else { return }
         let path = "\(module.path)/\(record.id)/\(action.suffix)"
@@ -150,7 +307,7 @@ struct WebConsoleListView: View {
             }
             if module == .proxies && action.showsResult { await load() }
         } catch {
-            message = error.localizedDescription
+            message = ConsoleLocalization.error(error.localizedDescription)
         }
     }
     private func performProxyAction(_ suffix: String, record: DynamicRecord) async {
@@ -174,10 +331,10 @@ private struct ConsoleRecordCard: View {
                 Image(systemName: module.symbol).foregroundStyle(module.color)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(record.text("name", "title", "code", "email", "action") ?? "#\(record.id)").font(.subheadline.bold()).lineLimit(2)
-                    Text(record.text("description", "content", "url", "proxy_url", "created_at", "createdAt") ?? "ID \(record.id)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(subtitleText).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                if let status = record.text("status", "state") { StatusPill(text: status, color: statusColor(status)) }
+                if let status = record.text("status", "state") { StatusPill(text: ConsoleLocalization.status(status), color: statusColor(status)) }
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 7)], spacing: 7) {
                 ForEach(summaryFields, id: \.0) { label, value in
@@ -218,7 +375,13 @@ private struct ConsoleRecordCard: View {
         .disabled(action == nil)
     }
 
-    private var summaryFields: [(String, String)] { let skip = Set(["id", "name", "title", "description", "content", "status", "state", "created_at", "updated_at"]); return record.object.keys.sorted().filter { !skip.contains($0) && record.object[$0]?.objectValue == nil && record.object[$0]?.arrayValue == nil }.prefix(6).map { ($0.replacingOccurrences(of: "_", with: " "), record.object[$0]?.displayText ?? "--") } }
+    private var summaryFields: [(String, String)] { let skip = Set(["id", "name", "title", "description", "content", "status", "state", "created_at", "updated_at"]); return record.object.keys.sorted().filter { !skip.contains($0) && record.object[$0]?.objectValue == nil && record.object[$0]?.arrayValue == nil }.prefix(6).map { key in (ConsoleLocalization.field(key), record.object[key].map { ConsoleLocalization.value($0, key: key) } ?? "--") } }
+    private var subtitleText: String {
+        if let text = record.text("description", "content", "url", "proxy_url") { return text }
+        if let value = record.object["created_at"] { return ConsoleLocalization.value(value, key: "created_at") }
+        if let value = record.object["createdAt"] { return ConsoleLocalization.value(value, key: "created_at") }
+        return "ID \(record.id)"
+    }
     private func statusColor(_ value: String) -> Color { ["active", "enabled", "success", "completed", "valid"].contains(value.lowercased()) ? .green : ["failed", "error", "revoked", "expired", "disabled"].contains(value.lowercased()) ? .red : .secondary }
 }
 
@@ -313,7 +476,7 @@ private struct ProxyEditorView: View {
                 }
 
                 Section("到期后连接方式") {
-                    Picker("Fallback 模式", selection: $fallbackMode) {
+                    Picker("兜底模式", selection: $fallbackMode) {
                         Text("无").tag("none")
                         Text("备用代理").tag("proxy")
                         Text("直连").tag("direct")
@@ -546,7 +709,7 @@ private struct ChannelEditorView: View {
                     Button { pricing.append(ChannelPricingDraft()) } label: { Label("添加模型定价", systemImage: "plus") }
                     ForEach($pricing) { $entry in
                         DisclosureGroup(entry.models.nilIfBlank ?? "未命名定价") {
-                            Picker("平台", selection: $entry.platform) { ForEach(Self.platforms, id: \.self) { Text($0).tag($0) } }
+                            Picker("平台", selection: $entry.platform) { ForEach(Self.platforms, id: \.self) { Text(ConsoleLocalization.provider($0)).tag($0) } }
                             TextField("模型，逗号分隔", text: $entry.models)
                             Picker("计费模式", selection: $entry.billingMode) { Text("Token").tag("token"); Text("按请求").tag("per_request"); Text("图片").tag("image"); Text("视频").tag("video") }
                             TextField("输入价格 / 1M Token", text: $entry.inputPrice).keyboardType(.decimalPad)
@@ -557,8 +720,8 @@ private struct ChannelEditorView: View {
                             TextField("图片输入 / 1M Token", text: $entry.imageInputPrice).keyboardType(.decimalPad)
                             TextField("图片输出 / 1M Token", text: $entry.imageOutputPrice).keyboardType(.decimalPad)
                             TextField("每请求价格", text: $entry.perRequestPrice).keyboardType(.decimalPad)
-                            TextField("Fast 倍率", text: $entry.fastMultiplier).keyboardType(.decimalPad)
-                            TextField("Flex 倍率", text: $entry.flexMultiplier).keyboardType(.decimalPad)
+                            TextField("快速模式倍率", text: $entry.fastMultiplier).keyboardType(.decimalPad)
+                            TextField("弹性模式倍率", text: $entry.flexMultiplier).keyboardType(.decimalPad)
                             Button("删除此定价", role: .destructive) { pricing.removeAll { $0.id == entry.id } }
                         }
                     }
@@ -568,7 +731,7 @@ private struct ChannelEditorView: View {
                     Button { mappings.append(ChannelMappingDraft(platform: "anthropic", source: "", target: "")) } label: { Label("添加模型映射", systemImage: "plus") }
                     ForEach($mappings) { $mapping in
                         DisclosureGroup(mapping.source.nilIfBlank ?? "未命名映射") {
-                            Picker("平台", selection: $mapping.platform) { ForEach(Self.platforms, id: \.self) { Text($0).tag($0) } }
+                            Picker("平台", selection: $mapping.platform) { ForEach(Self.platforms, id: \.self) { Text(ConsoleLocalization.provider($0)).tag($0) } }
                             TextField("请求模型 / 匹配模式", text: $mapping.source)
                             TextField("映射到模型", text: $mapping.target)
                             Button("删除此映射", role: .destructive) { mappings.removeAll { $0.id == mapping.id } }
@@ -719,9 +882,9 @@ private struct ChannelMonitorEditorView: View {
                 Section("检测设置") {
                     TextField("名称", text: $name)
                     Picker("检测模式", selection: $checkMode) { Text("探活").tag("probe"); Text("仅配额").tag("quota"); Text("探活 + 配额").tag("quota_probe") }.pickerStyle(.segmented)
-                    Picker("Provider", selection: $provider) { ForEach(Self.providers, id: \.self) { Text($0).tag($0) } }
+                    Picker("供应商", selection: $provider) { ForEach(Self.providers, id: \.self) { Text(ConsoleLocalization.provider($0)).tag($0) } }
                     if provider == "openai" && usesProbe {
-                        Picker("OpenAI API 模式", selection: $apiMode) { Text("Chat Completions").tag("chat_completions"); Text("Responses").tag("responses") }
+                        Picker("OpenAI API 模式", selection: $apiMode) { Text("聊天补全").tag("chat_completions"); Text("响应接口").tag("responses") }
                     }
                     if usesQuota {
                         Picker("关联账号", selection: $accountID) {
@@ -736,7 +899,7 @@ private struct ChannelMonitorEditorView: View {
 
                 if usesProbe {
                     Section("探活请求") {
-                        TextField("Endpoint", text: $endpoint).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        TextField("接口地址", text: $endpoint).textInputAutocapitalization(.never).autocorrectionDisabled()
                         SecureField(state.record == nil ? "API Key" : "新 API Key（留空不修改）", text: $apiKey)
                         TextField("主模型", text: $primaryModel).textInputAutocapitalization(.never)
                         TextField("附加模型，逗号分隔", text: $extraModels).textInputAutocapitalization(.never)
@@ -758,7 +921,7 @@ private struct ChannelMonitorEditorView: View {
                         }
                         Text("额外 Headers，每行 key=value").font(.caption).foregroundStyle(.secondary)
                         TextEditor(text: $extraHeaders).frame(minHeight: 90).font(.caption.monospaced())
-                        Picker("Body 覆盖", selection: $bodyMode) { Text("关闭").tag("off"); Text("合并").tag("merge"); Text("替换").tag("replace") }
+                        Picker("请求体覆盖", selection: $bodyMode) { Text("关闭").tag("off"); Text("合并").tag("merge"); Text("替换").tag("replace") }
                         if bodyMode != "off" {
                             TextEditor(text: $bodyOverride).frame(minHeight: 120).font(.caption.monospaced())
                         }
@@ -965,8 +1128,8 @@ struct SystemSettingsView: View {
             Section("站点") {
                 TextField("站点名称", text: textBinding("site_name"))
                 TextField("站点副标题", text: textBinding("site_subtitle"))
-                TextField("Logo URL", text: textBinding("site_logo")).textInputAutocapitalization(.never)
-                TextField("API Base URL", text: textBinding("api_base_url")).textInputAutocapitalization(.never)
+                TextField("站点 Logo 地址", text: textBinding("site_logo")).textInputAutocapitalization(.never)
+                TextField("API 基础地址", text: textBinding("api_base_url")).textInputAutocapitalization(.never)
                 TextField("联系方式", text: textBinding("contact_info"))
                 TextField("文档地址", text: textBinding("doc_url")).textInputAutocapitalization(.never)
                 Toggle("紧凑首页", isOn: boolBinding("compact_home_enabled"))
@@ -1121,7 +1284,7 @@ struct PersonalConsoleView: View {
     }
     private func personalLink(_ title: String, _ subtitle: String, _ symbol: String, _ color: Color) -> some View { HStack(spacing: 12) { Image(systemName: symbol).foregroundStyle(color).frame(width: 38, height: 38).background(color.opacity(0.1), in: RoundedRectangle(cornerRadius: 11)); VStack(alignment: .leading, spacing: 3) { Text(title).font(.headline); Text(subtitle).font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").foregroundStyle(.tertiary) }.padding(14).glassPanel(cornerRadius: 18, interactive: true) }
     @ViewBuilder private func personalSection(_ title: String, symbol: String, color: Color, value: JSONValue?) -> some View {
-        VStack(alignment: .leading, spacing: 10) { Label(title, systemImage: symbol).font(.headline).foregroundStyle(color); let rows = personalRows(value); if rows.isEmpty { Text("暂无数据").font(.caption).foregroundStyle(.secondary) }; ForEach(rows) { row in HStack { VStack(alignment: .leading, spacing: 3) { Text(row.text("name", "title", "group_name", "platform") ?? "#\(row.id)").font(.subheadline.weight(.semibold)); Text(row.text("description", "status", "expires_at", "updated_at") ?? "").font(.caption).foregroundStyle(.secondary) }; Spacer(); if let status = row.text("status") { StatusPill(text: status, color: status == "active" ? .green : .secondary) } }; Divider() } }.padding(14).glassPanel()
+        VStack(alignment: .leading, spacing: 10) { Label(title, systemImage: symbol).font(.headline).foregroundStyle(color); let rows = personalRows(value); if rows.isEmpty { Text("暂无数据").font(.caption).foregroundStyle(.secondary) }; ForEach(rows) { row in HStack { VStack(alignment: .leading, spacing: 3) { Text(row.text("name", "title", "group_name") ?? row.text("platform").map(ConsoleLocalization.provider) ?? "#\(row.id)").font(.subheadline.weight(.semibold)); Text(row.text("description", "expires_at", "updated_at") ?? "").font(.caption).foregroundStyle(.secondary) }; Spacer(); if let status = row.text("status") { StatusPill(text: ConsoleLocalization.status(status), color: status == "active" ? .green : .secondary) } }; Divider() } }.padding(14).glassPanel()
     }
     private func personalRows(_ value: JSONValue?) -> [DynamicRecord] { guard let value else { return [] }; if let array = value.arrayValue { return array.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) } }; if let object = value.objectValue { for key in ["items", "subscriptions", "channels", "monitors", "data"] { if let array = object[key]?.arrayValue { return array.enumerated().map { DynamicRecord(value: $0.element, index: $0.offset) } } } }; return [] }
     private func shortDate(_ value: String?) -> String { value.map { String($0.replacingOccurrences(of: "T", with: " ").prefix(10)) } ?? "--" }

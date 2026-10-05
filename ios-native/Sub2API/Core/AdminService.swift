@@ -218,6 +218,9 @@ struct AdminService: Sendable {
 
     func quota(_ account: AdminAccount) async throws -> JSONValue {
         if account.platform.lowercased() == "grok" { return try await api.get("/api/v1/admin/grok/accounts/\(account.id)/quota") }
+        if account.platform.lowercased() == "antigravity" {
+            return try await api.get("/api/v1/admin/accounts/\(account.id)/usage", query: query(["source": "active", "force": "true"]))
+        }
         return try await api.get("/api/v1/admin/openai/accounts/\(account.id)/quota")
     }
 

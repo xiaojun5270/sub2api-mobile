@@ -151,8 +151,8 @@ private struct AddServerView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     HStack {
-                        if revealKey { TextField("Admin Key / JWT", text: $adminKey) }
-                        else { SecureField("Admin Key / JWT", text: $adminKey) }
+                        if revealKey { TextField("管理密钥 / JWT", text: $adminKey) }
+                        else { SecureField("管理密钥 / JWT", text: $adminKey) }
                         Button { revealKey.toggle() } label: { Image(systemName: revealKey ? "eye.slash" : "eye") }
                     }
                 }

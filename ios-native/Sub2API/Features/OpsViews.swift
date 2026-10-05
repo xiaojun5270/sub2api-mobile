@@ -23,7 +23,7 @@ struct OpsView: View {
         }
         .navigationTitle("运维监控")
         .toolbar { ToolbarItem(placement: .primaryAction) { Button { showsFilters = true } label: { Image(systemName: (platform.isEmpty && groupID.isEmpty && timeRange == "24h") ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill") } } }
-        .sheet(isPresented: $showsFilters) { NavigationStack { Form { Section("时间") { Picker("范围", selection: $timeRange) { Text("近1小时").tag("1h"); Text("近24小时").tag("24h"); Text("近7天").tag("7d"); Text("近30天").tag("30d") } }; Section("范围") { Picker("平台", selection: $platform) { Text("全部平台").tag(""); ForEach(["openai", "anthropic", "gemini", "antigravity", "grok"], id: \.self) { Text($0).tag($0) } }; Picker("分组", selection: $groupID) { Text("全部分组").tag(""); ForEach(groups) { Text($0.name).tag(String($0.id)) } } } }.navigationTitle("运维筛选").toolbar { ToolbarItem(placement: .cancellationAction) { Button("重置") { timeRange = "24h"; platform = ""; groupID = "" } }; ToolbarItem(placement: .confirmationAction) { Button("完成") { showsFilters = false } } } } }
+        .sheet(isPresented: $showsFilters) { NavigationStack { Form { Section("时间") { Picker("范围", selection: $timeRange) { Text("近1小时").tag("1h"); Text("近24小时").tag("24h"); Text("近7天").tag("7d"); Text("近30天").tag("30d") } }; Section("范围") { Picker("平台", selection: $platform) { Text("全部平台").tag(""); ForEach(["openai", "anthropic", "gemini", "antigravity", "grok"], id: \.self) { Text(ConsoleLocalization.provider($0)).tag($0) } }; Picker("分组", selection: $groupID) { Text("全部分组").tag(""); ForEach(groups) { Text($0.name).tag(String($0.id)) } } } }.navigationTitle("运维筛选").toolbar { ToolbarItem(placement: .cancellationAction) { Button("重置") { timeRange = "24h"; platform = ""; groupID = "" } }; ToolbarItem(placement: .confirmationAction) { Button("完成") { showsFilters = false } } } } }
         .appPage().task { guard let service = try? store.adminService() else { return }; groups = (try? await service.allGroups()) ?? [] }
     }
 
@@ -153,12 +153,48 @@ struct DynamicJSONView: View {
     let value: JSONValue
     var body: some View {
         switch value {
-        case let .object(object): LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) { ForEach(object.keys.sorted().prefix(30), id: \.self) { key in let child = object[key] ?? .null; if child.objectValue == nil && child.arrayValue == nil { VStack(alignment: .leading, spacing: 3) { Text(readable(key)).font(.caption2).foregroundStyle(.secondary); Text(child.displayText).font(.caption.weight(.semibold)).lineLimit(3).minimumScaleFactor(0.7) }.frame(maxWidth: .infinity, alignment: .leading).padding(9).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9)) } } }
-        case let .array(array): VStack(alignment: .leading, spacing: 8) { ForEach(Array(array.prefix(12).enumerated()), id: \.offset) { _, child in Text(child.displayText).font(.caption).lineLimit(4).frame(maxWidth: .infinity, alignment: .leading).padding(9).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9)) } }
+        case let .object(object):
+            VStack(alignment: .leading, spacing: 10) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), spacing: 8)], spacing: 8) {
+                    ForEach(object.keys.sorted().prefix(30), id: \.self) { key in
+                        let child = object[key] ?? .null
+                        if child.objectValue == nil && child.arrayValue == nil {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(ConsoleLocalization.field(key)).font(.caption2).foregroundStyle(.secondary)
+                                Text(ConsoleLocalization.value(child, key: key)).font(.caption.weight(.semibold)).lineLimit(3).minimumScaleFactor(0.7)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(9)
+                            .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                        }
+                    }
+                }
+                ForEach(object.keys.sorted().prefix(30), id: \.self) { key in
+                    let child = object[key] ?? .null
+                    if child.objectValue != nil || child.arrayValue != nil {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(ConsoleLocalization.field(key)).font(.subheadline.weight(.semibold))
+                            DynamicJSONView(value: child)
+                        }
+                    }
+                }
+            }
+        case let .array(array):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(array.prefix(12).enumerated()), id: \.offset) { index, child in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("#\(index + 1)").font(.caption2).foregroundStyle(.secondary)
+                        if child.objectValue != nil || child.arrayValue != nil { DynamicJSONView(value: child) }
+                        else { Text(child.displayText).font(.caption) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(9)
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                }
+            }
         default: Text(value.displayText).font(.caption.monospaced()).textSelection(.enabled)
         }
     }
-    private func readable(_ value: String) -> String { value.replacingOccurrences(of: "_", with: " ").capitalized }
 }
 
 private struct OpsRecordsView: View {
@@ -172,10 +208,46 @@ private struct OpsRecordsView: View {
     @State private var errorMessage: String?
     @State private var message: String?
 
-    var body: some View { VStack(spacing: 0) {
-        HStack { Picker("类型", selection: $kind) { ForEach(OpsRecordKind.allCases) { Text($0.title).tag($0) } }.pickerStyle(.menu); Picker("级别", selection: $level) { Text("全部级别").tag(""); ForEach(["error", "warning", "info", "debug"], id: \.self) { Text($0).tag($0) } }.pickerStyle(.menu); Spacer(); if kind == .systemLogs { Button(role: .destructive) { Task { await cleanupLogs() } } label: { Image(systemName: "trash") } } }.padding(.horizontal, 16).padding(.top, 10)
-        ScrollView { LazyVStack(spacing: 12) { if let message { Text(message).font(.footnote).foregroundStyle(.secondary) }; if isLoading && records.isEmpty { LoadingView() }; if let errorMessage, records.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }; if !isLoading && records.isEmpty { EmptyContentView(symbol: "doc.text.magnifyingglass", title: "暂无记录", message: "当前条件下没有运维记录。") }; ForEach(records) { record in VStack(alignment: .leading, spacing: 8) { HStack { Text(record.message ?? record.errorMessage ?? record.upstreamError ?? record.path ?? "记录").font(.subheadline.bold()).lineLimit(3); Spacer(); StatusPill(text: record.level ?? record.status ?? "--", color: tone(record)) }; HStack { Text(record.method ?? ""); Text(record.model ?? ""); Text(record.accountName ?? ""); Spacer(); Text(record.createdAt ?? "") }.font(.caption2).foregroundStyle(.secondary); if kind != .systemLogs && record.resolvedAt == nil { Button("标记已解决") { Task { await resolve(record) } }.font(.caption) } }.padding(14).glassPanel(cornerRadius: 18) } }.padding(16) }.searchable(text: $search, prompt: "搜索消息或路径").refreshable { await load() }
-    }.task(id: taskKey) { await load() } }
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Picker("类型", selection: $kind) { ForEach(OpsRecordKind.allCases) { Text($0.title).tag($0) } }.pickerStyle(.menu)
+                Picker("级别", selection: $level) {
+                    Text("全部级别").tag("")
+                    ForEach(["error", "warning", "info", "debug"], id: \.self) { Text(ConsoleLocalization.status($0)).tag($0) }
+                }.pickerStyle(.menu)
+                Spacer()
+                if kind == .systemLogs { Button(role: .destructive) { Task { await cleanupLogs() } } label: { Image(systemName: "trash") } }
+            }
+            .padding(.horizontal, 16).padding(.top, 10)
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    if let message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+                    if isLoading && records.isEmpty { LoadingView() }
+                    if let errorMessage, records.isEmpty { InlineErrorView(message: errorMessage) { Task { await load() } } }
+                    if !isLoading && records.isEmpty { EmptyContentView(symbol: "doc.text.magnifyingglass", title: "暂无记录", message: "当前条件下没有运维记录。") }
+                    ForEach(records) { record in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text(record.message ?? record.errorMessage ?? record.upstreamError ?? record.path ?? "记录").font(.subheadline.bold()).lineLimit(3)
+                                Spacer()
+                                let rawStatus = record.level ?? record.status ?? "--"
+                                StatusPill(text: ConsoleLocalization.status(rawStatus), color: tone(record))
+                            }
+                            HStack { Text(record.method ?? ""); Text(record.model ?? ""); Text(record.accountName ?? ""); Spacer(); Text(record.createdAt ?? "") }
+                                .font(.caption2).foregroundStyle(.secondary)
+                            if kind != .systemLogs && record.resolvedAt == nil { Button("标记已解决") { Task { await resolve(record) } }.font(.caption) }
+                        }
+                        .padding(14).glassPanel(cornerRadius: 18)
+                    }
+                }
+                .padding(16)
+            }
+            .searchable(text: $search, prompt: "搜索消息或路径")
+            .refreshable { await load() }
+        }
+        .task(id: taskKey) { await load() }
+    }
 
     private var taskKey: String { "\(kind.rawValue)-\(level)-\(filters.description)" }
     private var path: String { "/api/v1/admin/ops/\(kind.rawValue)" }
