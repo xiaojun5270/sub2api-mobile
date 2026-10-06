@@ -444,8 +444,14 @@ struct AccountsView: View {
     }
 
     private func loadAutomaticQuotaIfNeeded(_ account: AdminAccount) async {
-        guard account.platform.lowercased().contains("antigravity") else { return }
-        if let quotas = accountQuotaPayload(account)?.objectValue?["antigravity_quota"]?.objectValue, !quotas.isEmpty { return }
+        switch quotaMode(account) {
+        case .antigravity:
+            if let quotas = accountQuotaPayload(account)?.objectValue?["antigravity_quota"]?.objectValue, !quotas.isEmpty { return }
+        case .openai:
+            if quotaByAccount[account.id] != nil { return }
+        case .grok, .generic, .unsupported:
+            return
+        }
         guard !automaticQuotaLoading.contains(account.id), let service = try? store.adminService() else { return }
         automaticQuotaLoading.insert(account.id)
         defer { automaticQuotaLoading.remove(account.id) }
@@ -667,7 +673,16 @@ private struct AccountSummaryCard: View {
             VStack(spacing: 6) {
                 HStack(spacing: 5) {
                     AccountProviderIcon(platform: account.platform)
-                    Text("OpenAI 额度窗口").font(.subheadline.weight(.bold))
+                    Text("OpenAI 额度窗口").font(.subheadline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    if let tier = openAIAccountTier {
+                        Text(tier)
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(AppPalette.teal)
+                            .lineLimit(1)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(AppPalette.teal.opacity(0.11), in: Capsule())
+                    }
                     Spacer()
                     Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
                 }
@@ -730,6 +745,51 @@ private struct AccountSummaryCard: View {
 
     private var antigravityTier: String? {
         quota?.objectValue?.text("subscription_tier", "subscriptionTier", "subscription_tier_raw", "subscriptionTierRaw")?.nilIfBlank
+    }
+
+    private var openAIAccountTier: String? {
+        let keys = [
+            "chatgpt_plan_type", "chatgptPlanType", "chatgpt_subscription_plan", "chatgptSubscriptionPlan",
+            "chatgpt_account_type", "chatgptAccountType", "codex_plan_type", "codexPlanType",
+            "codex_subscription_tier", "codexSubscriptionTier", "openai_plan_type", "openaiPlanType",
+            "openai_account_plan", "openaiAccountPlan", "openai_account_type", "openaiAccountType",
+            "openai_subscription_tier", "openaiSubscriptionTier", "subscription_plan", "subscriptionPlan",
+            "subscription_tier", "subscriptionTier", "subscription_tier_raw", "subscriptionTierRaw",
+            "subscription_type", "subscriptionType", "plan_type", "planType", "account_plan", "accountPlan",
+            "account_tier", "accountTier", "user_plan", "userPlan", "license_type", "licenseType",
+            "product_name", "productName", "membership", "plan", "tier", "sku"
+        ]
+        if let raw = findString(in: quota, matching: keys)?.nilIfBlank,
+           let tier = normalizedOpenAITier(raw) { return tier }
+        let tokenKeys = ["access_token", "accessToken", "id_token", "idToken"]
+        guard let token = findString(in: quota, matching: tokenKeys),
+              let payload = decodeJWTPayload(token),
+              let raw = findString(in: payload, matching: keys)?.nilIfBlank else { return nil }
+        return normalizedOpenAITier(raw)
+    }
+
+    private func normalizedOpenAITier(_ raw: String) -> String? {
+        let normalized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "chatgpt", with: "", options: .caseInsensitive)
+            .trimmingCharacters(in: CharacterSet(charactersIn: " _-"))
+            .uppercased()
+        guard !normalized.isEmpty, !["OAUTH", "OPENAI", "ACTIVE", "SUBSCRIPTION", "DEFAULT", "STANDARD"].contains(normalized) else { return nil }
+        if ["X20Z", "X20-Z", "X20_Z"].contains(normalized) { return "X20" }
+        return normalized
+    }
+
+    private func decodeJWTPayload(_ rawToken: String) -> JSONValue? {
+        let token = rawToken.lowercased().hasPrefix("bearer ")
+            ? String(rawToken.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
+            : rawToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count >= 2 else { return nil }
+        var base64 = String(segments[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        let padding = (4 - base64.count % 4) % 4
+        if padding > 0 { base64.append(String(repeating: "=", count: padding)) }
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONDecoder().decode(JSONValue.self, from: data)
     }
 
     private var antigravityCredits: Double? {
@@ -854,6 +914,9 @@ private struct AccountSummaryCard: View {
         if let object = value.objectValue {
             for key in keys { if let text = object[key]?.stringValue, !text.isEmpty { return text } }
             for child in object.values { if let text = findString(in: child, matching: keys) { return text } }
+        }
+        if let array = value.arrayValue {
+            for child in array { if let text = findString(in: child, matching: keys) { return text } }
         }
         return nil
     }
@@ -1261,9 +1324,13 @@ struct AccountDetailView: View {
                 if isTrendLoading { ProgressView().controlSize(.small) }
             }
             if let trendError { loadErrorContent(trendError) { Task { await loadRange() } } }
-            else if trend.isEmpty { Text(isTrendLoading ? "正在加载趋势" : "当前范围暂无趋势数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120) }
+            else if safeTrend.isEmpty { Text(isTrendLoading ? "正在加载趋势" : "当前范围暂无趋势数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120) }
             else {
-                Chart(trend) { LineMark(x: .value("时间", $0.date), y: .value("Token", $0.totalTokens ?? 0)).foregroundStyle(AppPalette.orange).interpolationMethod(.catmullRom) }
+                Chart(safeTrend) { point in
+                    LineMark(x: .value("时间", point.date), y: .value("Token", safeNumber(point.totalTokens)))
+                        .foregroundStyle(AppPalette.orange)
+                        .interpolationMethod(.catmullRom)
+                }
                     .chartYAxis(.hidden).frame(height: 170)
             }
         }.padding(16).glassPanel()
@@ -1319,7 +1386,8 @@ struct AccountDetailView: View {
             }
             if let usageError { loadErrorContent(usageError) { Task { await loadUsage() } } }
             else if usage.isEmpty { Text(isUsageLoading ? "正在加载使用记录" : "当前账号暂无使用记录").font(.footnote).foregroundStyle(.secondary) }
-            ForEach(usage.prefix(20)) { row in
+            ForEach(Array(usage.prefix(20).enumerated()), id: \.offset) { entry in
+                let row = entry.element
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
                         Text(row.model ?? row.requestedModel ?? "未知模型").font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -1328,7 +1396,7 @@ struct AccountDetailView: View {
                     }
                     HStack(spacing: 10) {
                         Label("Token \(metric(usageTokens(row)))", systemImage: "cpu")
-                        if let duration = row.durationMs { Label("\(Int(duration)) ms", systemImage: "timer") }
+                        if let duration = durationText(row.durationMs) { Label(duration, systemImage: "timer") }
                         Spacer()
                         Text(formattedDate(row.createdAt, key: "created_at"))
                     }.font(.caption2).foregroundStyle(.secondary)
@@ -1349,6 +1417,15 @@ struct AccountDetailView: View {
         return messages.isEmpty ? nil : messages.joined(separator: "\n")
     }
 
+    private var safeTrend: [TrendPoint] {
+        var seen = Set<String>()
+        return trend.filter { point in
+            guard !point.date.isEmpty, seen.insert(point.date).inserted else { return false }
+            guard let value = point.totalTokens else { return true }
+            return value.isFinite
+        }
+    }
+
     private func loadErrorRow(_ message: String, retry: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
@@ -1366,8 +1443,22 @@ struct AccountDetailView: View {
         }
     }
 
-    private func metric(_ value: Double?) -> String { value.map { NumberFormatters.compact($0) } ?? "--" }
-    private func money(_ value: Double?) -> String { value.map { NumberFormatters.currency($0) } ?? "--" }
+    private func metric(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "--" }
+        return NumberFormatters.compact(value)
+    }
+    private func money(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "--" }
+        return NumberFormatters.currency(value)
+    }
+    private func safeNumber(_ value: Double?) -> Double {
+        guard let value, value.isFinite else { return 0 }
+        return max(value, 0)
+    }
+    private func durationText(_ value: Double?) -> String? {
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        return String(format: "%.0f ms", min(value, 86_400_000))
+    }
     private func usageTokens(_ row: UsageRecord) -> Double? {
         let values = [row.inputTokens, row.outputTokens, row.cacheCreationTokens, row.cacheReadTokens, row.imageOutputTokens].compactMap { $0 }
         return values.isEmpty ? nil : values.reduce(0, +)
@@ -1381,7 +1472,7 @@ struct AccountDetailView: View {
     }
 
     private func load() async {
-        guard let service = try? store.adminService() else {
+        guard (try? store.adminService()) != nil else {
             accountError = "登录信息无效，请重新登录。"
             isInitialLoading = false
             return
@@ -1390,26 +1481,14 @@ struct AccountDetailView: View {
         isModelsLoading = true
         isUsageLoading = true
         isTrendLoading = true
-        let accountID = account.id
-        let selectedRange = range
-        let dates = selectedRange.startEnd
 
-        async let nextAccount: AccountDetailLoadResult<AdminAccount> = captureAccountDetailLoad { try await service.account(accountID) }
-        async let nextToday: AccountDetailLoadResult<AccountTodayStats> = captureAccountDetailLoad { try await service.accountToday(accountID) }
-        async let nextStats: AccountDetailLoadResult<UsageSummary> = captureAccountDetailLoad { try await service.accountStats(accountID, days: selectedRange.rawValue) }
-        async let nextSnapshot: AccountDetailLoadResult<DashboardSnapshot> = captureAccountDetailLoad {
-            try await service.dashboardSnapshot(start: dates.0, end: dates.1, granularity: selectedRange.granularity, filters: ["account_id": String(accountID), "include_stats": "false", "include_trend": "true"])
-        }
-        async let nextModels: AccountDetailLoadResult<[AccountModel]> = captureAccountDetailLoad { try await service.accountModels(accountID) }
-        async let nextUsage: AccountDetailLoadResult<Page<UsageRecord>> = captureAccountDetailLoad { try await service.accountUsageRecords(accountID) }
-        let result = await (nextAccount, nextToday, nextStats, nextSnapshot, nextModels, nextUsage)
-
-        switch result.0 { case let .success(value): account = value; accountError = nil; case let .failure(error): accountError = error }
-        switch result.1 { case let .success(value): today = value; todayError = nil; case let .failure(error): todayError = error }
-        switch result.2 { case let .success(value): stats = value; statsError = nil; case let .failure(error): statsError = error }
-        switch result.3 { case let .success(value): trend = value.trend ?? []; trendError = nil; case let .failure(error): trendError = error }
-        switch result.4 { case let .success(value): models = value; modelsError = nil; case let .failure(error): modelsError = error }
-        switch result.5 { case let .success(value): usage = value.items; usageError = nil; case let .failure(error): usageError = error }
+        // Apply each response separately so a malformed dynamic list cannot invalidate
+        // the whole destination while SwiftUI is constructing the navigation view.
+        await reloadAccount()
+        await loadMetrics()
+        await loadRange()
+        await loadModels()
+        await loadUsage()
 
         isRefreshing = false
         isModelsLoading = false
