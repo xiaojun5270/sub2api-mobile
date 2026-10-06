@@ -28,7 +28,13 @@ final class AppStore: ObservableObject {
     }
 
     @discardableResult
-    func connect(baseURL: String, adminKey: String) async throws -> ServerProfile {
+    func connect(
+        name: String? = nil,
+        baseURL: String,
+        adminKey: String,
+        username: String? = nil,
+        authMode: String? = nil
+    ) async throws -> ServerProfile {
         let normalizedURL = normalize(baseURL)
         let normalizedKey = adminKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedURL.isEmpty, !normalizedKey.isEmpty else { throw APIError.invalidBaseURL }
@@ -38,11 +44,15 @@ final class AppStore: ObservableObject {
         let existing = servers.first { $0.baseURL.caseInsensitiveCompare(normalizedURL) == .orderedSame }
         let id = existing?.id ?? UUID()
         let host = URL(string: normalizedURL)?.host ?? normalizedURL
-        let label = settings.siteName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let customName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let siteName = settings.siteName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedUsername = username?.trimmingCharacters(in: .whitespacesAndNewlines)
         let profile = ServerProfile(
             id: id,
-            label: label?.isEmpty == false ? (label ?? host) : host,
+            label: customName?.isEmpty == false ? (customName ?? host) : (existing?.label ?? (siteName?.isEmpty == false ? (siteName ?? host) : host)),
             baseURL: normalizedURL,
+            username: normalizedUsername?.isEmpty == false ? normalizedUsername : existing?.username,
+            authMode: authMode ?? existing?.authMode,
             updatedAt: Date()
         )
 

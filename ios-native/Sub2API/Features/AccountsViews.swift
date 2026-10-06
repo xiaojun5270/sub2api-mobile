@@ -7,7 +7,7 @@ struct AccountsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var accounts: [AdminAccount] = []
     @State private var searchText = ""
-    @State private var statusFilter = "all"
+    @State private var statusFilter = "正常"
     @State private var platformFilter = "all"
     @State private var typeFilter = "all"
     @State private var isLoading = true
@@ -35,7 +35,7 @@ struct AccountsView: View {
         accounts.filter { account in
             let haystack = "\(account.id) \(account.name) \(account.platform) \(account.type) \(account.groupName ?? "")"
             let searchOK = searchText.isEmpty || haystack.localizedCaseInsensitiveContains(searchText)
-            let statusOK = statusFilter == "all" || StatusStyle.account(account).0 == statusFilter
+            let statusOK = StatusStyle.account(account).0 == statusFilter
             return searchOK && statusOK && (platformFilter == "all" || account.platform == platformFilter) && (typeFilter == "all" || account.type == typeFilter)
         }
     }
@@ -132,7 +132,6 @@ struct AccountsView: View {
         let errors = accounts.filter { StatusStyle.account($0).0 == "异常" }.count
         let limited = accounts.filter { StatusStyle.account($0).0 == "限流" }.count
         return HStack(spacing: 0) {
-            compactMetric("全部", accounts.count, .primary, filter: "all")
             compactMetric("正常", active, .green, filter: "正常")
             compactMetric("暂停", paused, .secondary, filter: "暂停")
             compactMetric("异常", errors, AppPalette.orange, filter: "异常")
@@ -161,10 +160,10 @@ struct AccountsView: View {
     private var filterBar: some View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                Menu { ForEach(["all", "正常", "暂停", "异常", "限流"], id: \.self) { value in Button(value == "all" ? "全部状态" : value) { statusFilter = value } } } label: { filterLabel(statusFilter == "all" ? "全部状态" : statusFilter, active: statusFilter != "all") }
+                Menu { ForEach(["正常", "暂停", "异常", "限流"], id: \.self) { value in Button(value) { statusFilter = value } } } label: { filterLabel(statusFilter, active: statusFilter != "正常") }
                 Menu { ForEach(platforms, id: \.self) { value in Button(value == "all" ? "全部平台" : value) { platformFilter = value } } } label: { filterLabel(platformFilter == "all" ? "全部平台" : platformFilter, active: platformFilter != "all") }
                 Menu { ForEach(types, id: \.self) { value in Button(value == "all" ? "全部类型" : value) { typeFilter = value } } } label: { filterLabel(typeFilter == "all" ? "全部类型" : typeFilter, active: typeFilter != "all") }
-                if statusFilter != "all" || platformFilter != "all" || typeFilter != "all" { Button("清除") { statusFilter = "all"; platformFilter = "all"; typeFilter = "all" }.font(.caption) }
+                if statusFilter != "正常" || platformFilter != "all" || typeFilter != "all" { Button("清除") { statusFilter = "正常"; platformFilter = "all"; typeFilter = "all" }.font(.caption) }
             }
         }.scrollIndicators(.hidden)
     }

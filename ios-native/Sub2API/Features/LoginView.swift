@@ -10,6 +10,7 @@ private enum LoginMode: String, CaseIterable, Identifiable {
 
 struct LoginView: View {
     @EnvironmentObject private var store: AppStore
+    @State private var serverName = ""
     @State private var baseURL = ""
     @State private var loginMode: LoginMode = .account
     @State private var account = ""
@@ -47,6 +48,16 @@ struct LoginView: View {
                     }
 
                     VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            Label("服务器名称", systemImage: "server.rack")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("例如：生产环境", text: $serverName)
+                                .textContentType(.organizationName)
+                                .padding(13)
+                                .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
+                        }
+
                         VStack(alignment: .leading, spacing: 7) {
                             Label("服务器地址", systemImage: "link")
                                 .font(.caption.weight(.semibold))
@@ -257,7 +268,13 @@ struct LoginView: View {
                 } else {
                     credential = adminKey
                 }
-                try await store.connect(baseURL: baseURL, adminKey: credential)
+                try await store.connect(
+                    name: serverName,
+                    baseURL: baseURL,
+                    adminKey: credential,
+                    username: loginMode == .account ? account : nil,
+                    authMode: loginMode.rawValue
+                )
             } catch {
                 errorMessage = error.localizedDescription
             }

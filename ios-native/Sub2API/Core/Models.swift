@@ -4,6 +4,8 @@ struct ServerProfile: Codable, Identifiable, Hashable, Sendable {
     let id: UUID
     var label: String
     var baseURL: String
+    var username: String?
+    var authMode: String?
     var updatedAt: Date
 }
 
