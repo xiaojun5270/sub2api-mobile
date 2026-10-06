@@ -178,7 +178,7 @@ struct AccountsView: View {
         Button { editingAccount = account } label: { Label("编辑", systemImage: "pencil") }
         Button { Task { await toggle(account) } } label: { Label(account.schedulable == false ? "恢复调度" : "暂停调度", systemImage: "pause.circle") }
         Button { quotaAccount = account } label: { Label("查询额度", systemImage: "gauge") }
-        Button { advancedAccount = account } label: { Label("网页高级功能", systemImage: "wrench.and.screwdriver") }
+        Button { advancedAccount = account } label: { Label("账号高级功能", systemImage: "wrench.and.screwdriver") }
         Divider()
         Button(role: .destructive) { deletingAccount = account } label: { Label("删除", systemImage: "trash") }
     }
@@ -639,8 +639,7 @@ private struct AccountSummaryCard: View {
         if account.platform.lowercased().contains("antigravity") {
             VStack(spacing: 6) {
                 HStack(spacing: 5) {
-                    AccountProviderIcon(platform: account.platform)
-                    Text("5 小时模型额度").font(.subheadline.weight(.bold))
+                    Text("Antigravity").font(.subheadline.weight(.bold))
                     if let tier = antigravityTier {
                         Text(tier).font(.caption2.weight(.bold)).foregroundStyle(AppPalette.purple)
                             .padding(.horizontal, 7).padding(.vertical, 3)
@@ -672,8 +671,7 @@ private struct AccountSummaryCard: View {
         } else if isOpenAIQuotaAccount {
             VStack(spacing: 6) {
                 HStack(spacing: 5) {
-                    AccountProviderIcon(platform: account.platform)
-                    Text("OpenAI 额度窗口").font(.subheadline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    Text("OpenAI").font(.subheadline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.8)
                     if let tier = openAIAccountTier {
                         Text(tier)
                             .font(.caption2.weight(.bold))
@@ -1113,6 +1111,7 @@ struct AccountDetailView: View {
     @State private var showsEdit = false
     @State private var showsOAuth = false
     @State private var showsModelPicker = false
+    @State private var showsAdvanced = false
     @State private var selectedTestModel: String?
     @State private var pendingConfirmation: AccountConfirmation?
 
@@ -1145,18 +1144,21 @@ struct AccountDetailView: View {
                 actionPanel
                 trendPanel
                 settingsPanel
-                NavigationLink { AccountAdvancedView(account: account) } label: {
+                Button { showsAdvanced = true } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "wrench.and.screwdriver").foregroundStyle(AppPalette.teal)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("网页高级功能").font(.subheadline.weight(.semibold))
-                            Text("计费探测、定时测试与平台用量").font(.caption).foregroundStyle(.secondary)
+                            Text("账号高级功能").font(.subheadline.weight(.semibold))
+                            Text("计费探测、定时测试、临时暂停与平台用量").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
-                    .padding(14).glassPanel(cornerRadius: 16, interactive: true)
-                }.buttonStyle(.plain)
+                    .padding(14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .glassPanel(cornerRadius: 16, interactive: true)
                 modelsPanel
                 usagePanel
             }.padding(16)
@@ -1178,6 +1180,7 @@ struct AccountDetailView: View {
                 showsModelPicker = false
             }
         }
+        .sheet(isPresented: $showsAdvanced) { AccountAdvancedView(account: account) }
         .alert(item: $pendingConfirmation) { item in
             if item == .resetQuota {
                 Alert(
