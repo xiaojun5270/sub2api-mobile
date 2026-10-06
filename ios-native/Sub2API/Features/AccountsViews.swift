@@ -221,10 +221,11 @@ struct AccountsView: View {
             accounts = cached
             isLoading = false
         }
-        metricsByAccount = AccountsPageMemoryCache.metrics[serverID] ?? metricsByAccount
-        quotaByAccount = AccountsPageMemoryCache.quotas[serverID] ?? quotaByAccount
-        selectedModelByAccount = AccountsPageMemoryCache.selectedModels[serverID] ?? selectedModelByAccount
-        testFeedbackByAccount = AccountsPageMemoryCache.testFeedback[serverID] ?? testFeedbackByAccount
+        let persisted = AccountsPageMemoryCache.persisted(for: serverID)
+        metricsByAccount = AccountsPageMemoryCache.metrics[serverID] ?? persisted?.metrics ?? [:]
+        quotaByAccount = AccountsPageMemoryCache.quotas[serverID] ?? persisted?.quotas ?? [:]
+        selectedModelByAccount = AccountsPageMemoryCache.selectedModels[serverID] ?? [:]
+        testFeedbackByAccount = AccountsPageMemoryCache.testFeedback[serverID] ?? [:]
     }
 
     private func persistCache() {
@@ -234,6 +235,7 @@ struct AccountsView: View {
         AccountsPageMemoryCache.quotas[serverID] = quotaByAccount
         AccountsPageMemoryCache.selectedModels[serverID] = selectedModelByAccount
         AccountsPageMemoryCache.testFeedback[serverID] = testFeedbackByAccount
+        AccountsPageMemoryCache.persist(metrics: metricsByAccount, quotas: quotaByAccount, for: serverID)
     }
 
     private func test(_ account: AdminAccount) async {
@@ -376,7 +378,10 @@ struct AccountsView: View {
 
     private func mergeTodayMetrics(_ today: JSONValue?) -> [Int: AccountCardMetrics] {
         var result: [Int: AccountCardMetrics] = [:]
-        for (id, row) in metricRows(today) { result[id, default: .empty].applyToday(row) }
+        for (id, row) in metricRows(today) {
+            var metrics = AccountCardMetrics.empty
+            if metrics.applyToday(row) { result[id] = metrics }
+        }
         return result
     }
 
@@ -387,7 +392,10 @@ struct AccountsView: View {
             let batch = Array(ids[start..<end])
             do {
                 let response = try await service.accountTodayBatch(batch)
-                for (id, row) in metricRows(response) { result[id, default: .empty].applyToday(row) }
+                for (id, row) in metricRows(response) {
+                    var metrics = AccountCardMetrics.empty
+                    if metrics.applyToday(row) { result[id] = metrics }
+                }
             } catch {
                 for fallbackStart in stride(from: 0, to: batch.count, by: 10) {
                     let fallbackEnd = min(fallbackStart + 10, batch.count)
@@ -395,7 +403,9 @@ struct AccountsView: View {
                     await withTaskGroup(of: (Int, AccountTodayStats?).self) { group in
                         for id in fallbackBatch { group.addTask { (id, try? await service.accountToday(id)) } }
                         for await (id, stats) in group {
-                            guard let stats else { continue }
+                            guard let stats,
+                                  stats.requests != nil || stats.tokens != nil || stats.cost != nil
+                                    || stats.standardCost != nil || stats.userCost != nil else { continue }
                             var metrics = result[id] ?? .empty
                             metrics.todayRequests = stats.requests ?? 0
                             metrics.todayTokens = stats.tokens ?? 0
@@ -408,21 +418,19 @@ struct AccountsView: View {
                 }
             }
         }
-        for id in ids {
-            var metrics = result[id] ?? .empty
-            metrics.todayLoaded = true
-            result[id] = metrics
-        }
         return result
     }
 
     private func loadTotalMetrics(_ account: AdminAccount) async {
-        if metricsByAccount[account.id]?.totalLoaded == true || totalMetricsLoading.contains(account.id) { return }
+        if totalMetricsLoading.contains(account.id) { return }
         guard let service = try? store.adminService() else { return }
         totalMetricsLoading.insert(account.id)
         defer { totalMetricsLoading.remove(account.id) }
         do {
             let stats = try await service.accountStats(account.id, days: 30)
+            guard stats.totalRequests != nil || stats.requestCount != nil || stats.totalTokens != nil
+                    || stats.totalAccountCost != nil || stats.totalActualCost != nil
+                    || stats.actualCost != nil || stats.totalCost != nil else { return }
             var metrics = metricsByAccount[account.id] ?? .empty
             metrics.totalRequests = stats.totalRequests ?? stats.requestCount ?? 0
             metrics.totalTokens = stats.totalTokens ?? 0
@@ -431,10 +439,7 @@ struct AccountsView: View {
             metricsByAccount[account.id] = metrics
             persistCache()
         } catch {
-            var metrics = metricsByAccount[account.id] ?? .empty
-            metrics.totalLoaded = true
-            metricsByAccount[account.id] = metrics
-            persistCache()
+            // A failed refresh keeps the last successful cached totals.
         }
     }
 
@@ -445,10 +450,8 @@ struct AccountsView: View {
 
     private func loadAutomaticQuotaIfNeeded(_ account: AdminAccount) async {
         switch quotaMode(account) {
-        case .antigravity:
-            if let quotas = accountQuotaPayload(account)?.objectValue?["antigravity_quota"]?.objectValue, !quotas.isEmpty { return }
-        case .openai:
-            if quotaByAccount[account.id] != nil { return }
+        case .antigravity, .openai:
+            break
         case .grok, .generic, .unsupported:
             return
         }
@@ -456,7 +459,9 @@ struct AccountsView: View {
         automaticQuotaLoading.insert(account.id)
         defer { automaticQuotaLoading.remove(account.id) }
         do {
-            quotaByAccount[account.id] = try await service.quota(account)
+            let refreshed = try await service.quota(account)
+            guard let object = refreshed.objectValue, !object.isEmpty else { return }
+            quotaByAccount[account.id] = refreshed
             persistCache()
         } catch {
             // Automatic loading is best effort; manual refresh remains available.
@@ -514,7 +519,7 @@ struct AccountsView: View {
     }
 }
 
-private struct AccountCardMetrics: Sendable {
+private struct AccountCardMetrics: Codable, Sendable {
     var todayRequests = 0.0
     var todayTokens = 0.0
     var todayActualCost = 0.0
@@ -526,12 +531,18 @@ private struct AccountCardMetrics: Sendable {
     var totalLoaded = false
     static let empty = AccountCardMetrics()
 
-    mutating func applyToday(_ row: [String: JSONValue]) {
-        todayRequests = row.number("requests", "request_count", "total_requests") ?? 0
-        todayTokens = row.number("tokens", "total_tokens") ?? 0
-        todayActualCost = row.number("cost", "actual_cost", "account_cost") ?? 0
-        todayUserCost = row.number("user_cost", "userCost") ?? todayActualCost
+    mutating func applyToday(_ row: [String: JSONValue]) -> Bool {
+        let requests = row.number("requests", "request_count", "total_requests")
+        let tokens = row.number("tokens", "total_tokens")
+        let actualCost = row.number("cost", "actual_cost", "account_cost")
+        let userCost = row.number("user_cost", "userCost")
+        guard requests != nil || tokens != nil || actualCost != nil || userCost != nil else { return false }
+        todayRequests = requests ?? 0
+        todayTokens = tokens ?? 0
+        todayActualCost = actualCost ?? 0
+        todayUserCost = userCost ?? todayActualCost
         todayLoaded = true
+        return true
     }
 
     mutating func applyTotal(_ row: [String: JSONValue]) {
@@ -542,13 +553,30 @@ private struct AccountCardMetrics: Sendable {
     }
 }
 
+private struct AccountsPagePersistedCache: Codable {
+    let metrics: [Int: AccountCardMetrics]
+    let quotas: [Int: JSONValue]
+}
+
 @MainActor
 private enum AccountsPageMemoryCache {
+    private static let persistedKeyPrefix = "native.accountsPageCache.v1."
     static var accounts: [UUID: [AdminAccount]] = [:]
     static var metrics: [UUID: [Int: AccountCardMetrics]] = [:]
     static var quotas: [UUID: [Int: JSONValue]] = [:]
     static var selectedModels: [UUID: [Int: String]] = [:]
     static var testFeedback: [UUID: [Int: String]] = [:]
+
+    static func persisted(for serverID: UUID) -> AccountsPagePersistedCache? {
+        guard let data = UserDefaults.standard.data(forKey: persistedKeyPrefix + serverID.uuidString) else { return nil }
+        return try? JSONDecoder().decode(AccountsPagePersistedCache.self, from: data)
+    }
+
+    static func persist(metrics: [Int: AccountCardMetrics], quotas: [Int: JSONValue], for serverID: UUID) {
+        let payload = AccountsPagePersistedCache(metrics: metrics, quotas: quotas)
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        UserDefaults.standard.set(data, forKey: persistedKeyPrefix + serverID.uuidString)
+    }
 }
 
 private struct AccountSummaryCard: View {
