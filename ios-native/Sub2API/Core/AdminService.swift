@@ -102,7 +102,10 @@ struct AdminService: Sendable {
     func updateAccount(_ id: Int, body: [String: JSONValue]) async throws -> AdminAccount { try await api.send("/api/v1/admin/accounts/\(id)", method: .put, body: body) }
     func deleteAccount(_ id: Int) async throws { let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)", method: .delete) }
 
-    func accountToday(_ id: Int) async throws -> AccountTodayStats { try await api.get("/api/v1/admin/accounts/\(id)/today-stats") }
+    func accountToday(_ id: Int) async throws -> AccountTodayStats {
+        let raw: JSONValue = try await api.get("/api/v1/admin/accounts/\(id)/today-stats")
+        return AccountTodayStats(json: raw)
+    }
     func accountTodayBatch(_ ids: [Int]) async throws -> JSONValue {
         let body: [String: JSONValue] = ["account_ids": .array(ids.map { .number(Double($0)) })]
         return try await api.send("/api/v1/admin/accounts/today-stats/batch", method: .post, body: body)
@@ -112,10 +115,25 @@ struct AdminService: Sendable {
         let payload = raw.objectValue?["summary"] ?? raw
         return UsageSummary(json: payload)
     }
-    func accountUsage(_ id: Int) async throws -> Page<OpsRecord> { try await api.listPage("/api/v1/admin/accounts/\(id)/usage", itemKeys: ["items", "usage", "records"] ) }
+    func accountUsageRecords(_ id: Int, pageSize: Int = 20) async throws -> Page<UsageRecord> {
+        try await usageRecords(filters: ["account_id": String(id)], pageSize: pageSize)
+    }
     func accountModels(_ id: Int) async throws -> [AccountModel] {
-        let page: Page<AccountModel> = try await api.listPage("/api/v1/admin/accounts/\(id)/models", itemKeys: ["models", "items", "data"])
-        return page.items
+        let raw: JSONValue = try await api.get("/api/v1/admin/accounts/\(id)/models")
+        guard let values = extractAccountModelValues(raw) else { throw APIError.invalidResponse }
+        let data = try JSONEncoder().encode(values)
+        do { return try JSONDecoder().decode([AccountModel].self, from: data) }
+        catch { throw APIError.decoding(error.localizedDescription) }
+    }
+
+    private func extractAccountModelValues(_ value: JSONValue) -> [JSONValue]? {
+        if let array = value.arrayValue { return array }
+        guard let object = value.objectValue else { return nil }
+        for key in ["models", "items", "data", "payload", "result", "response"] {
+            if let child = object[key], let values = extractAccountModelValues(child) { return values }
+        }
+        if object.text("id", "model_id", "model", "name") != nil { return [value] }
+        return nil
     }
 
     func accountAction(_ id: Int, action: AccountActionRequest) async throws -> JSONValue? {
@@ -140,7 +158,7 @@ struct AdminService: Sendable {
         case .syncModels:
             let _: EmptyResponse = try await api.send("/api/v1/admin/accounts/\(id)/models/sync-upstream", method: .post)
         case let .schedulable(enabled):
-            let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/schedulable", method: .put, body: ["schedulable": JSONValue.bool(enabled)])
+            let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/schedulable", method: .post, body: ["schedulable": JSONValue.bool(enabled)])
         case .togglePrivacy:
             let _: AdminAccount = try await api.send("/api/v1/admin/accounts/\(id)/set-privacy", method: .post, body: [String: JSONValue]())
         case .revertProxy:

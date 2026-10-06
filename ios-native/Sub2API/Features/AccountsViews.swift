@@ -632,8 +632,9 @@ private struct AccountSummaryCard: View {
     @ViewBuilder private var quotaPanel: some View {
         if account.platform.lowercased().contains("antigravity") {
             VStack(spacing: 6) {
-                HStack {
-                    Label("5 小时模型额度", systemImage: "square.stack.3d.up.fill").font(.subheadline.weight(.bold))
+                HStack(spacing: 5) {
+                    AccountProviderIcon(platform: account.platform)
+                    Text("5 小时模型额度").font(.subheadline.weight(.bold))
                     if let tier = antigravityTier {
                         Text(tier).font(.caption2.weight(.bold)).foregroundStyle(AppPalette.purple)
                             .padding(.horizontal, 7).padding(.vertical, 3)
@@ -647,7 +648,9 @@ private struct AccountSummaryCard: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    ForEach(antigravityRows) { row in antigravityQuotaRow(row) }
+                    ForEach(antigravityRows) { row in
+                        compactQuotaRow(label: row.name, percent: row.percent, remaining: row.remaining, color: row.color)
+                    }
                 }
                 HStack(spacing: 8) {
                     cardButton("刷新模型额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
@@ -660,6 +663,24 @@ private struct AccountSummaryCard: View {
             }
             .padding(8)
             .background(AppPalette.purple.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+        } else if isOpenAIQuotaAccount {
+            VStack(spacing: 6) {
+                HStack(spacing: 5) {
+                    AccountProviderIcon(platform: account.platform)
+                    Text("OpenAI 额度窗口").font(.subheadline.weight(.bold))
+                    Spacer()
+                    Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
+                }
+                compactQuotaRow(label: fiveHour.label, percent: fiveHour.percent, remaining: fiveHour.remaining, color: AppPalette.teal)
+                compactQuotaRow(label: sevenDay.label, percent: sevenDay.percent, remaining: sevenDay.remaining, color: AppPalette.purple)
+                HStack(spacing: 5) {
+                    cardButton("刷新额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
+                    cardButton(resetCount.map { "次数 \(NumberFormatters.compact($0))" } ?? "次数", nil, AppPalette.purple, onCountQuota)
+                    cardButton("重置额度", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
+                }
+            }
+            .padding(8)
+            .background(AppPalette.teal.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         } else {
             VStack(spacing: 5) {
                 HStack {
@@ -678,6 +699,10 @@ private struct AccountSummaryCard: View {
             .padding(8)
             .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         }
+    }
+
+    private var isOpenAIQuotaAccount: Bool {
+        account.platform.lowercased().contains("openai") && account.type.lowercased() == "oauth"
     }
 
     private var antigravityRows: [AntigravityQuotaRow] {
@@ -713,14 +738,31 @@ private struct AccountSummaryCard: View {
         return total > 0 ? total : nil
     }
 
-    private func antigravityQuotaRow(_ row: AntigravityQuotaRow) -> some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 5) {
-                Text(row.name).font(.caption.weight(.bold)).lineLimit(1).minimumScaleFactor(0.75)
-                Spacer()
-                Text("\(Int(row.percent.rounded()))% · \(row.remaining)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-            }
-            ProgressView(value: row.percent / 100).tint(row.percent >= 90 ? .red : row.color)
+    private func compactQuotaRow(label: String, percent: Double, remaining: String, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Text(label)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .frame(minWidth: 36)
+                .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            ProgressView(value: min(max(percent / 100, 0), 1))
+                .tint(percent >= 90 ? .red : color)
+                .frame(maxWidth: .infinity)
+            Text("\(Int(percent.rounded()))%")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(percent >= 90 ? Color.red : Color.secondary)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .trailing)
+            Text(remaining.replacingOccurrences(of: "剩余 ", with: ""))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .frame(width: 58, alignment: .trailing)
         }
     }
 
@@ -959,6 +1001,29 @@ private struct AccountModelPickerView: View {
     }
 }
 
+private enum AccountDetailLoadResult<Value: Sendable>: Sendable {
+    case success(Value)
+    case failure(String)
+}
+
+private func captureAccountDetailLoad<Value: Sendable>(
+    _ operation: @escaping @Sendable () async throws -> Value
+) async -> AccountDetailLoadResult<Value> {
+    do { return .success(try await operation()) }
+    catch { return .failure(error.localizedDescription) }
+}
+
+private enum AccountConfirmation: String, Identifiable {
+    case createShadow
+    case resetQuota
+
+    var id: String { rawValue }
+    var title: String { self == .createShadow ? "创建 Shadow 账号" : "重置账号额度" }
+    var detail: String { self == .createShadow ? "将按服务器默认配置创建 Shadow 账号。" : "确认重置该账号的额度统计？" }
+    var actionTitle: String { self == .createShadow ? "创建 Shadow" : "重置额度" }
+    var request: AccountActionRequest { self == .createShadow ? .createShadow : .resetQuota }
+}
+
 struct AccountDetailView: View {
     @EnvironmentObject private var store: AppStore
     @State private var account: AdminAccount
@@ -966,13 +1031,27 @@ struct AccountDetailView: View {
     @State private var stats: UsageSummary?
     @State private var trend: [TrendPoint] = []
     @State private var models: [AccountModel] = []
-    @State private var usage: [OpsRecord] = []
+    @State private var usage: [UsageRecord] = []
     @State private var range: TimeRange = .week
-    @State private var isLoading = true
-    @State private var isWorking = false
-    @State private var message: String?
+    @State private var isInitialLoading = true
+    @State private var isRefreshing = false
+    @State private var isModelsLoading = false
+    @State private var isUsageLoading = false
+    @State private var isTrendLoading = false
+    @State private var runningActions: Set<String> = []
+    @State private var accountError: String?
+    @State private var todayError: String?
+    @State private var statsError: String?
+    @State private var trendError: String?
+    @State private var modelsError: String?
+    @State private var usageError: String?
+    @State private var actionMessage: String?
+    @State private var actionFailed = false
     @State private var showsEdit = false
     @State private var showsOAuth = false
+    @State private var showsModelPicker = false
+    @State private var selectedTestModel: String?
+    @State private var pendingConfirmation: AccountConfirmation?
 
     init(initialAccount: AdminAccount) { _account = State(initialValue: initialAccount) }
 
@@ -980,59 +1059,213 @@ struct AccountDetailView: View {
         ScrollView {
             VStack(spacing: 14) {
                 header
+                if isInitialLoading {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在加载账号数据").font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let accountError { loadErrorRow(accountError) { Task { await reloadAccount() } } }
                 Picker("范围", selection: $range) { ForEach(TimeRange.allCases) { Text($0.label).tag($0) } }.pickerStyle(.segmented)
                 Grid(horizontalSpacing: 9, verticalSpacing: 9) {
-                    GridRow { MetricTile(label: "今日请求", value: NumberFormatters.compact(today?.requests), symbol: "arrow.up.arrow.down", tint: AppPalette.blue); MetricTile(label: "今日 Token", value: NumberFormatters.compact(today?.tokens), symbol: "cpu", tint: AppPalette.teal) }
-                    GridRow { MetricTile(label: "今日成本", value: NumberFormatters.currency(today?.cost), symbol: "dollarsign.circle", tint: AppPalette.orange); MetricTile(label: "范围成本", value: NumberFormatters.currency(stats?.totalAccountCost ?? stats?.totalActualCost ?? stats?.totalCost), symbol: "calendar", tint: AppPalette.purple) }
+                    GridRow {
+                        MetricTile(label: "今日请求", value: metric(today?.requests), symbol: "arrow.up.arrow.down", tint: AppPalette.blue)
+                        MetricTile(label: "今日 Token", value: metric(today?.tokens), symbol: "cpu", tint: AppPalette.teal)
+                    }
+                    GridRow {
+                        MetricTile(label: "今日成本", value: money(today?.cost), symbol: "dollarsign.circle", tint: AppPalette.orange)
+                        MetricTile(label: "范围成本", value: money(stats?.totalAccountCost ?? stats?.totalActualCost ?? stats?.totalCost), symbol: "calendar", tint: AppPalette.purple)
+                    }
                 }
+                if let error = metricError { loadErrorRow(error) { Task { await loadMetrics() } } }
                 actionPanel
                 trendPanel
                 settingsPanel
-                NavigationLink { AccountAdvancedView(account: account) } label: { HStack { Label("网页高级功能", systemImage: "wrench.and.screwdriver"); Spacer(); Text("计费探测、定时测试与平台用量").font(.caption).foregroundStyle(.secondary); Image(systemName: "chevron.right").font(.caption) }.padding(14).glassPanel(cornerRadius: 16, interactive: true) }.buttonStyle(.plain)
+                NavigationLink { AccountAdvancedView(account: account) } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "wrench.and.screwdriver").foregroundStyle(AppPalette.teal)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("网页高级功能").font(.subheadline.weight(.semibold))
+                            Text("计费探测、定时测试与平台用量").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    .padding(14).glassPanel(cornerRadius: 16, interactive: true)
+                }.buttonStyle(.plain)
                 modelsPanel
                 usagePanel
-                if let message { Text(message).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(12).glassPanel(cornerRadius: 14) }
             }.padding(16)
         }
         .navigationTitle(account.name).navigationBarTitleDisplayMode(.inline)
-        .toolbar { ToolbarItem(placement: .primaryAction) { Menu { Button("编辑账号") { showsEdit = true }; if account.type == "oauth" || account.type == "setup-token" { Button("应用 OAuth 凭证") { showsOAuth = true } } } label: { Image(systemName: "ellipsis.circle") } } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("编辑账号") { showsEdit = true }
+                    if account.type == "oauth" || account.type == "setup-token" { Button("应用 OAuth 凭证") { showsOAuth = true } }
+                } label: { Image(systemName: "ellipsis.circle") }
+            }
+        }
         .sheet(isPresented: $showsEdit, onDismiss: { Task { await load() } }) { AccountEditorView(account: account) }
         .sheet(isPresented: $showsOAuth, onDismiss: { Task { await load() } }) { OAuthCredentialsView(account: account) }
-        .overlay { if isLoading || isWorking { ProgressView().padding(20).glassPanel(cornerRadius: 14) } }
-        .refreshable { await load() }.appPage().task(id: range) { await load() }
+        .sheet(isPresented: $showsModelPicker) {
+            AccountModelPickerView(account: account, selected: selectedTestModel) { model in
+                selectedTestModel = model
+                showsModelPicker = false
+            }
+        }
+        .alert(item: $pendingConfirmation) { item in
+            if item == .resetQuota {
+                Alert(
+                    title: Text(item.title),
+                    message: Text(item.detail),
+                    primaryButton: .destructive(Text("确认")) { Task { await run(item.request, key: item.rawValue, title: item.actionTitle) } },
+                    secondaryButton: .cancel(Text("取消"))
+                )
+            } else {
+                Alert(
+                    title: Text(item.title),
+                    message: Text(item.detail),
+                    primaryButton: .default(Text("确认")) { Task { await run(item.request, key: item.rawValue, title: item.actionTitle) } },
+                    secondaryButton: .cancel(Text("取消"))
+                )
+            }
+        }
+        .refreshable { await load() }
+        .appPage()
+        .task { await load() }
+        .onChange(of: range) { _, _ in Task { await loadRange() } }
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 11) {
-            HStack { VStack(alignment: .leading, spacing: 4) { Text(account.name).font(.title3.bold()); Text("\(ConsoleLocalization.provider(account.platform)) · \(ConsoleLocalization.accountType(account.type)) · ID \(account.id)").font(.caption).foregroundStyle(.secondary) }; Spacer(); let style = StatusStyle.account(account); StatusPill(text: style.0, color: style.1) }
-            if let error = account.errorMessage ?? account.error, !error.isEmpty { Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red) }
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.name).font(.title3.bold())
+                    Text("\(ConsoleLocalization.provider(account.platform)) · \(ConsoleLocalization.accountType(account.type)) · ID \(account.id)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                let style = StatusStyle.account(account)
+                StatusPill(text: style.0, color: style.1)
+            }
+            if let error = account.errorMessage ?? account.error, !error.isEmpty {
+                Label(ConsoleLocalization.error(error), systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.red)
+            }
             if let notes = account.notes, !notes.isEmpty { Text(notes).font(.footnote).foregroundStyle(.secondary) }
         }.padding(16).glassPanel()
     }
 
     private var actionPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("账号操作").font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], spacing: 8) {
-                action("测试", "checkmark.circle", .blue, .test(model: models.first?.id, prompt: "")); action("刷新", "arrow.clockwise", .blue, .refresh)
-                action(account.schedulable == false ? "恢复调度" : "暂停调度", "pause.circle", .teal, .schedulable(account.schedulable == false))
-                action("清除错误", "xmark.circle", .orange, .clearError); action("清除限流", "gauge.open.with.lines.needle.33percent", .purple, .clearRateLimit)
-                action("清临时暂停", "timer", .orange, .clearTemporaryPause); action("恢复状态", "cross.circle", .green, .recover)
-                action("同步模型", "arrow.triangle.2.circlepath", .blue, .syncModels); action("切换隐私", "hand.raised", .teal, .togglePrivacy)
-                action("恢复代理", "network", .purple, .revertProxy); action("创建 Shadow", "square.on.square", .blue, .createShadow); action("重置额度", "arrow.counterclockwise", .red, .resetQuota)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("账号操作").font(.headline)
+                Spacer()
+                if isRefreshing { ProgressView().controlSize(.small) }
+            }
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3), spacing: 8) {
+                compactAction("test", "测试", "checkmark.circle", AppPalette.blue, .test(model: selectedTestModel, prompt: ""))
+                compactAction("refresh", "刷新", "arrow.clockwise", AppPalette.blue, .refresh)
+                compactAction("scheduling", account.schedulable == false ? "恢复调度" : "暂停调度", account.schedulable == false ? "play.circle" : "pause.circle", AppPalette.teal, .schedulable(account.schedulable == false))
+            }
+
+            Button { showsModelPicker = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "cpu").foregroundStyle(AppPalette.teal).frame(width: 18)
+                    Text("测试模型").font(.caption.weight(.semibold))
+                    Spacer()
+                    Text(selectedTestModel ?? "自动选择").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: 38)
+                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            Divider()
+            operationLabel("故障恢复")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                compactAction("clear-error", "清除错误", "xmark.circle", .orange, .clearError)
+                compactAction("clear-rate-limit", "清除限流", "gauge.open.with.lines.needle.33percent", .purple, .clearRateLimit)
+                compactAction("clear-temp", "清临时暂停", "timer", .orange, .clearTemporaryPause)
+                compactAction("recover", "恢复状态", "cross.circle", .green, .recover)
+            }
+
+            operationLabel("维护")
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                compactAction("sync-models", "同步模型", "arrow.triangle.2.circlepath", AppPalette.blue, .syncModels)
+                compactAction("privacy", "切换隐私", "hand.raised", AppPalette.teal, .togglePrivacy)
+                compactAction("revert-proxy", "恢复代理", "network", .purple, .revertProxy)
+                confirmationAction(.createShadow, symbol: "square.on.square", color: AppPalette.blue)
+                confirmationAction(.resetQuota, symbol: "arrow.counterclockwise", color: .red)
+            }
+
+            if let actionMessage {
+                Label(actionMessage, systemImage: actionFailed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(actionFailed ? Color.red : Color.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
             }
         }.padding(16).glassPanel()
     }
 
-    private func action(_ title: String, _ symbol: String, _ color: Color, _ request: AccountActionRequest) -> some View {
-        ActionGridButton(title: title, symbol: symbol, tint: color, destructive: title == "重置额度") { Task { await run(request, title: title) } }
+    private func operationLabel(_ title: String) -> some View {
+        Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+    }
+
+    private func compactAction(_ key: String, _ title: String, _ symbol: String, _ color: Color, _ request: AccountActionRequest) -> some View {
+        Button { Task { await run(request, key: key, title: title) } } label: {
+            HStack(spacing: 7) {
+                if runningActions.contains(key) { ProgressView().controlSize(.small) }
+                else { Image(systemName: symbol).foregroundStyle(color).frame(width: 18) }
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.primary.opacity(0.08), lineWidth: 0.5) }
+        }
+        .buttonStyle(.plain)
+        .disabled(runningActions.contains(key))
+    }
+
+    private func confirmationAction(_ item: AccountConfirmation, symbol: String, color: Color) -> some View {
+        Button { pendingConfirmation = item } label: {
+            HStack(spacing: 7) {
+                if runningActions.contains(item.rawValue) { ProgressView().controlSize(.small) }
+                else { Image(systemName: symbol).foregroundStyle(color).frame(width: 18) }
+                Text(item.actionTitle).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(item == .resetQuota ? Color.red : Color.primary)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+            .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.primary.opacity(0.08), lineWidth: 0.5) }
+        }
+        .buttonStyle(.plain)
+        .disabled(runningActions.contains(item.rawValue))
     }
 
     private var trendPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Token 趋势").font(.headline)
-            if trend.isEmpty { Text("暂无趋势数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 130) }
-            else { Chart(trend) { LineMark(x: .value("时间", $0.date), y: .value("Token", $0.totalTokens ?? 0)).foregroundStyle(AppPalette.orange).interpolationMethod(.catmullRom) }.chartYAxis(.hidden).frame(height: 170) }
+            HStack {
+                Text("Token 趋势").font(.headline)
+                Spacer()
+                if isTrendLoading { ProgressView().controlSize(.small) }
+            }
+            if let trendError { loadErrorContent(trendError) { Task { await loadRange() } } }
+            else if trend.isEmpty { Text(isTrendLoading ? "正在加载趋势" : "当前范围暂无趋势数据").font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 120) }
+            else {
+                Chart(trend) { LineMark(x: .value("时间", $0.date), y: .value("Token", $0.totalTokens ?? 0)).foregroundStyle(AppPalette.orange).interpolationMethod(.catmullRom) }
+                    .chartYAxis(.hidden).frame(height: 170)
+            }
         }.padding(16).glassPanel()
     }
 
@@ -1045,44 +1278,239 @@ struct AccountDetailView: View {
             LabeledValueRow(label: "费率倍率", value: String(format: "%.2fx", account.rateMultiplier ?? 1))
             LabeledValueRow(label: "隐私模式", value: account.privacyMode ?? (account.privacy == true ? "开启" : "默认"))
             LabeledValueRow(label: "分组", value: account.groups?.map(\.name).joined(separator: ", ") ?? account.groupName ?? "--")
-            LabeledValueRow(label: "到期", value: account.expiresAt ?? "--")
-            LabeledValueRow(label: "最近使用", value: account.lastUsedAt ?? "--")
+            LabeledValueRow(label: "到期", value: formattedDate(account.expiresAt, key: "expires_at"))
+            LabeledValueRow(label: "最近使用", value: formattedDate(account.lastUsedAt, key: "last_used_at"))
         }.padding(16).glassPanel()
     }
 
     private var modelsPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("模型（\(models.count)）").font(.headline)
-            if models.isEmpty { Text("暂无模型").font(.footnote).foregroundStyle(.secondary) }
-            ForEach(models.prefix(20)) { model in HStack { Image(systemName: model.enabled == false ? "circle" : "checkmark.circle.fill").foregroundStyle(model.enabled == false ? Color.secondary : Color.green); Text(model.displayName ?? model.model ?? model.name ?? model.id).font(.subheadline); Spacer(); Text(model.source ?? "").font(.caption2).foregroundStyle(.secondary) } }
-        }.padding(16).glassPanel()
+            HStack {
+                Text("模型（\(models.count)）").font(.headline)
+                Spacer()
+                if isModelsLoading { ProgressView().controlSize(.small) }
+                Button { Task { await loadModels() } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).disabled(isModelsLoading)
+            }
+            if let modelsError { loadErrorContent(modelsError) { Task { await loadModels() } } }
+            else if models.isEmpty { Text(isModelsLoading ? "正在加载模型" : "当前账号暂无模型").font(.footnote).foregroundStyle(.secondary) }
+            ForEach(Array(models.prefix(20).enumerated()), id: \.offset) { entry in
+                let model = entry.element
+                HStack(spacing: 9) {
+                    Image(systemName: model.enabled == false ? "circle" : "checkmark.circle.fill").foregroundStyle(model.enabled == false ? Color.secondary : Color.green)
+                    Text(model.displayName ?? model.model ?? model.name ?? model.id).font(.subheadline).lineLimit(2)
+                    Spacer()
+                    if let status = model.status { Text(ConsoleLocalization.status(status)).font(.caption2).foregroundStyle(.secondary) }
+                    else if let source = model.source { Text(source).font(.caption2).foregroundStyle(.secondary) }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel()
     }
 
     private var usagePanel: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("最近使用（\(usage.count)）").font(.headline)
-            if usage.isEmpty { Text("暂无使用记录").font(.footnote).foregroundStyle(.secondary) }
-            ForEach(usage.prefix(20)) { row in VStack(alignment: .leading, spacing: 3) { Text(row.model ?? row.path ?? "请求").font(.subheadline.weight(.semibold)); HStack { Text(row.userEmail ?? ""); Spacer(); Text(row.createdAt ?? "") }.font(.caption2).foregroundStyle(.secondary) }; Divider() }
-        }.padding(16).glassPanel()
+            HStack {
+                Text("最近使用（\(usage.count)）").font(.headline)
+                Spacer()
+                if isUsageLoading { ProgressView().controlSize(.small) }
+                Button { Task { await loadUsage() } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.plain).disabled(isUsageLoading)
+            }
+            if let usageError { loadErrorContent(usageError) { Task { await loadUsage() } } }
+            else if usage.isEmpty { Text(isUsageLoading ? "正在加载使用记录" : "当前账号暂无使用记录").font(.footnote).foregroundStyle(.secondary) }
+            ForEach(usage.prefix(20)) { row in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(row.model ?? row.requestedModel ?? "未知模型").font(.subheadline.weight(.semibold)).lineLimit(1)
+                        Spacer()
+                        Text(money(row.accountStatsCost ?? row.actualCost ?? row.totalCost)).font(.caption.weight(.semibold)).foregroundStyle(AppPalette.orange)
+                    }
+                    HStack(spacing: 10) {
+                        Label("Token \(metric(usageTokens(row)))", systemImage: "cpu")
+                        if let duration = row.durationMs { Label("\(Int(duration)) ms", systemImage: "timer") }
+                        Spacer()
+                        Text(formattedDate(row.createdAt, key: "created_at"))
+                    }.font(.caption2).foregroundStyle(.secondary)
+                    if let identity = row.user?.email ?? row.user?.username {
+                        Text(identity).font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                Divider()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassPanel()
+    }
+
+    private var metricError: String? {
+        let messages = [todayError.map { "今日用量：\($0)" }, statsError.map { "范围统计：\($0)" }].compactMap { $0 }
+        return messages.isEmpty ? nil : messages.joined(separator: "\n")
+    }
+
+    private func loadErrorRow(_ message: String, retry: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text(ConsoleLocalization.error(message)).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            Button("重试", action: retry).font(.caption.weight(.semibold))
+        }
+        .padding(12).glassPanel(cornerRadius: 14)
+    }
+
+    private func loadErrorContent(_ message: String, retry: @escaping () -> Void) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text(ConsoleLocalization.error(message)).font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+            Button("重试", action: retry).font(.caption.weight(.semibold))
+        }
+    }
+
+    private func metric(_ value: Double?) -> String { value.map { NumberFormatters.compact($0) } ?? "--" }
+    private func money(_ value: Double?) -> String { value.map { NumberFormatters.currency($0) } ?? "--" }
+    private func usageTokens(_ row: UsageRecord) -> Double? {
+        let values = [row.inputTokens, row.outputTokens, row.cacheCreationTokens, row.cacheReadTokens, row.imageOutputTokens].compactMap { $0 }
+        return values.isEmpty ? nil : values.reduce(0, +)
+    }
+
+    private func formattedDate(_ value: String?, key: String) -> String {
+        guard let value, !value.isEmpty else { return "--" }
+        let localized = ConsoleLocalization.value(.string(value), key: key)
+        if localized != value { return localized }
+        return String(value.replacingOccurrences(of: "T", with: " ").prefix(16))
     }
 
     private func load() async {
-        guard let service = try? store.adminService() else { return }; isLoading = true
-        let dates = range.startEnd
-        do {
-            async let nextAccount = service.account(account.id); async let nextToday = service.accountToday(account.id); async let nextStats = service.accountStats(account.id, days: range.rawValue)
-            async let nextSnapshot = service.dashboardSnapshot(start: dates.0, end: dates.1, granularity: range.granularity, filters: ["account_id": String(account.id), "include_stats": "false", "include_trend": "true"])
-            async let nextModels = service.accountModels(account.id); async let nextUsage = service.accountUsage(account.id)
-            let result = try await (nextAccount, nextToday, nextStats, nextSnapshot, nextModels, nextUsage)
-            account = result.0; today = result.1; stats = result.2; trend = result.3.trend ?? []; models = result.4; usage = result.5.items; message = nil
-        } catch { message = error.localizedDescription }
-        isLoading = false
+        guard let service = try? store.adminService() else {
+            accountError = "登录信息无效，请重新登录。"
+            isInitialLoading = false
+            return
+        }
+        isRefreshing = true
+        isModelsLoading = true
+        isUsageLoading = true
+        isTrendLoading = true
+        let accountID = account.id
+        let selectedRange = range
+        let dates = selectedRange.startEnd
+
+        async let nextAccount: AccountDetailLoadResult<AdminAccount> = captureAccountDetailLoad { try await service.account(accountID) }
+        async let nextToday: AccountDetailLoadResult<AccountTodayStats> = captureAccountDetailLoad { try await service.accountToday(accountID) }
+        async let nextStats: AccountDetailLoadResult<UsageSummary> = captureAccountDetailLoad { try await service.accountStats(accountID, days: selectedRange.rawValue) }
+        async let nextSnapshot: AccountDetailLoadResult<DashboardSnapshot> = captureAccountDetailLoad {
+            try await service.dashboardSnapshot(start: dates.0, end: dates.1, granularity: selectedRange.granularity, filters: ["account_id": String(accountID), "include_stats": "false", "include_trend": "true"])
+        }
+        async let nextModels: AccountDetailLoadResult<[AccountModel]> = captureAccountDetailLoad { try await service.accountModels(accountID) }
+        async let nextUsage: AccountDetailLoadResult<Page<UsageRecord>> = captureAccountDetailLoad { try await service.accountUsageRecords(accountID) }
+        let result = await (nextAccount, nextToday, nextStats, nextSnapshot, nextModels, nextUsage)
+
+        switch result.0 { case let .success(value): account = value; accountError = nil; case let .failure(error): accountError = error }
+        switch result.1 { case let .success(value): today = value; todayError = nil; case let .failure(error): todayError = error }
+        switch result.2 { case let .success(value): stats = value; statsError = nil; case let .failure(error): statsError = error }
+        switch result.3 { case let .success(value): trend = value.trend ?? []; trendError = nil; case let .failure(error): trendError = error }
+        switch result.4 { case let .success(value): models = value; modelsError = nil; case let .failure(error): modelsError = error }
+        switch result.5 { case let .success(value): usage = value.items; usageError = nil; case let .failure(error): usageError = error }
+
+        isRefreshing = false
+        isModelsLoading = false
+        isUsageLoading = false
+        isTrendLoading = false
+        isInitialLoading = false
     }
 
-    private func run(_ request: AccountActionRequest, title: String) async {
-        guard let service = try? store.adminService() else { return }; isWorking = true
-        do { _ = try await service.accountAction(account.id, action: request); message = "\(title)已完成"; account = try await service.account(account.id) } catch { message = error.localizedDescription }
-        isWorking = false
+    private func reloadAccount() async {
+        guard let service = try? store.adminService() else { return }
+        let accountID = account.id
+        switch await captureAccountDetailLoad({ try await service.account(accountID) }) {
+        case let .success(value): account = value; accountError = nil
+        case let .failure(error): accountError = error
+        }
+    }
+
+    private func loadMetrics() async {
+        guard let service = try? store.adminService() else { return }
+        isRefreshing = true
+        let accountID = account.id
+        let selectedRange = range
+        async let nextToday: AccountDetailLoadResult<AccountTodayStats> = captureAccountDetailLoad { try await service.accountToday(accountID) }
+        async let nextStats: AccountDetailLoadResult<UsageSummary> = captureAccountDetailLoad { try await service.accountStats(accountID, days: selectedRange.rawValue) }
+        let result = await (nextToday, nextStats)
+        switch result.0 { case let .success(value): today = value; todayError = nil; case let .failure(error): todayError = error }
+        switch result.1 { case let .success(value): stats = value; statsError = nil; case let .failure(error): statsError = error }
+        isRefreshing = false
+    }
+
+    private func loadRange() async {
+        guard let service = try? store.adminService() else { return }
+        isTrendLoading = true
+        let accountID = account.id
+        let selectedRange = range
+        let dates = selectedRange.startEnd
+        async let nextStats: AccountDetailLoadResult<UsageSummary> = captureAccountDetailLoad { try await service.accountStats(accountID, days: selectedRange.rawValue) }
+        async let nextSnapshot: AccountDetailLoadResult<DashboardSnapshot> = captureAccountDetailLoad {
+            try await service.dashboardSnapshot(start: dates.0, end: dates.1, granularity: selectedRange.granularity, filters: ["account_id": String(accountID), "include_stats": "false", "include_trend": "true"])
+        }
+        let result = await (nextStats, nextSnapshot)
+        guard range == selectedRange else { return }
+        switch result.0 { case let .success(value): stats = value; statsError = nil; case let .failure(error): statsError = error }
+        switch result.1 { case let .success(value): trend = value.trend ?? []; trendError = nil; case let .failure(error): trendError = error }
+        isTrendLoading = false
+    }
+
+    private func loadModels() async {
+        guard let service = try? store.adminService() else { return }
+        isModelsLoading = true
+        let accountID = account.id
+        switch await captureAccountDetailLoad({ try await service.accountModels(accountID) }) {
+        case let .success(value): models = value; modelsError = nil
+        case let .failure(error): modelsError = error
+        }
+        isModelsLoading = false
+    }
+
+    private func loadUsage() async {
+        guard let service = try? store.adminService() else { return }
+        isUsageLoading = true
+        let accountID = account.id
+        switch await captureAccountDetailLoad({ try await service.accountUsageRecords(accountID) }) {
+        case let .success(value): usage = value.items; usageError = nil
+        case let .failure(error): usageError = error
+        }
+        isUsageLoading = false
+    }
+
+    private func run(_ request: AccountActionRequest, key: String, title: String) async {
+        guard let service = try? store.adminService() else { return }
+        runningActions.insert(key)
+        actionMessage = nil
+        do {
+            let response = try await service.accountAction(account.id, action: request)
+            actionFailed = false
+            switch request {
+            case .test:
+                let detail = response?.objectValue?.text("text", "message", "model")
+                actionMessage = detail.map { "测试完成：\(String($0.prefix(80)))" } ?? "测试已完成"
+            default:
+                actionMessage = "\(title)已完成"
+            }
+            await reloadAccount()
+            switch request {
+            case .refresh:
+                await loadMetrics(); await loadModels(); await loadUsage(); await loadRange()
+            case .test:
+                await loadMetrics(); await loadUsage()
+            case .syncModels:
+                await loadModels()
+            case .resetQuota:
+                await loadMetrics()
+            default:
+                break
+            }
+        } catch {
+            actionFailed = true
+            actionMessage = ConsoleLocalization.error(error.localizedDescription)
+        }
+        runningActions.remove(key)
     }
 }
 

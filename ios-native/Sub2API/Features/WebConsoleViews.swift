@@ -143,6 +143,7 @@ enum ConsoleLocalization {
 
     private static func phrase(_ message: String) -> String {
         let replacements = [
+            "Session network fingerprint changed, please login again": "会话网络指纹已变化，请重新登录",
             "Invalid proxy ID": "代理 ID 无效",
             "Proxy not found": "未找到代理",
             "Failed to test proxy": "代理连接测试失败",

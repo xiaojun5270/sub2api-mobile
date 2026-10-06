@@ -208,7 +208,20 @@ struct AccountTodayStats: Decodable, Sendable {
     let cost: Double?
     let standardCost: Double?
     let userCost: Double?
-    enum CodingKeys: String, CodingKey { case requests, tokens, cost; case standardCost = "standard_cost"; case userCost = "user_cost" }
+
+    init(from decoder: Decoder) throws {
+        self.init(json: try JSONValue(from: decoder))
+    }
+
+    init(json: JSONValue) {
+        let root = json.objectValue ?? [:]
+        let object = root["stats"]?.objectValue ?? root["data"]?.objectValue ?? root
+        requests = object.number("requests", "request_count", "requestCount", "total_requests", "totalRequests")
+        tokens = object.number("tokens", "total_tokens", "totalTokens", "token_consumed", "tokenConsumed")
+        cost = object.number("cost", "actual_cost", "actualCost", "account_cost", "accountCost", "total_cost", "totalCost")
+        standardCost = object.number("standard_cost", "standardCost")
+        userCost = object.number("user_cost", "userCost") ?? cost
+    }
 }
 
 struct AccountModel: Decodable, Identifiable, Hashable, Sendable {
@@ -223,7 +236,39 @@ struct AccountModel: Decodable, Identifiable, Hashable, Sendable {
     let enabled: Bool?
     let source: String?
     let status: String?
-    enum CodingKeys: String, CodingKey { case model, name, available, enabled, source, status; case modelID = "id"; case displayName = "display_name"; case ownedBy = "owned_by"; case contextWindow = "context_window" }
+
+    init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder)
+        if let rawName = value.stringValue {
+            modelID = rawName
+            displayName = rawName
+            model = rawName
+            name = nil
+            ownedBy = nil
+            contextWindow = nil
+            available = nil
+            enabled = nil
+            source = nil
+            status = nil
+            return
+        }
+
+        guard let object = value.objectValue else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: decoder.codingPath, debugDescription: "账号模型必须是字符串或对象。")
+            )
+        }
+        modelID = object.text("id", "model_id", "modelId")
+        displayName = object.text("display_name", "displayName", "label")
+        model = object.text("model", "model_name", "modelName")
+        name = object.text("name")
+        ownedBy = object.text("owned_by", "ownedBy", "provider")
+        contextWindow = object.number("context_window", "contextWindow").map { Int($0) }
+        available = object.flag("available", "is_available", "isAvailable")
+        enabled = object.flag("enabled", "is_enabled", "isEnabled")
+        source = object.text("source")
+        status = object.text("status")
+    }
 }
 
 struct AccountModelsResponse: Decodable, Sendable { let models: [AccountModel] }
