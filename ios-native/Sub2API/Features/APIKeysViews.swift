@@ -148,47 +148,184 @@ private struct APIKeyEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: AppStore
     let key: AdminAPIKey?
-    @State private var userID = ""; @State private var name: String; @State private var rawKey = ""; @State private var status: String
-    @State private var groupID: String; @State private var quota: String; @State private var expiresAt: String; @State private var expiresInDays = ""
-    @State private var ipWhitelist = ""; @State private var ipBlacklist = ""; @State private var limit5h: String; @State private var limit1d: String; @State private var limit7d: String
-    @State private var resetQuota = false; @State private var resetUsage = false; @State private var isSaving = false; @State private var errorMessage: String?
+
+    @State private var name: String
+    @State private var status: String
+    @State private var provider = "anthropic"
+    @State private var groupID: String
+    @State private var useCustomKey: Bool
+    @State private var rawKey = ""
+    @State private var enableIPRestriction: Bool
+    @State private var ipWhitelist: String
+    @State private var ipBlacklist: String
+    @State private var enableQuota: Bool
+    @State private var quota: String
+    @State private var enableRateLimit: Bool
+    @State private var limit5h: String
+    @State private var limit1d: String
+    @State private var limit7d: String
+    @State private var enableExpiration: Bool
+    @State private var expirationPreset = "30"
+    @State private var expirationDate: Date
+    @State private var resetQuota = false
+    @State private var resetUsage = false
+    @State private var isSaving = false
+    @State private var errorMessage: String?
     @State private var availableGroups: [AdminGroup] = []
     @State private var isLoadingGroups = false
     @State private var groupLoadError: String?
 
-    init(key: AdminAPIKey?) { self.key = key; _name = State(initialValue: key?.name ?? ""); _status = State(initialValue: key?.status ?? "active"); _groupID = State(initialValue: key?.groupID.map { String($0) } ?? ""); _quota = State(initialValue: key?.quota.map { String($0) } ?? ""); _expiresAt = State(initialValue: key?.expiresAt ?? ""); _ipWhitelist = State(initialValue: key?.ipWhitelist?.displayText ?? ""); _ipBlacklist = State(initialValue: key?.ipBlacklist?.displayText ?? ""); _limit5h = State(initialValue: key?.rateLimit5h.map { String($0) } ?? ""); _limit1d = State(initialValue: key?.rateLimit1d.map { String($0) } ?? ""); _limit7d = State(initialValue: key?.rateLimit7d.map { String($0) } ?? "") }
+    init(key: AdminAPIKey?) {
+        self.key = key
+        let quotaValue = key?.quota ?? 0
+        let hasIPRestriction = Self.hasValues(key?.ipWhitelist) || Self.hasValues(key?.ipBlacklist)
+        let hasRateLimit = (key?.rateLimit5h ?? 0) > 0 || (key?.rateLimit1d ?? 0) > 0 || (key?.rateLimit7d ?? 0) > 0
+        let parsedExpiration = key?.expiresAt.flatMap(Self.parseDate)
+        _name = State(initialValue: key?.name ?? "")
+        _status = State(initialValue: key?.status ?? "active")
+        _groupID = State(initialValue: key?.groupID.map { String($0) } ?? "")
+        _useCustomKey = State(initialValue: false)
+        _enableIPRestriction = State(initialValue: hasIPRestriction)
+        _ipWhitelist = State(initialValue: Self.listText(key?.ipWhitelist))
+        _ipBlacklist = State(initialValue: Self.listText(key?.ipBlacklist))
+        _enableQuota = State(initialValue: quotaValue > 0)
+        _quota = State(initialValue: quotaValue > 0 ? String(quotaValue) : "")
+        _enableRateLimit = State(initialValue: hasRateLimit)
+        _limit5h = State(initialValue: key?.rateLimit5h.map { String($0) } ?? "")
+        _limit1d = State(initialValue: key?.rateLimit1d.map { String($0) } ?? "")
+        _limit7d = State(initialValue: key?.rateLimit7d.map { String($0) } ?? "")
+        _enableExpiration = State(initialValue: parsedExpiration != nil)
+        _expirationPreset = State(initialValue: parsedExpiration == nil ? "30" : "custom")
+        _expirationDate = State(initialValue: parsedExpiration ?? Calendar.current.date(byAdding: .day, value: 30, to: Date()) ?? Date())
+    }
 
-    var body: some View { NavigationStack { Form {
-        Section("基本信息") {
-            if key == nil { TextField("用户 ID（兼容旧接口，可选）", text: $userID).keyboardType(.numberPad) }
-            TextField("名称", text: $name)
-            SecureField(key == nil ? "自定义 Key（可选）" : "新 Key（留空不修改）", text: $rawKey)
-            if key != nil { Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") } }
-            Picker("分组", selection: $groupID) {
-                Text("未分组").tag("")
-                if let currentID = key?.groupID, !availableGroups.contains(where: { $0.id == currentID }) {
-                    let currentName = key?.groupName ?? "分组 #\(currentID)"
-                    Text("\(currentName)（当前）").tag(String(currentID))
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("基本信息") {
+                    TextField("名称", text: $name)
+                    if key == nil {
+                        Picker("供应商", selection: $provider) {
+                            ForEach(providerOptions, id: \.self) { value in Text(ConsoleLocalization.provider(value)).tag(value) }
+                        }
+                        .onChange(of: provider) { _, _ in groupID = "" }
+                    }
+                    Picker("分组", selection: $groupID) {
+                        Text("请选择分组").tag("")
+                        if let currentID = key?.groupID, !filteredGroups.contains(where: { $0.id == currentID }) {
+                            Text("\(key?.groupName ?? "分组 #\(currentID)")（当前）").tag(String(currentID))
+                        }
+                        ForEach(filteredGroups.sorted(by: groupSort)) { group in
+                            Text("\(group.name) · \(ConsoleLocalization.provider(group.platform))").tag(String(group.id))
+                        }
+                    }
+                    if isLoadingGroups {
+                        HStack { ProgressView(); Text("正在加载分组").foregroundStyle(.secondary) }.font(.caption)
+                    } else if let groupLoadError {
+                        HStack { Text(groupLoadError).font(.caption).foregroundStyle(.red).lineLimit(2); Spacer(); Button("重试") { Task { await loadGroups() } } }
+                    } else if filteredGroups.isEmpty {
+                        Text("该供应商暂无可用分组。请先在网页端创建或启用分组。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if key != nil {
+                        Picker("状态", selection: $status) { Text("启用").tag("active"); Text("禁用").tag("inactive") }
+                    }
                 }
-                ForEach(availableGroups.sorted(by: groupSort)) { group in
-                    Text("\(group.name) · \(ConsoleLocalization.provider(group.platform))").tag(String(group.id))
+
+                if key == nil {
+                    Section("自定义 Key") {
+                        Toggle("使用自定义 Key", isOn: $useCustomKey)
+                        if useCustomKey {
+                            TextField("至少 16 位，仅限字母、数字、_ 和 -", text: $rawKey)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            if let customKeyError { Text(customKeyError).font(.caption).foregroundStyle(.red) }
+                        }
+                    }
+                }
+
+                Section("IP 访问限制") {
+                    Toggle("启用 IP 限制", isOn: $enableIPRestriction)
+                    if enableIPRestriction {
+                        TextField("IP 白名单，每行一个", text: $ipWhitelist, axis: .vertical).lineLimit(3...6)
+                        TextField("IP 黑名单，每行一个", text: $ipBlacklist, axis: .vertical).lineLimit(3...6)
+                    }
+                }
+
+                Section("总额度") {
+                    Toggle("启用总额度", isOn: $enableQuota)
+                    if enableQuota {
+                        TextField("额度金额（USD）", text: $quota).keyboardType(.decimalPad)
+                    }
+                    if key != nil, (key?.quota ?? 0) > 0 { Toggle("重置已用额度", isOn: $resetQuota) }
+                }
+
+                Section("限流额度") {
+                    Toggle("启用 5H / 1D / 7D 限流", isOn: $enableRateLimit)
+                    if enableRateLimit {
+                        TextField("5H 限额（USD）", text: $limit5h).keyboardType(.decimalPad)
+                        TextField("1D 限额（USD）", text: $limit1d).keyboardType(.decimalPad)
+                        TextField("7D 限额（USD）", text: $limit7d).keyboardType(.decimalPad)
+                    }
+                    if key != nil, hasExistingRateLimit { Toggle("重置限流用量", isOn: $resetUsage) }
+                }
+
+                Section("有效期") {
+                    Toggle("设置有效期", isOn: $enableExpiration)
+                    if enableExpiration {
+                        Picker("期限", selection: $expirationPreset) {
+                            Text("7 天").tag("7"); Text("30 天").tag("30"); Text("90 天").tag("90"); Text("自定义").tag("custom")
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: expirationPreset) { _, value in applyExpirationPreset(value) }
+                        DatePicker("到期时间", selection: $expirationDate, displayedComponents: [.date, .hourAndMinute])
+                    }
+                }
+
+                if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
+            }
+            .navigationTitle(key == nil ? "创建 API Key" : "编辑 API Key")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "保存中" : "保存") { save() }.disabled(!canSave)
                 }
             }
-            if isLoadingGroups {
-                HStack { ProgressView(); Text("正在加载分组").foregroundStyle(.secondary) }
-                    .font(.caption)
-            } else if let groupLoadError {
-                HStack {
-                    Text(groupLoadError).font(.caption).foregroundStyle(.red).lineLimit(2)
-                    Spacer()
-                    Button("重试") { Task { await loadGroups() } }
-                }
-            }
+            .task { await loadGroups() }
         }
-        Section("额度与期限") { TextField("额度", text: $quota).keyboardType(.decimalPad); if key == nil { TextField("有效天数", text: $expiresInDays).keyboardType(.numberPad) } else { TextField("到期时间 ISO8601", text: $expiresAt); Toggle("重置额度", isOn: $resetQuota); Toggle("重置限流用量", isOn: $resetUsage) } }
-        Section("访问限制") { TextField("IP 白名单，逗号分隔", text: $ipWhitelist); TextField("IP 黑名单，逗号分隔", text: $ipBlacklist); TextField("5H 限额", text: $limit5h).keyboardType(.decimalPad); TextField("1D 限额", text: $limit1d).keyboardType(.decimalPad); TextField("7D 限额", text: $limit7d).keyboardType(.decimalPad) }
-        if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
-    }.navigationTitle(key == nil ? "创建 API Key" : "编辑 API Key").navigationBarTitleDisplayMode(.inline).toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button(isSaving ? "保存中" : "保存") { save() }.disabled(isSaving || name.isEmpty) } }.task { await loadGroups() } } }
+    }
+
+    private let providerOrder = ["anthropic", "openai", "gemini", "antigravity", "grok", "kimi", "zhipu", "deepseek", "minimax", "opencode_go", "typesafe", "composite"]
+
+    private var providerOptions: [String] {
+        let values = Set(availableGroups.map { $0.platform.lowercased() })
+        guard !values.isEmpty else { return [provider] }
+        let ordered = providerOrder.filter(values.contains)
+        return ordered + values.filter { !providerOrder.contains($0) }.sorted()
+    }
+
+    private var filteredGroups: [AdminGroup] {
+        guard key == nil else {
+            if let current = availableGroups.first(where: { $0.id == key?.groupID }) { return availableGroups.filter { $0.platform.caseInsensitiveCompare(current.platform) == .orderedSame } }
+            return availableGroups
+        }
+        return availableGroups.filter { $0.platform.caseInsensitiveCompare(provider) == .orderedSame }
+    }
+
+    private var customKeyError: String? {
+        guard key == nil, useCustomKey else { return nil }
+        if rawKey.count < 16 { return "自定义 Key 至少需要 16 位。" }
+        if rawKey.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) == nil { return "仅可使用字母、数字、下划线和连字符。" }
+        return nil
+    }
+
+    private var hasExistingRateLimit: Bool {
+        (key?.rateLimit5h ?? 0) > 0 || (key?.rateLimit1d ?? 0) > 0 || (key?.rateLimit7d ?? 0) > 0
+    }
+
+    private var canSave: Bool {
+        !isSaving && name.nilIfBlank != nil && Int(groupID) != nil && customKeyError == nil && !isLoadingGroups
+    }
 
     private func groupSort(_ left: AdminGroup, _ right: AdminGroup) -> Bool {
         let leftOrder = left.sortOrder ?? Int.max
@@ -201,14 +338,89 @@ private struct APIKeyEditorView: View {
         isLoadingGroups = true
         groupLoadError = nil
         do {
-            availableGroups = try await service.allGroups()
+            availableGroups = try await service.apiKeyGroups()
+            if let current = availableGroups.first(where: { $0.id == key?.groupID }) {
+                provider = current.platform.lowercased()
+            } else if !providerOptions.contains(provider), let first = providerOptions.first {
+                provider = first
+            }
         } catch {
             groupLoadError = error.localizedDescription
         }
         isLoadingGroups = false
     }
 
-    private func save() { guard let service = try? store.adminService() else { return }; isSaving = true; Task { do { var body: [String: JSONValue] = ["name": .string(name)]; if let value = rawKey.nilIfBlank { body["custom_key"] = .string(value); body["key"] = .string(value) }; body["group_id"] = try FormParsing.integer(groupID).map { .number(Double($0)) } ?? .null; if let value = try FormParsing.number(quota) { body["quota"] = .number(value) }; if key == nil { if let value = try FormParsing.integer(userID) { body["user_id"] = .number(Double(value)) }; if let value = try FormParsing.integer(expiresInDays) { body["expires_in_days"] = .number(Double(value)) } } else { body["status"] = .string(status); body["expires_at"] = expiresAt.nilIfBlank.map { JSONValue.string($0) } ?? .null; if resetQuota { body["reset_quota"] = .bool(true) }; if resetUsage { body["reset_rate_limit_usage"] = .bool(true) } }; if let value = ipWhitelist.nilIfBlank { body["ip_whitelist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = ipBlacklist.nilIfBlank { body["ip_blacklist"] = .array(value.split(separator: ",").map { .string($0.trimmingCharacters(in: .whitespaces)) }) }; if let value = try FormParsing.number(limit5h) { body["rate_limit_5h"] = .number(value) }; if let value = try FormParsing.number(limit1d) { body["rate_limit_1d"] = .number(value) }; if let value = try FormParsing.number(limit7d) { body["rate_limit_7d"] = .number(value) }; if let key { _ = try await service.updateAPIKey(key, body: body) } else { _ = try await service.createAPIKey(body) }; dismiss() } catch { errorMessage = error.localizedDescription }; isSaving = false } }
+    private func save() {
+        guard let service = try? store.adminService(), let selectedGroupID = Int(groupID) else { return }
+        isSaving = true
+        errorMessage = nil
+        Task {
+            do {
+                var body: [String: JSONValue] = ["name": .string(name.trimmingCharacters(in: .whitespacesAndNewlines)), "group_id": .number(Double(selectedGroupID))]
+                if key == nil, useCustomKey, let value = rawKey.nilIfBlank { body["custom_key"] = .string(value); body["key"] = .string(value) }
+                if key == nil {
+                    if enableIPRestriction {
+                        let whitelist = parsedIPList(ipWhitelist), blacklist = parsedIPList(ipBlacklist)
+                        if !whitelist.isEmpty { body["ip_whitelist"] = .array(whitelist.map(JSONValue.string)) }
+                        if !blacklist.isEmpty { body["ip_blacklist"] = .array(blacklist.map(JSONValue.string)) }
+                    }
+                    if enableQuota, let value = try FormParsing.number(quota), value > 0 { body["quota"] = .number(value) }
+                    if enableRateLimit {
+                        if let value = try FormParsing.number(limit5h), value > 0 { body["rate_limit_5h"] = .number(value) }
+                        if let value = try FormParsing.number(limit1d), value > 0 { body["rate_limit_1d"] = .number(value) }
+                        if let value = try FormParsing.number(limit7d), value > 0 { body["rate_limit_7d"] = .number(value) }
+                    }
+                    if enableExpiration { body["expires_in_days"] = .number(Double(expirationDays)) }
+                } else {
+                    body["status"] = .string(status)
+                    body["ip_whitelist"] = .array(enableIPRestriction ? parsedIPList(ipWhitelist).map(JSONValue.string) : [])
+                    body["ip_blacklist"] = .array(enableIPRestriction ? parsedIPList(ipBlacklist).map(JSONValue.string) : [])
+                    body["quota"] = .number(enableQuota ? max(try FormParsing.number(quota) ?? 0, 0) : 0)
+                    body["rate_limit_5h"] = .number(enableRateLimit ? max(try FormParsing.number(limit5h) ?? 0, 0) : 0)
+                    body["rate_limit_1d"] = .number(enableRateLimit ? max(try FormParsing.number(limit1d) ?? 0, 0) : 0)
+                    body["rate_limit_7d"] = .number(enableRateLimit ? max(try FormParsing.number(limit7d) ?? 0, 0) : 0)
+                    body["expires_at"] = enableExpiration ? .string(ISO8601DateFormatter().string(from: expirationDate)) : .null
+                    if resetQuota { body["reset_quota"] = .bool(true) }
+                    if resetUsage { body["reset_rate_limit_usage"] = .bool(true) }
+                }
+                if let key { _ = try await service.updateAPIKey(key, body: body) }
+                else { _ = try await service.createAPIKey(body) }
+                dismiss()
+            } catch { errorMessage = error.localizedDescription }
+            isSaving = false
+        }
+    }
+
+    private var expirationDays: Int {
+        if let preset = Int(expirationPreset) { return preset }
+        return max(1, Int(ceil(expirationDate.timeIntervalSince(Date()) / 86_400)))
+    }
+
+    private func applyExpirationPreset(_ value: String) {
+        guard let days = Int(value) else { return }
+        expirationDate = Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
+    }
+
+    private func parsedIPList(_ value: String) -> [String] {
+        value.components(separatedBy: CharacterSet(charactersIn: ",\n"))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func hasValues(_ value: JSONValue?) -> Bool {
+        if let values = value?.arrayValue { return !values.isEmpty }
+        return value?.stringValue?.nilIfBlank != nil
+    }
+
+    private static func listText(_ value: JSONValue?) -> String {
+        if let values = value?.arrayValue { return values.compactMap(\.stringValue).joined(separator: "\n") }
+        return value?.stringValue ?? ""
+    }
+
+    private static func parseDate(_ value: String) -> Date? {
+        let fractional = ISO8601DateFormatter(); fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
 }
 
 private struct APIKeyUsageView: View {

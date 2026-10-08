@@ -298,6 +298,11 @@ struct AdminService: Sendable {
         }
     }
 
+    func apiKeyGroups() async throws -> [AdminGroup] {
+        do { return try await api.get("/api/v1/groups/available") }
+        catch { return try await api.get("/api/v1/admin/groups/all") }
+    }
+
     func updateAPIKey(_ key: AdminAPIKey, body: [String: JSONValue]) async throws -> AdminAPIKey {
         let primary = primaryAPIKeyBody(body)
         let legacy = legacyAPIKeyBody(body)
