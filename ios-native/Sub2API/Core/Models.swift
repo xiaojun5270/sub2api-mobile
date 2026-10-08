@@ -9,7 +9,7 @@ struct ServerProfile: Codable, Identifiable, Hashable, Sendable {
     var updatedAt: Date
 }
 
-struct AdminSettings: Decodable, Sendable {
+struct AdminSettings: Codable, Sendable {
     let siteName: String?
 
     enum CodingKeys: String, CodingKey {
@@ -47,7 +47,7 @@ struct Page<Item: Decodable & Sendable>: Decodable, Sendable {
     }
 }
 
-struct DashboardStats: Decodable, Sendable {
+struct DashboardStats: Codable, Sendable {
     let totalUsers: Double?
     let todayNewUsers: Double?
     let activeUsers: Double?
@@ -96,7 +96,7 @@ struct DashboardStats: Decodable, Sendable {
     }
 }
 
-struct TrendPoint: Decodable, Identifiable, Sendable {
+struct TrendPoint: Codable, Identifiable, Sendable {
     var id: String { date }
     let date: String
     let requests: Double?
@@ -138,7 +138,7 @@ struct DashboardTrend: Decodable, Sendable {
     }
 }
 
-struct AdminUser: Decodable, Identifiable, Hashable, Sendable {
+struct AdminUser: Codable, Identifiable, Hashable, Sendable {
     let id: Int
     let email: String
     let username: String?
@@ -161,7 +161,7 @@ struct AdminUser: Decodable, Identifiable, Hashable, Sendable {
     }
 }
 
-struct UsageSummary: Decodable, Sendable {
+struct UsageSummary: Codable, Sendable {
     let totalRequests: Double?
     let requestCount: Double?
     let inputTokens: Double?

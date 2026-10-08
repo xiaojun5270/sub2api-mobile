@@ -149,7 +149,7 @@ struct DashboardModelStats: Decodable, Sendable {
     let models: [ModelStat]
 }
 
-struct ModelStat: Decodable, Identifiable, Sendable {
+struct ModelStat: Codable, Identifiable, Sendable {
     var id: String { model }
     let model: String
     let requests: Double?
@@ -174,7 +174,7 @@ struct DashboardSnapshot: Decodable, Sendable {
     let groups: [SnapshotGroup]?
 }
 
-struct SnapshotGroup: Decodable, Identifiable, Sendable {
+struct SnapshotGroup: Codable, Identifiable, Sendable {
     var id: Int { groupID ?? 0 }
     let groupID: Int?
     let groupName: String?

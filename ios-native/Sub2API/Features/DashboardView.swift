@@ -6,9 +6,15 @@ struct DashboardView: View {
     @AppStorage("sub2api_monitor_range_key") private var storedRange = DashboardRange.week.rawValue
     @State private var stats: DashboardStats?
     @State private var ops: OpsOverview?
+    @State private var cachedOpsRPM: Double?
+    @State private var cachedOpsAvgLatencyMs: Double?
     @State private var settings: AdminSettings?
     @State private var trend: [TrendPoint] = []
     @State private var accounts: [AdminAccount] = []
+    @State private var cachedNormalAccounts: Double?
+    @State private var cachedErrorAccounts: Double?
+    @State private var cachedLimitedAccounts: Double?
+    @State private var cachedBusyAccounts: Double?
     @State private var models: [ModelStat] = []
     @State private var groups: [SnapshotGroup] = []
     @State private var groupMetric = "tokens"
@@ -48,7 +54,10 @@ struct DashboardView: View {
         .navigationBarHidden(true)
         .appPage()
         .onAppear { if DashboardRange(rawValue: storedRange) == nil { storedRange = DashboardRange.week.rawValue } }
-        .task(id: "\(store.activeServerID?.uuidString ?? "")-\(storedRange)") { await load() }
+        .task(id: "\(store.activeServerID?.uuidString ?? "")-\(storedRange)") {
+            restoreCache()
+            await load()
+        }
         .task(id: store.activeServerID) {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -326,27 +335,94 @@ struct DashboardView: View {
             let payload = await (nextSettings, nextOps, nextAccounts, nextTrend, nextModels, nextSnapshot)
             stats = nextStats
             if let value = payload.0 { settings = value }
-            if let value = payload.1 { ops = value }
-            if let value = payload.2 { accounts = value.items }
+            if let value = payload.1 {
+                ops = value
+                cachedOpsRPM = value.rpm
+                cachedOpsAvgLatencyMs = value.avgLatencyMs
+            }
+            if let value = payload.2 {
+                accounts = value.items
+                cachedNormalAccounts = Double(value.items.filter { StatusStyle.account($0).0 == "正常" }.count)
+                cachedErrorAccounts = Double(value.items.filter { StatusStyle.account($0).0 == "异常" }.count)
+                cachedLimitedAccounts = Double(value.items.filter { StatusStyle.account($0).0 == "限流" }.count)
+                cachedBusyAccounts = Double(value.items.filter { StatusStyle.account($0).0 == "正常" && ($0.currentConcurrency ?? 0) > 0 }.count)
+            }
             if let value = payload.3 { trend = value.trend }
             if let value = payload.4 { models = value.models }
             if let value = payload.5 { groups = value.groups ?? [] }
+            persistCache()
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
 
+    private func restoreCache() {
+        guard let serverID = store.activeServerID else { return }
+        guard let cached = DashboardCacheStore.value(serverID: serverID, range: range.rawValue) else {
+            stats = nil
+            settings = nil
+            ops = nil
+            cachedOpsRPM = nil
+            cachedOpsAvgLatencyMs = nil
+            trend = []
+            accounts = []
+            cachedNormalAccounts = nil
+            cachedErrorAccounts = nil
+            cachedLimitedAccounts = nil
+            cachedBusyAccounts = nil
+            models = []
+            groups = []
+            isLoading = true
+            return
+        }
+        stats = cached.stats
+        settings = cached.settings
+        ops = nil
+        cachedOpsRPM = cached.opsRPM
+        cachedOpsAvgLatencyMs = cached.opsAvgLatencyMs
+        trend = cached.trend
+        accounts = []
+        cachedNormalAccounts = cached.normalAccounts
+        cachedErrorAccounts = cached.errorAccounts
+        cachedLimitedAccounts = cached.limitedAccounts
+        cachedBusyAccounts = cached.busyAccounts
+        models = cached.models
+        groups = cached.groups
+        isLoading = cached.stats == nil
+    }
+
+    private func persistCache() {
+        guard let serverID = store.activeServerID, stats != nil else { return }
+        DashboardCacheStore.save(
+            DashboardPersistedCache(
+                stats: stats,
+                settings: settings,
+                opsRPM: ops?.rpm ?? cachedOpsRPM,
+                opsAvgLatencyMs: ops?.avgLatencyMs ?? cachedOpsAvgLatencyMs,
+                trend: trend,
+                normalAccounts: normalAccounts,
+                errorAccounts: errorAccounts,
+                limitedAccounts: limitedAccounts,
+                busyAccounts: busyAccounts,
+                models: models,
+                groups: groups
+            ),
+            serverID: serverID,
+            range: range.rawValue
+        )
+    }
+
     private var totalAccounts: Double { stats?.totalAccounts ?? Double(accounts.count) }
-    private var errorAccounts: Double { max(stats?.errorAccounts ?? 0, Double(accounts.filter { StatusStyle.account($0).0 == "异常" }.count)) }
-    private var limitedAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "限流" }.count) }
-    private var normalAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "正常" }.count) }
-    private var busyAccounts: Double { Double(accounts.filter { StatusStyle.account($0).0 == "正常" && ($0.currentConcurrency ?? 0) > 0 }.count) }
-    private var currentRPM: Double? { stats?.rpm ?? ops?.rpm }
+    private var errorAccounts: Double { max(stats?.errorAccounts ?? 0, cachedErrorAccounts ?? Double(accounts.filter { StatusStyle.account($0).0 == "异常" }.count)) }
+    private var limitedAccounts: Double { cachedLimitedAccounts ?? Double(accounts.filter { StatusStyle.account($0).0 == "限流" }.count) }
+    private var normalAccounts: Double { cachedNormalAccounts ?? Double(accounts.filter { StatusStyle.account($0).0 == "正常" }.count) }
+    private var busyAccounts: Double { cachedBusyAccounts ?? Double(accounts.filter { StatusStyle.account($0).0 == "正常" && ($0.currentConcurrency ?? 0) > 0 }.count) }
+    private var currentRPM: Double? { stats?.rpm ?? ops?.rpm ?? cachedOpsRPM }
     private var currentTPM: Double? { stats?.tpm }
 
     private var averageResponse: String {
         if let value = stats?.avgResponseSeconds { return String(format: "%.2fs", value) }
         if let value = stats?.avgResponseTimeMs ?? stats?.averageDurationMs { return String(format: "%.2fs", value / 1_000) }
-        if let value = ops?.avgLatencyMs { return String(format: "%.2fs", value / 1_000) }
+        if let value = ops?.avgLatencyMs ?? cachedOpsAvgLatencyMs { return String(format: "%.2fs", value / 1_000) }
         let weighted = trend.reduce(into: (duration: 0.0, requests: 0.0, sum: 0.0, count: 0.0)) { result, point in
             guard let duration = point.avgDurationMs ?? point.averageDurationMs ?? point.avgLatencyMs, duration >= 0 else { return }
             let requests = point.requests ?? 0
@@ -419,5 +495,45 @@ private enum DashboardRange: String, CaseIterable, Identifiable {
         }
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd"
         return (formatter.string(from: start), formatter.string(from: now))
+    }
+}
+
+private struct DashboardPersistedCache: Codable {
+    let stats: DashboardStats?
+    let settings: AdminSettings?
+    let opsRPM: Double?
+    let opsAvgLatencyMs: Double?
+    let trend: [TrendPoint]
+    let normalAccounts: Double
+    let errorAccounts: Double
+    let limitedAccounts: Double
+    let busyAccounts: Double
+    let models: [ModelStat]
+    let groups: [SnapshotGroup]
+}
+
+@MainActor
+private enum DashboardCacheStore {
+    private static let keyPrefix = "native.dashboardCache.v1."
+    private static var memory: [String: DashboardPersistedCache] = [:]
+
+    static func value(serverID: UUID, range: String) -> DashboardPersistedCache? {
+        let key = cacheKey(serverID: serverID, range: range)
+        if let cached = memory[key] { return cached }
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let cached = try? JSONDecoder().decode(DashboardPersistedCache.self, from: data) else { return nil }
+        memory[key] = cached
+        return cached
+    }
+
+    static func save(_ value: DashboardPersistedCache, serverID: UUID, range: String) {
+        let key = cacheKey(serverID: serverID, range: range)
+        memory[key] = value
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private static func cacheKey(serverID: UUID, range: String) -> String {
+        keyPrefix + serverID.uuidString + "." + range
     }
 }

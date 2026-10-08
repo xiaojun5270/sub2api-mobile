@@ -53,6 +53,7 @@ struct UsersView: View {
         }
         .appPage()
         .task(id: "\(store.activeServerID?.uuidString ?? "")-\(searchText)") {
+            restoreCache()
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await load()
@@ -61,23 +62,85 @@ struct UsersView: View {
 
     private func load() async {
         guard let service = try? store.adminService() else { return }
-        isLoading = true
+        isLoading = users.isEmpty
         errorMessage = nil
         do {
-            users = try await service.users(search: searchText, pageSize: 50).items
+            let refreshedUsers = try await service.users(search: searchText, pageSize: 50).items
+            users = refreshedUsers
             sortUsers()
             let dates = TimeRange.week.startEnd
-            usageByUser = await withTaskGroup(of: (Int, UsageSummary?).self) { group in
+            let refreshedUsage = await withTaskGroup(of: (Int, UsageSummary?).self) { group in
                 for user in users { group.addTask { (user.id, try? await service.usageStats(start: dates.0, end: dates.1, filters: ["user_id": String(user.id)])) } }
                 var result: [Int: UsageSummary] = [:]; for await (id, usage) in group { result[id] = usage }; return result
             }
+            let userIDs = Set(users.map(\.id))
+            var merged = usageByUser.filter { userIDs.contains($0.key) }
+            for (id, usage) in refreshedUsage { merged[id] = usage }
+            usageByUser = merged
+            persistCache()
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
     }
 
+    private func restoreCache() {
+        guard let serverID = store.activeServerID,
+              let cached = UsersCacheStore.value(serverID: serverID, search: searchText) else {
+            users = []
+            usageByUser = [:]
+            isLoading = true
+            return
+        }
+        users = cached.users
+        usageByUser = cached.usageByUser
+        sortUsers()
+        isLoading = users.isEmpty
+    }
+
+    private func persistCache() {
+        guard let serverID = store.activeServerID else { return }
+        UsersCacheStore.save(
+            UsersPersistedCache(users: users, usageByUser: usageByUser),
+            serverID: serverID,
+            search: searchText
+        )
+    }
+
     private func sortUsers() { users.sort { left, right in let a = left.lastUsedAt ?? left.updatedAt ?? left.createdAt ?? ""; let b = right.lastUsedAt ?? right.updatedAt ?? right.createdAt ?? ""; return sortAscending ? a < b : a > b } }
+}
+
+private struct UsersPersistedCache: Codable {
+    let users: [AdminUser]
+    let usageByUser: [Int: UsageSummary]
+}
+
+@MainActor
+private enum UsersCacheStore {
+    private static let keyPrefix = "native.usersCache.v1."
+    private static var memory: [String: UsersPersistedCache] = [:]
+
+    static func value(serverID: UUID, search: String) -> UsersPersistedCache? {
+        let key = cacheKey(serverID: serverID, search: search)
+        if let cached = memory[key] { return cached }
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let cached = try? JSONDecoder().decode(UsersPersistedCache.self, from: data) else { return nil }
+        memory[key] = cached
+        return cached
+    }
+
+    static func save(_ value: UsersPersistedCache, serverID: UUID, search: String) {
+        let key = cacheKey(serverID: serverID, search: search)
+        memory[key] = value
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private static func cacheKey(serverID: UUID, search: String) -> String {
+        let normalized = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let queryKey = Data(normalized.utf8).base64EncodedString()
+        return keyPrefix + serverID.uuidString + "." + queryKey
+    }
 }
 
 private struct UserRow: View {
