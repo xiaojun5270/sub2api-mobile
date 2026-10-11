@@ -48,11 +48,6 @@ struct AccountsView: View {
             LazyVStack(spacing: 12) {
                 summary
                 filterBar
-                if let message {
-                    Text(message).font(.footnote).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 4)
-                }
                 if isLoading && accounts.isEmpty {
                     HStack { Spacer(); ProgressView(); Text("正在加载账号").font(.footnote).foregroundStyle(.secondary); Spacer() }
                         .padding(.vertical, 28)
