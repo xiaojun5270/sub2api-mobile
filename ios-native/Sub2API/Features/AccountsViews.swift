@@ -607,24 +607,15 @@ private struct AccountSummaryCard: View {
                 HStack(spacing: 5) {
                     AccountProviderIcon(platform: account.platform)
                     Text(account.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
-                    HStack(spacing: 3) {
-                        Text(ConsoleLocalization.provider(account.platform))
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(ConsoleLocalization.accountType(account.type))
-                    }
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
                     Spacer(minLength: 4)
-                    if let modelTestDisplay {
-                        Text(modelTestDisplay)
+                    if let headerMessage {
+                        Text(headerMessage)
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(modelTestColor)
+                            .foregroundStyle(headerMessageColor)
                             .lineLimit(1).minimumScaleFactor(0.65)
                             .padding(.horizontal, 8).padding(.vertical, 5)
-                            .background(modelTestColor.opacity(0.1), in: Capsule())
-                            .frame(maxWidth: 132)
+                            .background(headerMessageColor.opacity(0.1), in: Capsule())
+                            .frame(maxWidth: 170)
                     }
                     StatusPill(text: style.0, color: style.1)
                 }
@@ -724,7 +715,7 @@ private struct AccountSummaryCard: View {
         } else {
             VStack(spacing: 5) {
                 HStack {
-                    Label("额度窗口", systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
+                    Label(genericQuotaTitle, systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
                     Spacer()
                     Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
                 }
@@ -743,6 +734,12 @@ private struct AccountSummaryCard: View {
 
     private var isOpenAIQuotaAccount: Bool {
         account.platform.lowercased().contains("openai") && account.type.lowercased() == "oauth"
+    }
+
+    private var genericQuotaTitle: String {
+        let platform = account.platform.lowercased()
+        let type = account.type.lowercased()
+        return platform.contains("openai") && ["apikey", "api-key", "api_key"].contains(type) ? "OpenAI 密钥" : "额度窗口"
     }
 
     private var antigravityRows: [AntigravityQuotaRow] {
@@ -851,13 +848,17 @@ private struct AccountSummaryCard: View {
         }
     }
 
-    private var modelTestDisplay: String? {
-        let feedback = testFeedback?.nilIfBlank
-        return feedback ?? selectedModel?.nilIfBlank
+    private var headerMessage: String? {
+        if let feedback = testFeedback?.nilIfBlank { return feedback }
+        if let model = selectedModel?.nilIfBlank { return model }
+        if let error = (account.errorMessage ?? account.error)?.nilIfBlank { return ConsoleLocalization.error(error) }
+        return account.notes?.nilIfBlank
     }
 
-    private var modelTestColor: Color {
-        guard let testFeedback else { return AppPalette.orange }
+    private var headerMessageColor: Color {
+        if testFeedback == nil, selectedModel != nil { return AppPalette.teal }
+        if testFeedback == nil, (account.errorMessage ?? account.error)?.nilIfBlank != nil { return .red }
+        guard let testFeedback else { return .secondary }
         if testFeedback.contains("失败") { return .red }
         if testFeedback.contains("成功") { return .green }
         return AppPalette.orange
