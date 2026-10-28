@@ -30,6 +30,8 @@ struct AccountsView: View {
     @State private var detailAccount: AdminAccount?
     @State private var totalMetricsLoading: Set<Int> = []
     @State private var automaticQuotaLoading: Set<Int> = []
+    @State private var cardDataLoaded: Set<Int> = []
+    @State private var cardRefreshGeneration = 0
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -61,6 +63,7 @@ struct AccountsView: View {
                             account: account,
                             metrics: metricsByAccount[account.id] ?? .empty,
                             quota: accountQuotaPayload(account),
+                            refreshGeneration: cardRefreshGeneration,
                             selectedModel: selectedModelByAccount[account.id],
                             testFeedback: testFeedbackByAccount[account.id],
                             onLoadMetrics: { await loadCardData(account) },
@@ -83,7 +86,13 @@ struct AccountsView: View {
         }
         .scrollIndicators(.hidden)
         .searchable(text: $searchText, prompt: "名称、ID、平台或分组")
-        .refreshable { await load() }
+        .refreshable {
+            cardDataLoaded = []
+            totalMetricsLoading = []
+            automaticQuotaLoading = []
+            cardRefreshGeneration += 1
+            await load()
+        }
         .navigationTitle("账号管理")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -118,7 +127,14 @@ struct AccountsView: View {
         }
         .overlay { if isWorking { ProgressView().padding(20).glassPanel(cornerRadius: 14) } }
         .appPage()
-        .task(id: store.activeServerID) { restoreCache(); await load() }
+        .task(id: store.activeServerID) {
+            cardDataLoaded = []
+            totalMetricsLoading = []
+            automaticQuotaLoading = []
+            cardRefreshGeneration += 1
+            restoreCache()
+            await load()
+        }
     }
 
     private var summary: some View {
@@ -438,6 +454,8 @@ struct AccountsView: View {
     }
 
     private func loadCardData(_ account: AdminAccount) async {
+        guard !cardDataLoaded.contains(account.id) else { return }
+        cardDataLoaded.insert(account.id)
         await loadAutomaticQuotaIfNeeded(account)
         await loadTotalMetrics(account)
     }
@@ -577,6 +595,7 @@ private struct AccountSummaryCard: View {
     let account: AdminAccount
     let metrics: AccountCardMetrics
     let quota: JSONValue?
+    let refreshGeneration: Int
     let selectedModel: String?
     let testFeedback: String?
     let onLoadMetrics: () async -> Void
@@ -641,7 +660,7 @@ private struct AccountSummaryCard: View {
         }
         .padding(8)
         .glassPanel(cornerRadius: 18)
-        .task { await onLoadMetrics() }
+        .task(id: refreshGeneration) { await onLoadMetrics() }
     }
 
     private var resetCount: Double? {
@@ -885,7 +904,8 @@ private struct AccountSummaryCard: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-        .glassPanel(cornerRadius: 11)
+        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.primary.opacity(0.09), lineWidth: 0.5) }
     }
 
     private func quotaRow(_ window: QuotaWindow) -> some View {
