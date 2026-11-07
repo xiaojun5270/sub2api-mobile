@@ -32,6 +32,7 @@ struct AccountsView: View {
     @State private var automaticQuotaLoading: Set<Int> = []
     @State private var cardDataLoaded: Set<Int> = []
     @State private var cardRefreshGeneration = 0
+    @State private var cachePersistTask: Task<Void, Never>?
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -47,7 +48,7 @@ struct AccountsView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 12) {
+            LazyVStack(spacing: 8) {
                 summary
                 filterBar
                 if isLoading && accounts.isEmpty {
@@ -82,7 +83,8 @@ struct AccountsView: View {
                     }
                 }
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .scrollIndicators(.hidden)
         .searchable(text: $searchText, prompt: "名称、ID、平台或分组")
@@ -245,7 +247,14 @@ struct AccountsView: View {
         AccountsPageMemoryCache.quotas[serverID] = quotaByAccount
         AccountsPageMemoryCache.selectedModels[serverID] = selectedModelByAccount
         AccountsPageMemoryCache.testFeedback[serverID] = testFeedbackByAccount
-        AccountsPageMemoryCache.persist(metrics: metricsByAccount, quotas: quotaByAccount, for: serverID)
+        cachePersistTask?.cancel()
+        let metrics = metricsByAccount, quotas = quotaByAccount
+        cachePersistTask = Task {
+            do { try await Task.sleep(for: .milliseconds(500)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            AccountsPageMemoryCache.persist(metrics: metrics, quotas: quotas, for: serverID)
+        }
     }
 
     private func test(_ account: AdminAccount) async {
@@ -320,7 +329,10 @@ struct AccountsView: View {
             let status = snapshot?.text("entitlement_status", "entitlementStatus") ?? "--"
             message = "\(account.name) 权益：\(status) · 等待 \(retry.map { formatDuration($0) } ?? "--")"
         case .antigravity:
-            let modelCount = value?.objectValue?["antigravity_quota"]?.objectValue?.count ?? 0
+            let groupedCount = value?.objectValue?["antigravity_quota_groups"]?.arrayValue?.reduce(0) { total, group in
+                total + (group.objectValue?["windows"]?.arrayValue?.count ?? 0)
+            } ?? 0
+            let modelCount = groupedCount > 0 ? groupedCount : (value?.objectValue?["antigravity_quota"]?.objectValue?.count ?? 0)
             let tier = value?.objectValue?.text("subscription_tier", "subscriptionTier") ?? "--"
             message = "\(account.name) \(tier) · \(modelCount) 个模型额度"
         case .generic, .unsupported:
@@ -455,9 +467,10 @@ struct AccountsView: View {
 
     private func loadCardData(_ account: AdminAccount) async {
         guard !cardDataLoaded.contains(account.id) else { return }
-        cardDataLoaded.insert(account.id)
         await loadAutomaticQuotaIfNeeded(account)
         await loadTotalMetrics(account)
+        guard !Task.isCancelled else { return }
+        cardDataLoaded.insert(account.id)
     }
 
     private func loadAutomaticQuotaIfNeeded(_ account: AdminAccount) async {
@@ -616,7 +629,7 @@ private struct AccountSummaryCard: View {
     private var sevenDay: QuotaWindow { quotaWindow(label: "7D", token: "7d") }
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             Button(action: onOpen) {
                 HStack(spacing: 5) {
                     AccountProviderIcon(platform: account.platform)
@@ -627,7 +640,7 @@ private struct AccountSummaryCard: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(headerMessageColor)
                             .lineLimit(1).minimumScaleFactor(0.65)
-                            .padding(.horizontal, 8).padding(.vertical, 5)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(headerMessageColor.opacity(0.1), in: Capsule())
                             .frame(maxWidth: 170)
                     }
@@ -636,7 +649,7 @@ private struct AccountSummaryCard: View {
             }
             .buttonStyle(.plain)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
                 metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
                 metric("今日额度", metrics.todayLoaded ? NumberFormatters.currency(metrics.todayUserCost) : "--", "dollarsign", .orange)
@@ -647,20 +660,27 @@ private struct AccountSummaryCard: View {
 
             quotaPanel
 
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 cardButton("编辑", "pencil", AppPalette.blue, onEdit)
                 cardButton(disabled ? "启用" : "禁用", "power", AppPalette.orange, onToggleEnabled)
                 cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", AppPalette.purple, onToggleScheduling)
                 cardButton("删除", "trash", .red, onDelete)
             }
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
                 cardButton(selectedModel ?? "选择模型", "cpu", AppPalette.teal, onSelectModel, fill: .primary.opacity(0.045))
             }
         }
-        .padding(8)
-        .glassPanel(cornerRadius: 18)
-        .task(id: refreshGeneration) { await onLoadMetrics() }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.primary.opacity(0.1), lineWidth: 0.6) }
+        .task(id: refreshGeneration) {
+            do { try await Task.sleep(for: .milliseconds(120)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            await onLoadMetrics()
+        }
     }
 
     private var resetCount: Double? {
@@ -669,7 +689,7 @@ private struct AccountSummaryCard: View {
 
     @ViewBuilder private var quotaPanel: some View {
         if account.platform.lowercased().contains("antigravity") {
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 HStack(spacing: 5) {
                     Text("Antigravity").font(.subheadline.weight(.bold))
                     if let tier = antigravityTier {
@@ -689,7 +709,7 @@ private struct AccountSummaryCard: View {
                         compactQuotaRow(label: row.name, percent: row.percent, remaining: row.remaining, color: row.color)
                     }
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 5) {
                     cardButton("刷新模型额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
                     if let credits = antigravityCredits {
                         Text("AI 点数 \(NumberFormatters.compact(credits))")
@@ -698,11 +718,12 @@ private struct AccountSummaryCard: View {
                     }
                 }
             }
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(AppPalette.purple.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         } else if isOpenAIQuotaAccount {
-            VStack(spacing: 6) {
-                HStack(spacing: 5) {
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
                     Text("OpenAI").font(.subheadline.weight(.bold)).lineLimit(1).minimumScaleFactor(0.8)
                     if let tier = openAIAccountTier {
                         Text(tier)
@@ -724,10 +745,11 @@ private struct AccountSummaryCard: View {
                     cardButton("重置额度", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
                 }
             }
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(AppPalette.teal.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         } else {
-            VStack(spacing: 5) {
+            VStack(spacing: 4) {
                 HStack {
                     Label(genericQuotaTitle, systemImage: "gauge.with.dots.needle.50percent").font(.subheadline.weight(.bold))
                     Spacer()
@@ -735,13 +757,14 @@ private struct AccountSummaryCard: View {
                 }
                 quotaRow(fiveHour)
                 quotaRow(sevenDay)
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     cardButton("查询", "magnifyingglass", AppPalette.blue, onQueryQuota)
                     cardButton(resetCount.map { "次数 \(NumberFormatters.compact($0))" } ?? "次数", nil, AppPalette.purple, onCountQuota)
                     cardButton("重置", "arrow.counterclockwise", AppPalette.orange, onResetQuota)
                 }
             }
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
         }
     }
@@ -757,6 +780,46 @@ private struct AccountSummaryCard: View {
     }
 
     private var antigravityRows: [AntigravityQuotaRow] {
+        if let groups = quota?.objectValue?["antigravity_quota_groups"]?.arrayValue, !groups.isEmpty {
+            let rows = groups.flatMap { groupValue -> [AntigravityQuotaRow] in
+                guard let group = groupValue.objectValue else { return [] }
+                let key = group.text("key")?.lowercased() ?? ""
+                let family: String
+                if key == "gemini" { family = "gemini" }
+                else if key.hasPrefix("gemini-argon") { family = "argon" }
+                else { family = "claude" }
+                return (group["windows"]?.arrayValue ?? []).compactMap { windowValue in
+                    guard let window = windowValue.objectValue else { return nil }
+                    let rawWindow = window.text("window")?.lowercased() ?? ""
+                    let weekly = ["weekly", "week", "seven_day", "7d"].contains(rawWindow)
+                    let label: String
+                    let color: Color
+                    switch family {
+                    case "gemini":
+                        label = weekly ? "G·周" : "G·5h"
+                        color = weekly ? .indigo : .green
+                    case "argon":
+                        label = weekly ? "A·周" : "A·5h"
+                        color = .indigo
+                    default:
+                        label = weekly ? "C·周" : "C·5h"
+                        color = weekly ? AppPalette.purple : AppPalette.orange
+                    }
+                    let percent = min(max(window.number("utilization", "used_percent", "usedPercent") ?? 0, 0), 100)
+                    let resetValue = window["resets_at"] ?? window["reset_at"] ?? window["reset_time"]
+                    let remaining = formatRemaining(resetValue, fallback: "--").replacingOccurrences(of: "剩余 ", with: "")
+                    return AntigravityQuotaRow(
+                        id: "\(key)-\(rawWindow)",
+                        name: label,
+                        percent: percent,
+                        remaining: remaining,
+                        color: color
+                    )
+                }
+            }
+            if !rows.isEmpty { return rows }
+        }
+
         guard let values = quota?.objectValue?["antigravity_quota"]?.objectValue else { return [] }
         let definitions: [(id: String, name: String, color: Color, matches: (String) -> Bool)] = [
             ("g3f", "G3F", .green, { $0 == "gemini-3-flash" || $0.hasPrefix("gemini-3-flash-") }),
@@ -835,14 +898,14 @@ private struct AccountSummaryCard: View {
     }
 
     private func compactQuotaRow(label: String, percent: Double, remaining: String, color: Color) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 6) {
             Text(label)
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
                 .padding(.horizontal, 5)
-                .padding(.vertical, 3)
+                .padding(.vertical, 2)
                 .frame(minWidth: 36)
                 .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             ProgressView(value: min(max(percent / 100, 0), 1))
@@ -902,8 +965,8 @@ private struct AccountSummaryCard: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
         .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.primary.opacity(0.09), lineWidth: 0.5) }
     }
@@ -922,7 +985,7 @@ private struct AccountSummaryCard: View {
                 else { Text(title) }
             }
             .font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity, minHeight: 30)
+            .frame(maxWidth: .infinity, minHeight: 25)
         }
             .buttonStyle(.plain).foregroundStyle(color).background(fill, in: Capsule())
     }
@@ -991,8 +1054,9 @@ private struct AccountSummaryCard: View {
             return "剩余 \(max(minutes, 1))m"
         }
         guard let text = value.stringValue, !text.isEmpty else { return fallback }
-        let formatter = ISO8601DateFormatter()
-        if let date = formatter.date(from: text) {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text) {
             return formatRemaining(.number(date.timeIntervalSinceNow), fallback: fallback)
         }
         return text.lowercased().hasPrefix("剩余") ? text : "剩余 \(text)"
