@@ -649,7 +649,7 @@ private struct AccountSummaryCard: View {
             }
             .buttonStyle(.plain)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 3), spacing: 4) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
                 metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
                 metric("今日额度", metrics.todayLoaded ? NumberFormatters.currency(metrics.todayUserCost) : "--", "dollarsign", .orange)
@@ -898,31 +898,33 @@ private struct AccountSummaryCard: View {
     }
 
     private func compactQuotaRow(label: String, percent: Double, remaining: String, color: Color) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Text(label)
-                .font(.caption2.weight(.bold))
+                .font(.system(size: 8, weight: .bold))
                 .foregroundStyle(color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .frame(minWidth: 36)
+                .padding(.horizontal, 3)
+                .padding(.vertical, 1)
+                .frame(minWidth: 30)
                 .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             ProgressView(value: min(max(percent / 100, 0), 1))
                 .tint(percent >= 90 ? .red : color)
                 .frame(maxWidth: .infinity)
+                .scaleEffect(x: 1, y: 0.55, anchor: .center)
             Text("\(Int(percent.rounded()))%")
-                .font(.caption2.weight(.semibold))
+                .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(percent >= 90 ? Color.red : Color.secondary)
                 .monospacedDigit()
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: 30, alignment: .trailing)
             Text(remaining.replacingOccurrences(of: "剩余 ", with: ""))
-                .font(.caption2)
+                .font(.system(size: 8))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.72)
-                .frame(width: 58, alignment: .trailing)
+                .frame(width: 52, alignment: .trailing)
         }
+        .frame(height: 12)
     }
 
     private var headerMessage: String? {
@@ -942,21 +944,21 @@ private struct AccountSummaryCard: View {
     }
 
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 3) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.caption2.weight(.semibold))
+                    .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(color)
-                    .frame(width: 15, height: 15)
+                    .frame(width: 10, height: 10)
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(label)
-                    .font(.caption2)
+                    .font(.system(size: 7))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
@@ -964,18 +966,21 @@ private struct AccountSummaryCard: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+        .frame(maxWidth: .infinity, minHeight: 23, alignment: .leading)
         .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.primary.opacity(0.09), lineWidth: 0.5) }
     }
 
     private func quotaRow(_ window: QuotaWindow) -> some View {
-        VStack(spacing: 2) {
-            HStack { Text(window.label).font(.caption.weight(.bold)); Spacer(); Text("\(Int(window.percent.rounded()))% · \(window.remaining)").font(.caption2).foregroundStyle(.secondary) }
-            ProgressView(value: min(max(window.percent / 100, 0), 1)).tint(window.percent >= 90 ? .red : AppPalette.teal)
+        VStack(spacing: 0) {
+            HStack { Text(window.label).font(.system(size: 8, weight: .bold)); Spacer(); Text("\(Int(window.percent.rounded()))% · \(window.remaining)").font(.system(size: 8)).foregroundStyle(.secondary) }
+            ProgressView(value: min(max(window.percent / 100, 0), 1))
+                .tint(window.percent >= 90 ? .red : AppPalette.teal)
+                .scaleEffect(x: 1, y: 0.55, anchor: .center)
         }
+        .frame(height: 14)
     }
 
     private func cardButton(_ title: String, _ symbol: String?, _ color: Color, _ action: @escaping () -> Void, fill: Color = .primary.opacity(0.035)) -> some View {
