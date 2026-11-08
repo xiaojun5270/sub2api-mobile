@@ -661,14 +661,14 @@ private struct AccountSummaryCard: View {
             quotaPanel
 
             HStack(spacing: 4) {
+                cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
+                cardButton(selectedModel ?? "选择模型", "cpu", AppPalette.teal, onSelectModel, fill: .primary.opacity(0.045))
+            }
+            HStack(spacing: 4) {
                 cardButton("编辑", "pencil", AppPalette.blue, onEdit)
                 cardButton(disabled ? "启用" : "禁用", "power", AppPalette.orange, onToggleEnabled)
                 cardButton(account.schedulable == false ? "恢复" : "暂停", "pause.circle", AppPalette.purple, onToggleScheduling)
                 cardButton("删除", "trash", .red, onDelete)
-            }
-            HStack(spacing: 4) {
-                cardButton("测试", "waveform.path.ecg", .white, onTest, fill: Color(red: 0.02, green: 0.08, blue: 0.13))
-                cardButton(selectedModel ?? "选择模型", "cpu", AppPalette.teal, onSelectModel, fill: .primary.opacity(0.045))
             }
         }
         .padding(.horizontal, 8)
@@ -697,6 +697,12 @@ private struct AccountSummaryCard: View {
                             .padding(.horizontal, 7).padding(.vertical, 3)
                             .background(AppPalette.purple.opacity(0.1), in: Capsule())
                     }
+                    if let credits = antigravityCredits {
+                        Text("点数 \(NumberFormatters.compact(credits))")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(AppPalette.teal)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(AppPalette.teal.opacity(0.08), in: Capsule())
+                    }
                     Spacer()
                     Text("更新 \(shortTime(quotaUpdatedAt))").font(.caption2).foregroundStyle(.secondary)
                 }
@@ -709,18 +715,11 @@ private struct AccountSummaryCard: View {
                         compactQuotaRow(label: row.name, percent: row.percent, remaining: row.remaining, color: row.color)
                     }
                 }
-                HStack(spacing: 5) {
-                    cardButton("刷新模型额度", "arrow.clockwise", AppPalette.blue, onQueryQuota)
-                    if let credits = antigravityCredits {
-                        Text("AI 点数 \(NumberFormatters.compact(credits))")
-                            .font(.caption.weight(.semibold)).foregroundStyle(AppPalette.teal)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(AppPalette.purple.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+            .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.primary.opacity(0.06), lineWidth: 0.5) }
         } else if isOpenAIQuotaAccount {
             VStack(spacing: 4) {
                 HStack(spacing: 4) {
@@ -747,7 +746,8 @@ private struct AccountSummaryCard: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(AppPalette.teal.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+            .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.primary.opacity(0.06), lineWidth: 0.5) }
         } else {
             VStack(spacing: 4) {
                 HStack {
@@ -765,7 +765,8 @@ private struct AccountSummaryCard: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(AppPalette.blue.opacity(0.045), in: RoundedRectangle(cornerRadius: 11))
+            .background(.primary.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.primary.opacity(0.06), lineWidth: 0.5) }
         }
     }
 
