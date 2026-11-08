@@ -649,7 +649,7 @@ private struct AccountSummaryCard: View {
             }
             .buttonStyle(.plain)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 3), count: 3), spacing: 3) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 6), spacing: 0) {
                 metric("今日请求", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayRequests) + " req" : "--", "waveform.path.ecg", AppPalette.blue)
                 metric("今日 Token", metrics.todayLoaded ? NumberFormatters.compact(metrics.todayTokens) : "--", "cpu", .cyan)
                 metric("今日额度", metrics.todayLoaded ? NumberFormatters.currency(metrics.todayUserCost) : "--", "dollarsign", .orange)
@@ -945,33 +945,30 @@ private struct AccountSummaryCard: View {
     }
 
     private func metric(_ label: String, _ value: String, _ symbol: String?, _ color: Color) -> some View {
-        HStack(spacing: 3) {
+        VStack(spacing: 1) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.system(size: 7, weight: .semibold))
                     .foregroundStyle(color)
-                    .frame(width: 10, height: 10)
+                    .frame(height: 8)
             }
-            VStack(alignment: .leading, spacing: 0) {
-                Text(label)
-                    .font(.system(size: 7))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-                Text(value)
-                    .font(.system(size: 8, weight: .bold, design: .rounded))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
-                    .monospacedDigit()
-            }
-            Spacer(minLength: 0)
+            Text(label)
+                .font(.system(size: 6))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.62)
+            Text(value)
+                .font(.system(size: 7, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.52)
+                .monospacedDigit()
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 1)
-        .frame(maxWidth: .infinity, minHeight: 23, alignment: .leading)
-        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).stroke(.primary.opacity(0.09), lineWidth: 0.5) }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
+        .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.primary.opacity(0.09), lineWidth: 0.5) }
     }
 
     private func quotaRow(_ window: QuotaWindow) -> some View {
