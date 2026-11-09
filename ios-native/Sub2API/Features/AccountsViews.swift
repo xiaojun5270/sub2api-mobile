@@ -93,7 +93,6 @@ struct AccountsView: View {
                             onTest: { Task { await test(account) } },
                             onSelectModel: { modelPickerAccount = account }
                         )
-                        .equatable()
                         .contextMenu { accountMenu(account) }
                     }
                 }
@@ -586,7 +585,7 @@ private enum AccountsPageMemoryCache {
     }
 }
 
-private struct AccountSummaryCard: View, Equatable {
+private struct AccountSummaryCard: View {
     let account: AdminAccount
     let metrics: AccountCardMetrics
     let quota: JSONValue?
@@ -602,14 +601,6 @@ private struct AccountSummaryCard: View, Equatable {
     let onDelete: () -> Void
     let onTest: () -> Void
     let onSelectModel: () -> Void
-
-    static func == (left: AccountSummaryCard, right: AccountSummaryCard) -> Bool {
-        left.account == right.account
-            && left.metrics == right.metrics
-            && left.quota == right.quota
-            && left.selectedModel == right.selectedModel
-            && left.testFeedback == right.testFeedback
-    }
 
     private var style: (String, Color) { StatusStyle.account(account) }
     private var disabled: Bool { ["inactive", "disabled"].contains((account.status ?? "active").lowercased()) }
