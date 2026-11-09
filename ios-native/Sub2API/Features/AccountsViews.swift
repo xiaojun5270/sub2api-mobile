@@ -2,6 +2,27 @@ import Charts
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct AccountCardRefreshResult: Sendable {
+    let accountID: Int
+    let stats: UsageSummary?
+    let quota: JSONValue?
+}
+
+private func fetchAccountCardRefresh(_ account: AdminAccount, service: AdminService) async -> AccountCardRefreshResult {
+    async let stats: UsageSummary? = try? service.accountStats(account.id, days: 30)
+    async let quota: JSONValue? = fetchAccountQuotaIfNeeded(account, service: service)
+    let result = await (stats, quota)
+    return AccountCardRefreshResult(accountID: account.id, stats: result.0, quota: result.1)
+}
+
+private func fetchAccountQuotaIfNeeded(_ account: AdminAccount, service: AdminService) async -> JSONValue? {
+    let platform = account.platform.lowercased()
+    let type = account.type.lowercased()
+    guard platform.contains("antigravity") || (platform.contains("openai") && type == "oauth") else { return nil }
+    guard let value = try? await service.quota(account), let object = value.objectValue, !object.isEmpty else { return nil }
+    return value
+}
+
 @MainActor
 struct AccountsView: View {
     @EnvironmentObject private var store: AppStore
@@ -28,11 +49,6 @@ struct AccountsView: View {
     @State private var selectedModelByAccount: [Int: String] = [:]
     @State private var testFeedbackByAccount: [Int: String] = [:]
     @State private var detailAccount: AdminAccount?
-    @State private var totalMetricsLoading: Set<Int> = []
-    @State private var automaticQuotaLoading: Set<Int> = []
-    @State private var cardDataLoaded: Set<Int> = []
-    @State private var cardRefreshGeneration = 0
-    @State private var cachePersistTask: Task<Void, Never>?
 
     private var filtered: [AdminAccount] {
         accounts.filter { account in
@@ -64,10 +80,8 @@ struct AccountsView: View {
                             account: account,
                             metrics: metricsByAccount[account.id] ?? .empty,
                             quota: accountQuotaPayload(account),
-                            refreshGeneration: cardRefreshGeneration,
                             selectedModel: selectedModelByAccount[account.id],
                             testFeedback: testFeedbackByAccount[account.id],
-                            onLoadMetrics: { await loadCardData(account) },
                             onOpen: { detailAccount = account },
                             onQueryQuota: { Task { await queryQuota(account) } },
                             onCountQuota: { Task { await showQuotaCount(account) } },
@@ -79,6 +93,7 @@ struct AccountsView: View {
                             onTest: { Task { await test(account) } },
                             onSelectModel: { modelPickerAccount = account }
                         )
+                        .equatable()
                         .contextMenu { accountMenu(account) }
                     }
                 }
@@ -88,13 +103,7 @@ struct AccountsView: View {
         }
         .scrollIndicators(.hidden)
         .searchable(text: $searchText, prompt: "名称、ID、平台或分组")
-        .refreshable {
-            cardDataLoaded = []
-            totalMetricsLoading = []
-            automaticQuotaLoading = []
-            cardRefreshGeneration += 1
-            await load()
-        }
+        .refreshable { await load() }
         .navigationTitle("账号管理")
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -130,10 +139,6 @@ struct AccountsView: View {
         .overlay { if isWorking { ProgressView().padding(20).glassPanel(cornerRadius: 14) } }
         .appPage()
         .task(id: store.activeServerID) {
-            cardDataLoaded = []
-            totalMetricsLoading = []
-            automaticQuotaLoading = []
-            cardRefreshGeneration += 1
             restoreCache()
             await load()
         }
@@ -208,6 +213,7 @@ struct AccountsView: View {
                 quotaByAccount = [:]
             } else {
                 let refreshedToday = await loadTodayMetrics(ids: ids, service: service)
+                let refreshedCards = await loadCardRefreshes(accounts: accounts, service: service)
                 var merged = metricsByAccount.filter { ids.contains($0.key) }
                 for (id, today) in refreshedToday {
                     var current = merged[id] ?? .empty
@@ -218,8 +224,23 @@ struct AccountsView: View {
                     current.todayLoaded = today.todayLoaded
                     merged[id] = current
                 }
+                var mergedQuotas = quotaByAccount.filter { ids.contains($0.key) }
+                for result in refreshedCards {
+                    if let stats = result.stats,
+                       stats.totalRequests != nil || stats.requestCount != nil || stats.totalTokens != nil
+                        || stats.totalAccountCost != nil || stats.totalActualCost != nil
+                        || stats.actualCost != nil || stats.totalCost != nil {
+                        var current = merged[result.accountID] ?? .empty
+                        current.totalRequests = stats.totalRequests ?? stats.requestCount ?? 0
+                        current.totalTokens = stats.totalTokens ?? 0
+                        current.totalCost = stats.totalAccountCost ?? stats.totalActualCost ?? stats.actualCost ?? stats.totalCost ?? 0
+                        current.totalLoaded = true
+                        merged[result.accountID] = current
+                    }
+                    if let quota = result.quota { mergedQuotas[result.accountID] = quota }
+                }
                 metricsByAccount = merged
-                quotaByAccount = quotaByAccount.filter { ids.contains($0.key) }
+                quotaByAccount = mergedQuotas
             }
             persistCache()
             errorMessage = nil
@@ -247,14 +268,7 @@ struct AccountsView: View {
         AccountsPageMemoryCache.quotas[serverID] = quotaByAccount
         AccountsPageMemoryCache.selectedModels[serverID] = selectedModelByAccount
         AccountsPageMemoryCache.testFeedback[serverID] = testFeedbackByAccount
-        cachePersistTask?.cancel()
-        let metrics = metricsByAccount, quotas = quotaByAccount
-        cachePersistTask = Task {
-            do { try await Task.sleep(for: .milliseconds(500)) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            AccountsPageMemoryCache.persist(metrics: metrics, quotas: quotas, for: serverID)
-        }
+        AccountsPageMemoryCache.persist(metrics: metricsByAccount, quotas: quotaByAccount, for: serverID)
     }
 
     private func test(_ account: AdminAccount) async {
@@ -443,54 +457,22 @@ struct AccountsView: View {
         return result
     }
 
-    private func loadTotalMetrics(_ account: AdminAccount) async {
-        if totalMetricsLoading.contains(account.id) { return }
-        guard let service = try? store.adminService() else { return }
-        totalMetricsLoading.insert(account.id)
-        defer { totalMetricsLoading.remove(account.id) }
-        do {
-            let stats = try await service.accountStats(account.id, days: 30)
-            guard stats.totalRequests != nil || stats.requestCount != nil || stats.totalTokens != nil
-                    || stats.totalAccountCost != nil || stats.totalActualCost != nil
-                    || stats.actualCost != nil || stats.totalCost != nil else { return }
-            var metrics = metricsByAccount[account.id] ?? .empty
-            metrics.totalRequests = stats.totalRequests ?? stats.requestCount ?? 0
-            metrics.totalTokens = stats.totalTokens ?? 0
-            metrics.totalCost = stats.totalAccountCost ?? stats.totalActualCost ?? stats.actualCost ?? stats.totalCost ?? 0
-            metrics.totalLoaded = true
-            metricsByAccount[account.id] = metrics
-            persistCache()
-        } catch {
-            // A failed refresh keeps the last successful cached totals.
+    private func loadCardRefreshes(accounts: [AdminAccount], service: AdminService) async -> [AccountCardRefreshResult] {
+        var results: [AccountCardRefreshResult] = []
+        for start in stride(from: 0, to: accounts.count, by: 3) {
+            guard !Task.isCancelled else { return results }
+            let batch = Array(accounts[start..<min(start + 3, accounts.count)])
+            let batchResults = await withTaskGroup(of: AccountCardRefreshResult.self) { group in
+                for account in batch {
+                    group.addTask { await fetchAccountCardRefresh(account, service: service) }
+                }
+                var values: [AccountCardRefreshResult] = []
+                for await value in group { values.append(value) }
+                return values
+            }
+            results.append(contentsOf: batchResults)
         }
-    }
-
-    private func loadCardData(_ account: AdminAccount) async {
-        guard !cardDataLoaded.contains(account.id) else { return }
-        await loadAutomaticQuotaIfNeeded(account)
-        await loadTotalMetrics(account)
-        guard !Task.isCancelled else { return }
-        cardDataLoaded.insert(account.id)
-    }
-
-    private func loadAutomaticQuotaIfNeeded(_ account: AdminAccount) async {
-        switch quotaMode(account) {
-        case .antigravity, .openai:
-            break
-        case .grok, .generic, .unsupported:
-            return
-        }
-        guard !automaticQuotaLoading.contains(account.id), let service = try? store.adminService() else { return }
-        automaticQuotaLoading.insert(account.id)
-        defer { automaticQuotaLoading.remove(account.id) }
-        do {
-            let refreshed = try await service.quota(account)
-            guard let object = refreshed.objectValue, !object.isEmpty else { return }
-            quotaByAccount[account.id] = refreshed
-            persistCache()
-        } catch {
-            // Automatic loading is best effort; manual refresh remains available.
-        }
+        return results
     }
 
     private func metricRows(_ value: JSONValue?) -> [(Int, [String: JSONValue])] {
@@ -544,7 +526,7 @@ struct AccountsView: View {
     }
 }
 
-private struct AccountCardMetrics: Codable, Sendable {
+private struct AccountCardMetrics: Codable, Equatable, Sendable {
     var todayRequests = 0.0
     var todayTokens = 0.0
     var todayActualCost = 0.0
@@ -604,14 +586,12 @@ private enum AccountsPageMemoryCache {
     }
 }
 
-private struct AccountSummaryCard: View {
+private struct AccountSummaryCard: View, Equatable {
     let account: AdminAccount
     let metrics: AccountCardMetrics
     let quota: JSONValue?
-    let refreshGeneration: Int
     let selectedModel: String?
     let testFeedback: String?
-    let onLoadMetrics: () async -> Void
     let onOpen: () -> Void
     let onQueryQuota: () -> Void
     let onCountQuota: () -> Void
@@ -622,6 +602,14 @@ private struct AccountSummaryCard: View {
     let onDelete: () -> Void
     let onTest: () -> Void
     let onSelectModel: () -> Void
+
+    static func == (left: AccountSummaryCard, right: AccountSummaryCard) -> Bool {
+        left.account == right.account
+            && left.metrics == right.metrics
+            && left.quota == right.quota
+            && left.selectedModel == right.selectedModel
+            && left.testFeedback == right.testFeedback
+    }
 
     private var style: (String, Color) { StatusStyle.account(account) }
     private var disabled: Bool { ["inactive", "disabled"].contains((account.status ?? "active").lowercased()) }
@@ -675,12 +663,6 @@ private struct AccountSummaryCard: View {
         .padding(.vertical, 5)
         .background(Color(uiColor: .secondarySystemGroupedBackground).opacity(0.94), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(.primary.opacity(0.1), lineWidth: 0.6) }
-        .task(id: refreshGeneration) {
-            do { try await Task.sleep(for: .milliseconds(120)) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            await onLoadMetrics()
-        }
     }
 
     private var resetCount: Double? {
